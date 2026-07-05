@@ -1,0 +1,247 @@
+import type {
+  CameraNode,
+  CompositionRefNode,
+  GroupNode,
+  ImageNode,
+  LightNode,
+  LightType,
+  MeshNode,
+  SceneNode,
+  SceneNodeKind,
+  TextNode,
+} from "@cadra/core";
+import { z } from "zod";
+
+import { colorRgbaSchema, transformSchema, vector3Schema } from "./primitives.js";
+
+/**
+ * Zod mirror of the discriminated `SceneNode` union in
+ * `@cadra/core`'s `scene-graph/scene-node.ts`.
+ *
+ * Every kind shares the same base fields (`id`, `kind`, optional `name`,
+ * `transform`, `visible`, `children`) and is discriminated on `kind` via
+ * `z.discriminatedUnion`, matching the core union exactly: an unrecognized
+ * `kind` value, or a variant's own fields on the wrong `kind`, is rejected at
+ * parse time rather than silently coerced.
+ *
+ * `children` on every variant is typed as an array of the *whole* union
+ * (defined via a lazy getter so the self-reference is legal at module
+ * evaluation time), since any node kind may nest any other node kind as a
+ * child, exactly like the recursive `SceneNode[]` field in core.
+ *
+ * Every variant is built with `z.strictObject` rather than `z.object`: an
+ * agent-authored document with a misspelled or stray field name is rejected
+ * with a diagnostic, not silently stripped, matching the `additionalProperties:
+ * false` every object already gets in the generated JSON Schema (`z.object`
+ * would leave the two validation paths inconsistent, since Zod's runtime
+ * `safeParse` strips unknown keys by default even though its own JSON Schema
+ * output marks them disallowed).
+ */
+
+/** A compile-time-only equality check between two types, with no runtime cost. */
+type AssertEqual<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+
+/** Forces `T` to be exactly the literal type `true`, or the file fails to typecheck. */
+type AssertTrue<T extends true> = T;
+
+/** Every kind of node the scene graph can represent, mirroring `SceneNodeKind`. */
+export const sceneNodeKindSchema = z
+  .enum(["group", "mesh", "camera", "light", "text", "image", "compositionRef"])
+  .describe("Which of the fixed set of scene node kinds this node is.");
+
+type _CheckSceneNodeKind = AssertTrue<
+  AssertEqual<z.infer<typeof sceneNodeKindSchema>, SceneNodeKind>
+>;
+
+/** The kind of light source a light node represents, mirroring `LightType`. */
+export const lightTypeSchema = z
+  .enum(["ambient", "directional", "point", "spot"])
+  .describe("The kind of light source this light node represents.");
+
+type _CheckLightType = AssertTrue<AssertEqual<z.infer<typeof lightTypeSchema>, LightType>>;
+
+/** A plain container node. Groups exist only to organize their children. */
+export const groupNodeSchema = z.strictObject({
+  id: z.string().describe("Unique identifier for this scene node within the project."),
+  kind: z.literal("group").describe("Discriminant identifying this node as a group."),
+  name: z
+    .string()
+    .optional()
+    .describe("Optional human-readable label, purely for authoring and debugging."),
+  transform: transformSchema.describe("The position, rotation, and scale of this node."),
+  visible: z.boolean().describe("Whether this node (and its subtree) should be rendered."),
+  get children(): z.ZodArray<typeof sceneNodeSchema> {
+    return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
+  },
+});
+
+type _CheckGroupNode = AssertTrue<AssertEqual<z.infer<typeof groupNodeSchema>, GroupNode>>;
+
+/**
+ * A renderable mesh. `geometryRef` and `materialRef` are ids resolved
+ * against a geometry and material registry by a later phase; the scene DSL
+ * itself stays agnostic to how those registries are populated.
+ */
+export const meshNodeSchema = z.strictObject({
+  id: z.string().describe("Unique identifier for this scene node within the project."),
+  kind: z.literal("mesh").describe("Discriminant identifying this node as a mesh."),
+  name: z
+    .string()
+    .optional()
+    .describe("Optional human-readable label, purely for authoring and debugging."),
+  transform: transformSchema.describe("The position, rotation, and scale of this node."),
+  visible: z.boolean().describe("Whether this node (and its subtree) should be rendered."),
+  geometryRef: z
+    .string()
+    .describe("Id of a geometry asset, resolved against a geometry registry by the renderer."),
+  materialRef: z
+    .string()
+    .describe("Id of a material asset, resolved against a material registry by the renderer."),
+  get children(): z.ZodArray<typeof sceneNodeSchema> {
+    return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
+  },
+});
+
+type _CheckMeshNode = AssertTrue<AssertEqual<z.infer<typeof meshNodeSchema>, MeshNode>>;
+
+/** A camera. `target` is the world-space point the camera looks at. */
+export const cameraNodeSchema = z.strictObject({
+  id: z.string().describe("Unique identifier for this scene node within the project."),
+  kind: z.literal("camera").describe("Discriminant identifying this node as a camera."),
+  name: z
+    .string()
+    .optional()
+    .describe("Optional human-readable label, purely for authoring and debugging."),
+  transform: transformSchema.describe("The position, rotation, and scale of this node."),
+  visible: z.boolean().describe("Whether this node (and its subtree) should be rendered."),
+  fov: z.number().describe("Vertical field of view, in degrees."),
+  near: z.number().describe("Distance to the near clipping plane."),
+  far: z.number().describe("Distance to the far clipping plane."),
+  target: vector3Schema.describe("The world-space point the camera looks at."),
+  get children(): z.ZodArray<typeof sceneNodeSchema> {
+    return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
+  },
+});
+
+type _CheckCameraNode = AssertTrue<AssertEqual<z.infer<typeof cameraNodeSchema>, CameraNode>>;
+
+/** A light source. */
+export const lightNodeSchema = z.strictObject({
+  id: z.string().describe("Unique identifier for this scene node within the project."),
+  kind: z.literal("light").describe("Discriminant identifying this node as a light."),
+  name: z
+    .string()
+    .optional()
+    .describe("Optional human-readable label, purely for authoring and debugging."),
+  transform: transformSchema.describe("The position, rotation, and scale of this node."),
+  visible: z.boolean().describe("Whether this node (and its subtree) should be rendered."),
+  lightType: lightTypeSchema,
+  color: colorRgbaSchema.describe("The color this light emits."),
+  intensity: z.number().describe("The brightness of this light source."),
+  get children(): z.ZodArray<typeof sceneNodeSchema> {
+    return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
+  },
+});
+
+type _CheckLightNode = AssertTrue<AssertEqual<z.infer<typeof lightNodeSchema>, LightNode>>;
+
+/** A block of rendered text. */
+export const textNodeSchema = z.strictObject({
+  id: z.string().describe("Unique identifier for this scene node within the project."),
+  kind: z.literal("text").describe("Discriminant identifying this node as text."),
+  name: z
+    .string()
+    .optional()
+    .describe("Optional human-readable label, purely for authoring and debugging."),
+  transform: transformSchema.describe("The position, rotation, and scale of this node."),
+  visible: z.boolean().describe("Whether this node (and its subtree) should be rendered."),
+  content: z.string().describe("The text string to render."),
+  fontRef: z
+    .string()
+    .optional()
+    .describe("Id of a registered font asset. Omitted means the renderer's default."),
+  fontSize: z.number().describe("The size to render the text at."),
+  color: colorRgbaSchema.describe("The color to render the text in."),
+  get children(): z.ZodArray<typeof sceneNodeSchema> {
+    return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
+  },
+});
+
+type _CheckTextNode = AssertTrue<AssertEqual<z.infer<typeof textNodeSchema>, TextNode>>;
+
+/** A 2D image plane. `assetRef` is resolved against an asset registry. */
+export const imageNodeSchema = z.strictObject({
+  id: z.string().describe("Unique identifier for this scene node within the project."),
+  kind: z.literal("image").describe("Discriminant identifying this node as an image."),
+  name: z
+    .string()
+    .optional()
+    .describe("Optional human-readable label, purely for authoring and debugging."),
+  transform: transformSchema.describe("The position, rotation, and scale of this node."),
+  visible: z.boolean().describe("Whether this node (and its subtree) should be rendered."),
+  assetRef: z
+    .string()
+    .describe("Id of an image asset, resolved against an asset registry by the renderer."),
+  get children(): z.ZodArray<typeof sceneNodeSchema> {
+    return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
+  },
+});
+
+type _CheckImageNode = AssertTrue<AssertEqual<z.infer<typeof imageNodeSchema>, ImageNode>>;
+
+/**
+ * A reference to another composition, embedded by id. Carries no content of
+ * its own; a timeline resolver replaces it with the referenced composition's
+ * resolved output.
+ */
+export const compositionRefNodeSchema = z.strictObject({
+  id: z.string().describe("Unique identifier for this scene node within the project."),
+  kind: z
+    .literal("compositionRef")
+    .describe("Discriminant identifying this node as a composition reference."),
+  name: z
+    .string()
+    .optional()
+    .describe("Optional human-readable label, purely for authoring and debugging."),
+  transform: transformSchema.describe("The position, rotation, and scale of this node."),
+  visible: z.boolean().describe("Whether this node (and its subtree) should be rendered."),
+  compositionId: z
+    .string()
+    .describe("Id of the composition this node embeds, resolved by the timeline resolver."),
+  get children(): z.ZodArray<typeof sceneNodeSchema> {
+    return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
+  },
+});
+
+type _CheckCompositionRefNode = AssertTrue<
+  AssertEqual<z.infer<typeof compositionRefNodeSchema>, CompositionRefNode>
+>;
+
+/**
+ * A node in the scene graph, discriminated on `kind`. Mirrors the `SceneNode`
+ * union in `@cadra/core` exactly: every variant is a strict, closed shape,
+ * and an object whose `kind` does not match one of the seven known literals
+ * is rejected rather than coerced into the closest variant.
+ */
+export const sceneNodeSchema: z.ZodDiscriminatedUnion<
+  [
+    typeof groupNodeSchema,
+    typeof meshNodeSchema,
+    typeof cameraNodeSchema,
+    typeof lightNodeSchema,
+    typeof textNodeSchema,
+    typeof imageNodeSchema,
+    typeof compositionRefNodeSchema,
+  ]
+> = z.discriminatedUnion("kind", [
+  groupNodeSchema,
+  meshNodeSchema,
+  cameraNodeSchema,
+  lightNodeSchema,
+  textNodeSchema,
+  imageNodeSchema,
+  compositionRefNodeSchema,
+]);
+
+type _CheckSceneNode = AssertTrue<AssertEqual<z.infer<typeof sceneNodeSchema>, SceneNode>>;
