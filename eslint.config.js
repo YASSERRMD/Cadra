@@ -91,11 +91,13 @@ export default tseslint.config(
     },
   },
   {
-    // Scoped to Phase 2/3's scene-graph and frame-evaluation source only.
-    // Extend this `files` list with further `packages/<name>/src/**/*.ts`
-    // globs as later phases (renderer, player, headless) grow their own
-    // scene-evaluation code; the restriction list above needs no changes.
-    files: ["packages/core/src/**/*.ts"],
+    // Scoped to Phase 2/3's scene-graph and frame-evaluation source, plus
+    // Phase 5's renderer (its renderFrame path is scene-evaluation code
+    // too: it must be a pure function of sceneState/frameContext). Extend
+    // this `files` list with further `packages/<name>/src/**/*.ts` globs as
+    // later phases (player, headless) grow their own scene-evaluation code;
+    // the restriction list above needs no changes.
+    files: ["packages/core/src/**/*.ts", "packages/renderer/src/**/*.ts"],
     ignores: ["**/*.test.ts"],
     rules: {
       "no-restricted-properties": ["error", ...NON_DETERMINISTIC_PROPERTY_RESTRICTIONS],
