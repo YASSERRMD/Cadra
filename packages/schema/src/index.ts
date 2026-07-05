@@ -11,6 +11,11 @@
  * (see the `_Check*` types in `./primitives.ts`, `./scene-node.ts`, and
  * `./timeline.ts`): if a Zod schema's inferred type ever stops matching its
  * corresponding core type, `pnpm -w typecheck` fails.
+ *
+ * `./keyframes.ts` mirrors `@cadra/core`'s generic keyframe/property model
+ * (`Keyframe<T>`, `KeyframeTrack<T>`, `Property<T>`) the same way, guarded by
+ * the same `_Check*` pattern applied to one concrete instantiation of each
+ * generic schema.
  */
 
 export const VERSION = "0.0.0";
@@ -23,6 +28,7 @@ export const PACKAGE_NAME = "@cadra/schema";
 export type { SceneDocument } from "./envelope.js";
 export { CURRENT_SCHEMA_VERSION, sceneDocumentSchema, schemaVersionSchema } from "./envelope.js";
 export { generateSceneJsonSchema } from "./json-schema.js";
+export { easingSchema, keyframeSchema, keyframeTrackSchema, propertySchema } from "./keyframes.js";
 export type { SceneMigration } from "./migrate.js";
 export { migrateSceneDocument } from "./migrate.js";
 export type {

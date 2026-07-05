@@ -1,16 +1,17 @@
 /**
  * @cadra/core
  *
- * Scene graph, deterministic clock, timeline, primitives, and interpolation
- * for the Cadra 3D video animation framework.
+ * Scene graph, deterministic clock, timeline, primitives, interpolation, and
+ * keyframes for the Cadra 3D video animation framework.
  *
  * The scene graph data model (Project, Composition, Track, Clip, SceneNode),
  * its pure tree operations, the deterministic frame/time model (FrameContext,
  * seeded per-frame randomness, frame/time conversions), the authoring
  * primitives library (createComposition, Sequence, Series, Shape, Text,
- * Image, Camera, Light), the timeline resolver (resolveSceneAtFrame), and the
+ * Image, Camera, Light), the timeline resolver (resolveSceneAtFrame), the
  * deterministic interpolation toolkit (interpolate, spring, easing curves,
- * cubicBezier) are implemented.
+ * cubicBezier), and the declarative keyframe/property model (Property,
+ * KeyframeTrack, resolveProperty) are implemented.
  */
 
 export const VERSION = "0.0.0";
@@ -23,6 +24,7 @@ export const PACKAGE_NAME = "@cadra/core";
 
 export * from "./frame/index.js";
 export * from "./interpolation/index.js";
+export * from "./keyframes/index.js";
 // Not a plain `export *`: `./scene-graph/index.js` already exports the
 // `Composition` data-shape type, so the primitives barrel's own factory
 // function is named `createComposition` (see `composition.ts`) to keep both
