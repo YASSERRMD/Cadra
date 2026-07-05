@@ -1,3 +1,4 @@
+import type { AssetDescriptor } from "@cadra/core";
 import { createInMemoryAssetRegistry } from "@cadra/core";
 import { describe, expect, it, vi } from "vitest";
 
@@ -6,6 +7,11 @@ import { createAssetLoaderOrchestrator } from "./asset-loader-orchestrator.js";
 interface FakeLoadedAsset {
   hash: string;
   label: string;
+}
+
+/** Builds a minimal `AssetDescriptor` for `url`; the `kind` value is irrelevant to this dedup logic. */
+function descriptorFor(url: string): AssetDescriptor {
+  return { kind: "image", url };
 }
 
 /** A `loadByUrl`-shaped fake: resolves with `result` once `resolve()` is called, tracks call count. */
@@ -47,8 +53,8 @@ describe("createAssetLoaderOrchestrator single-flight dedup", () => {
     const controllable = createControllableLoader();
     const orchestrator = createAssetLoaderOrchestrator(registry, controllable.loadByUrl);
 
-    const first = orchestrator.load("https://example.test/a.png");
-    const second = orchestrator.load("https://example.test/a.png");
+    const first = orchestrator.load(descriptorFor("https://example.test/a.png"));
+    const second = orchestrator.load(descriptorFor("https://example.test/a.png"));
 
     expect(controllable.callCount()).toBe(1);
 
@@ -64,8 +70,8 @@ describe("createAssetLoaderOrchestrator single-flight dedup", () => {
     const controllable = createControllableLoader();
     const orchestrator = createAssetLoaderOrchestrator(registry, controllable.loadByUrl);
 
-    orchestrator.load("https://example.test/a.png");
-    orchestrator.load("https://example.test/b.png");
+    orchestrator.load(descriptorFor("https://example.test/a.png"));
+    orchestrator.load(descriptorFor("https://example.test/b.png"));
 
     expect(controllable.callCount()).toBe(2);
     expect(controllable.calledUrls()).toEqual([
@@ -79,14 +85,14 @@ describe("createAssetLoaderOrchestrator single-flight dedup", () => {
     const controllable = createControllableLoader();
     const orchestrator = createAssetLoaderOrchestrator(registry, controllable.loadByUrl);
 
-    const first = orchestrator.load("https://example.test/a.png");
+    const first = orchestrator.load(descriptorFor("https://example.test/a.png"));
     controllable.resolveNext({ hash: "hash-1", label: "first-load" });
     await first.ready;
 
     // First request has fully settled; the in-flight entry is cleared, so a
     // second request for the same url is a genuinely new load, not a stale
     // single-flight replay.
-    const second = orchestrator.load("https://example.test/a.png");
+    const second = orchestrator.load(descriptorFor("https://example.test/a.png"));
     expect(controllable.callCount()).toBe(2);
     controllable.resolveNext({ hash: "hash-1", label: "second-load-same-hash" });
     await second.ready;
@@ -104,11 +110,11 @@ describe("createAssetLoaderOrchestrator single-flight dedup", () => {
     });
     const orchestrator = createAssetLoaderOrchestrator(registry, loadByUrl);
 
-    await expect(orchestrator.load("https://example.test/a.png").ready).rejects.toThrow(
-      "transient failure",
-    );
+    await expect(
+      orchestrator.load(descriptorFor("https://example.test/a.png")).ready,
+    ).rejects.toThrow("transient failure");
 
-    const retryResult = await orchestrator.load("https://example.test/a.png").ready;
+    const retryResult = await orchestrator.load(descriptorFor("https://example.test/a.png")).ready;
     expect(retryResult).toEqual({ hash: "hash-1", label: "retry-succeeded" });
     expect(callCount).toBe(2);
   });
@@ -126,8 +132,8 @@ describe("createAssetLoaderOrchestrator content-hash dedup", () => {
     });
     const orchestrator = createAssetLoaderOrchestrator(registry, loadByUrl);
 
-    const first = await orchestrator.load("https://example.test/a.png").ready;
-    const second = await orchestrator.load("https://example.test/b.png").ready;
+    const first = await orchestrator.load(descriptorFor("https://example.test/a.png")).ready;
+    const second = await orchestrator.load(descriptorFor("https://example.test/b.png")).ready;
 
     expect(callCount).toBe(2);
     // The second url's own load result is discarded in favor of the first,
@@ -145,8 +151,8 @@ describe("createAssetLoaderOrchestrator content-hash dedup", () => {
     }));
     const orchestrator = createAssetLoaderOrchestrator(registry, loadByUrl);
 
-    await orchestrator.load("https://example.test/a.png").ready;
-    await orchestrator.load("https://example.test/b.png").ready;
+    await orchestrator.load(descriptorFor("https://example.test/a.png")).ready;
+    await orchestrator.load(descriptorFor("https://example.test/b.png")).ready;
 
     expect(registry.has("shared-hash")).toBe(true);
     expect(registry.resolve("shared-hash")?.label).toBe("from-https://example.test/a.png");
@@ -161,8 +167,8 @@ describe("createAssetLoaderOrchestrator content-hash dedup", () => {
     });
     const orchestrator = createAssetLoaderOrchestrator(registry, loadByUrl);
 
-    const first = await orchestrator.load("https://example.test/a.png").ready;
-    const second = await orchestrator.load("https://example.test/b.png").ready;
+    const first = await orchestrator.load(descriptorFor("https://example.test/a.png")).ready;
+    const second = await orchestrator.load(descriptorFor("https://example.test/b.png")).ready;
 
     expect(first).not.toBe(second);
     expect(registry.has("hash-a")).toBe(true);
@@ -178,7 +184,7 @@ describe("createAssetLoaderOrchestrator content-hash dedup", () => {
     }));
     const orchestrator = createAssetLoaderOrchestrator(registry, loadByUrl);
 
-    const result = await orchestrator.load("https://example.test/new-url.png").ready;
+    const result = await orchestrator.load(descriptorFor("https://example.test/new-url.png")).ready;
 
     expect(result.label).toBe("already-there");
   });

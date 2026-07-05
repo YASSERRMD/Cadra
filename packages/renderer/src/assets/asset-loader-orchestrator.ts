@@ -1,4 +1,4 @@
-import type { AssetRegistry, ContentHash } from "@cadra/core";
+import type { AssetDescriptor, AssetRegistry, ContentHash } from "@cadra/core";
 
 import type { LoadedAsset } from "./types.js";
 
@@ -8,12 +8,14 @@ export interface Hashed {
 }
 
 /**
- * Loads assets by url, deduping two independent ways so identical inputs
- * never produce redundant work or redundant registered resources:
+ * Loads assets described by an `AssetDescriptor`, deduping two independent
+ * ways so identical inputs never produce redundant work or redundant
+ * registered resources:
  *
- * - Single-flight: two concurrent `load()` calls for the exact same url,
- *   made before the first resolves, share one in-flight promise. The
- *   underlying loader function runs exactly once for that url, not twice.
+ * - Single-flight: two concurrent `load()` calls for the exact same
+ *   `descriptor.url`, made before the first resolves, share one in-flight
+ *   promise. The underlying loader function runs exactly once for that url,
+ *   not twice.
  * - Content-hash: once a load resolves, its content hash is checked against
  *   `registry`. If a resource is already registered under that hash (e.g.
  *   two different urls that happen to serve byte-identical content), the
@@ -26,8 +28,8 @@ export interface Hashed {
  * `loadVideo`, ...) and its own `AssetRegistry<T>`.
  */
 export interface AssetLoaderOrchestrator<T> {
-  /** Loads the asset at `url`, deduping by in-flight url and by content hash. */
-  load(url: string): LoadedAsset<T>;
+  /** Loads the asset `descriptor` describes, deduping by in-flight url and by content hash. */
+  load(descriptor: AssetDescriptor): LoadedAsset<T>;
 }
 
 /**
@@ -51,7 +53,8 @@ export function createAssetLoaderOrchestrator<T extends Hashed>(
   // stale result forever.
   const inFlightByUrl = new Map<string, Promise<T>>();
 
-  function load(url: string): LoadedAsset<T> {
+  function load(descriptor: AssetDescriptor): LoadedAsset<T> {
+    const { url } = descriptor;
     const existing = inFlightByUrl.get(url);
     if (existing) {
       return { ready: existing };
