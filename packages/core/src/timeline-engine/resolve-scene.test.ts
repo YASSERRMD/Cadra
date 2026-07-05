@@ -61,6 +61,7 @@ describe("resolveSceneAtFrame: single track, single clip", () => {
       node: shape,
       zIndex: 0,
       localFrame: 0,
+      opacity: 1,
     });
   });
 
@@ -245,6 +246,7 @@ describe("resolveSceneAtFrame: nested compositionRef", () => {
       node: innerShape,
       zIndex: 0,
       localFrame: 5,
+      opacity: 1,
     });
   });
 
