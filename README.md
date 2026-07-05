@@ -30,24 +30,6 @@ file.
 This phase stands up an empty but production-grade monorepo skeleton for the
 packages above. No framework logic has landed yet.
 
-## Working rules
-
-- Git identity is fixed for this project: user.name `YASSERRMD`, user.email
-  `arafath.yasser@gmail.com`.
-- One branch per phase, created from `main` (for example
-  `phase/01-monorepo-scaffold`).
-- No direct pushes to `main`. All work lands through a pull request.
-- Pull requests are merged with a merge commit; squash merges are not used.
-- Commit messages follow Conventional Commits (`feat:`, `fix:`, `chore:`,
-  `test:`, `docs:`, `refactor:`, `build:`, `ci:`) and stay atomic, one logical
-  change per commit.
-- No em dash character (U+2014) anywhere in the repository: not in code,
-  comments, docs, commit messages, or any tracked file. Use a regular hyphen
-  or restructure the sentence instead. This is enforced by
-  `pnpm run check:no-em-dash`.
-- Strict TypeScript everywhere. `any` is avoided unless truly unavoidable, and
-  any unavoidable use carries a one-line comment justifying it.
-
 ## Getting started
 
 ```bash
