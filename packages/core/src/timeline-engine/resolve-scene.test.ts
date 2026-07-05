@@ -545,3 +545,249 @@ describe("resolveSceneAtFrame: purity and memoization safety", () => {
     expect(otherFrame.frame).toBe(100);
   });
 });
+
+describe("resolveSceneAtFrame: clip transitionIn (crossDissolve) opacity blending", () => {
+  const firstShape = Shape({ id: "transition-first-shape" });
+  const secondShape = Shape({ id: "transition-second-shape" });
+
+  // Two clips back to back on one track: clip-first runs frames 0..29,
+  // clip-second runs frames 30..59 and blends in with a 10-frame
+  // crossDissolve, so the transition window is [30, 40).
+  const clipFirst = Sequence({
+    id: "clip-first",
+    from: 0,
+    durationInFrames: 30,
+    content: firstShape,
+  });
+  const clipSecond = {
+    ...Sequence({ id: "clip-second", from: 30, durationInFrames: 30, content: secondShape }),
+    transitionIn: { type: "crossDissolve" as const, durationInFrames: 10 },
+  };
+
+  const composition = createComposition({
+    id: "comp-transition",
+    name: "Transition",
+    fps: 30,
+    durationInFrames: 60,
+    width: 100,
+    height: 100,
+    tracks: [{ id: "track-transition", clips: [clipFirst, clipSecond] }],
+  });
+  const project = createProject({
+    id: "p-transition",
+    name: "Project",
+    compositions: [composition],
+  });
+
+  it("shows only the first clip at opacity 1 before the transition window opens", () => {
+    const state = resolveSceneAtFrame(project, "comp-transition", 20);
+    expect(state.layers).toHaveLength(1);
+    expect(state.layers[0]?.clipId).toBe("clip-first");
+    expect(state.layers[0]?.opacity).toBe(1);
+  });
+
+  it("shows only the first clip at opacity 1 on the last frame strictly before the transition starts", () => {
+    const state = resolveSceneAtFrame(project, "comp-transition", 29);
+    expect(state.layers).toHaveLength(1);
+    expect(state.layers[0]?.clipId).toBe("clip-first");
+    expect(state.layers[0]?.opacity).toBe(1);
+  });
+
+  it("at the transition's first frame, both layers are present: incoming opacity 0, outgoing opacity 1", () => {
+    const state = resolveSceneAtFrame(project, "comp-transition", 30);
+    expect(state.layers).toHaveLength(2);
+    expect(state.layers[0]?.clipId).toBe("clip-first");
+    expect(state.layers[0]?.opacity).toBe(1);
+    expect(state.layers[1]?.clipId).toBe("clip-second");
+    expect(state.layers[1]?.opacity).toBe(0);
+  });
+
+  it("at the transition's midpoint, both clips' layers are present with opacities summing to 1 and matching the exact blend factor", () => {
+    const state = resolveSceneAtFrame(project, "comp-transition", 35);
+
+    expect(state.layers).toHaveLength(2);
+
+    // Outgoing (clip-first) is positioned before the incoming clip's layer in z-order.
+    const outgoing = state.layers[0];
+    const incoming = state.layers[1];
+    expect(outgoing?.clipId).toBe("clip-first");
+    expect(incoming?.clipId).toBe("clip-second");
+
+    // framesIntoTransition = 35 - 30 = 5, durationInFrames = 10 -> blend = 0.5 exactly.
+    expect(incoming?.opacity).toBe(0.5);
+    expect(outgoing?.opacity).toBe(0.5);
+    expect((incoming?.opacity ?? 0) + (outgoing?.opacity ?? 0)).toBe(1);
+
+    // zIndex still matches array position, unaffected by opacity.
+    expect(outgoing?.zIndex).toBe(0);
+    expect(incoming?.zIndex).toBe(1);
+  });
+
+  it("at the transition's last frame (framesIntoTransition = 9), blend is close to but not yet 1", () => {
+    const state = resolveSceneAtFrame(project, "comp-transition", 39);
+    expect(state.layers).toHaveLength(2);
+    const outgoing = state.layers[0];
+    const incoming = state.layers[1];
+    expect(incoming?.opacity).toBeCloseTo(0.9);
+    expect(outgoing?.opacity).toBeCloseTo(0.1);
+  });
+
+  it("shows only the second clip at opacity 1 once the transition window closes, with the first clip gone", () => {
+    const state = resolveSceneAtFrame(project, "comp-transition", 40);
+    expect(state.layers).toHaveLength(1);
+    expect(state.layers[0]?.clipId).toBe("clip-second");
+    expect(state.layers[0]?.opacity).toBe(1);
+  });
+
+  it("shows only the second clip at opacity 1 well after the transition ends", () => {
+    const state = resolveSceneAtFrame(project, "comp-transition", 50);
+    expect(state.layers).toHaveLength(1);
+    expect(state.layers[0]?.clipId).toBe("clip-second");
+    expect(state.layers[0]?.opacity).toBe(1);
+  });
+});
+
+describe("resolveSceneAtFrame: clip transitionIn with no preceding clip (fade-in from nothing)", () => {
+  it("applies opacity = blend to the sole incoming clip, with no outgoing layer to pair it with", () => {
+    const shape = Shape({ id: "solo-fade-shape" });
+    const soleClip = {
+      ...Sequence({ id: "clip-solo", from: 0, durationInFrames: 30, content: shape }),
+      transitionIn: { type: "fade" as const, durationInFrames: 10 },
+    };
+    const composition = createComposition({
+      id: "comp-solo-fade",
+      name: "SoloFade",
+      fps: 30,
+      durationInFrames: 30,
+      width: 100,
+      height: 100,
+      tracks: [{ id: "track-solo", clips: [soleClip] }],
+    });
+    const project = createProject({
+      id: "p-solo-fade",
+      name: "Project",
+      compositions: [composition],
+    });
+
+    const atStart = resolveSceneAtFrame(project, "comp-solo-fade", 0);
+    expect(atStart.layers).toHaveLength(1);
+    expect(atStart.layers[0]?.opacity).toBe(0);
+
+    const atMid = resolveSceneAtFrame(project, "comp-solo-fade", 5);
+    expect(atMid.layers).toHaveLength(1);
+    expect(atMid.layers[0]?.opacity).toBe(0.5);
+
+    const afterTransition = resolveSceneAtFrame(project, "comp-solo-fade", 15);
+    expect(afterTransition.layers).toHaveLength(1);
+    expect(afterTransition.layers[0]?.opacity).toBe(1);
+  });
+});
+
+describe("resolveSceneAtFrame: activeCameraNodeId resolution", () => {
+  function buildCameraProject(): Project {
+    const shape = Shape({ id: "camera-track-shape" });
+    const composition = createComposition({
+      id: "comp-camera-track",
+      name: "CameraTrack",
+      fps: 30,
+      durationInFrames: 60,
+      width: 100,
+      height: 100,
+      tracks: [
+        {
+          id: "track-content",
+          clips: [Sequence({ id: "clip-content", from: 0, durationInFrames: 60, content: shape })],
+        },
+      ],
+    });
+    const withActiveCameraTrack: Composition = {
+      ...composition,
+      activeCameraTrack: [
+        { startFrame: 0, durationInFrames: 30, cameraNodeId: "camera-a" },
+        { startFrame: 30, durationInFrames: 30, cameraNodeId: "camera-b" },
+      ],
+    };
+    return createProject({
+      id: "p-camera-track",
+      name: "Project",
+      compositions: [withActiveCameraTrack],
+    });
+  }
+
+  it("resolves to the first entry's cameraNodeId within its frame range", () => {
+    const project = buildCameraProject();
+    const state = resolveSceneAtFrame(project, "comp-camera-track", 10);
+    expect(state.activeCameraNodeId).toBe("camera-a");
+  });
+
+  it("resolves to the second entry's cameraNodeId within its frame range", () => {
+    const project = buildCameraProject();
+    const state = resolveSceneAtFrame(project, "comp-camera-track", 45);
+    expect(state.activeCameraNodeId).toBe("camera-b");
+  });
+
+  it("resolves at each entry's exact boundary frame (half-open window)", () => {
+    const project = buildCameraProject();
+    expect(resolveSceneAtFrame(project, "comp-camera-track", 0).activeCameraNodeId).toBe(
+      "camera-a",
+    );
+    expect(resolveSceneAtFrame(project, "comp-camera-track", 29).activeCameraNodeId).toBe(
+      "camera-a",
+    );
+    expect(resolveSceneAtFrame(project, "comp-camera-track", 30).activeCameraNodeId).toBe(
+      "camera-b",
+    );
+  });
+
+  it("resolves to undefined outside every entry's frame range", () => {
+    const shape = Shape({ id: "camera-gap-shape" });
+    const composition = createComposition({
+      id: "comp-camera-gap",
+      name: "CameraGap",
+      fps: 30,
+      durationInFrames: 60,
+      width: 100,
+      height: 100,
+      tracks: [
+        {
+          id: "track-content",
+          clips: [Sequence({ id: "clip-content", from: 0, durationInFrames: 60, content: shape })],
+        },
+      ],
+    });
+    const withGap: Composition = {
+      ...composition,
+      activeCameraTrack: [{ startFrame: 10, durationInFrames: 10, cameraNodeId: "camera-a" }],
+    };
+    const project = createProject({ id: "p-camera-gap", name: "Project", compositions: [withGap] });
+
+    expect(resolveSceneAtFrame(project, "comp-camera-gap", 5).activeCameraNodeId).toBeUndefined();
+    expect(resolveSceneAtFrame(project, "comp-camera-gap", 25).activeCameraNodeId).toBeUndefined();
+  });
+
+  it("resolves to undefined when the composition has no activeCameraTrack at all", () => {
+    const shape = Shape({ id: "no-camera-track-shape" });
+    const composition = createComposition({
+      id: "comp-no-camera-track",
+      name: "NoCameraTrack",
+      fps: 30,
+      durationInFrames: 30,
+      width: 100,
+      height: 100,
+      tracks: [
+        {
+          id: "track-content",
+          clips: [Sequence({ id: "clip-content", from: 0, durationInFrames: 30, content: shape })],
+        },
+      ],
+    });
+    const project = createProject({
+      id: "p-no-camera-track",
+      name: "Project",
+      compositions: [composition],
+    });
+
+    const state = resolveSceneAtFrame(project, "comp-no-camera-track", 5);
+    expect(state.activeCameraNodeId).toBeUndefined();
+  });
+});
