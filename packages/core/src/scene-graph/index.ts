@@ -15,6 +15,13 @@ export type {
   SceneNodeKind,
   TextNode,
 } from "./scene-node.js";
-export type { Clip, Composition, Project, Track } from "./timeline.js";
+export type {
+  ActiveCameraEntry,
+  Clip,
+  Composition,
+  Project,
+  Track,
+  Transition,
+} from "./timeline.js";
 export { SceneNodeNotFoundError } from "./tree-operations.js";
 export { addNode, findNode, removeNode, updateNode } from "./tree-operations.js";
