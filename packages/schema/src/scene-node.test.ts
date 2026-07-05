@@ -96,6 +96,67 @@ describe("sceneNodeSchema: camera", () => {
     });
     expect(result.success).toBe(true);
   });
+
+  it("accepts a camera node with a keyframe track for fov", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "camera",
+      fov: {
+        type: "keyframeTrack",
+        keyframes: [
+          { frame: 0, value: 40 },
+          { frame: 100, value: 100 },
+        ],
+      },
+      near: 0.1,
+      far: 1000,
+      target: [0, 0, 0],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a camera node whose fov keyframe track has unordered keyframes, with a precise diagnostic", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "camera",
+      fov: {
+        type: "keyframeTrack",
+        keyframes: [
+          { frame: 50, value: 40 },
+          { frame: 10, value: 100 },
+        ],
+      },
+      near: 0.1,
+      far: 1000,
+      target: [0, 0, 0],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((candidate) =>
+        candidate.path.join(".").includes("fov.keyframes.1.frame"),
+      );
+      expect(issue).toBeDefined();
+      expect(issue?.message).toMatch(/does not come strictly after/);
+    }
+  });
+
+  it("accepts a camera node with a keyframe track for target (a Vector3 property)", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "camera",
+      fov: 50,
+      near: 0.1,
+      far: 1000,
+      target: {
+        type: "keyframeTrack",
+        keyframes: [
+          { frame: 0, value: [0, 0, 0] },
+          { frame: 100, value: [10, 0, 0] },
+        ],
+      },
+    });
+    expect(result.success).toBe(true);
+  });
 });
 
 describe("sceneNodeSchema: light", () => {
