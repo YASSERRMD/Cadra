@@ -1,4 +1,10 @@
-import { createIdentityTransform, type SceneNode, type Transform } from "@cadra/core";
+import {
+  type CameraNode,
+  createIdentityTransform,
+  type KeyframeTrack,
+  type SceneNode,
+  type Transform,
+} from "@cadra/core";
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
 
@@ -513,6 +519,90 @@ describe("createReconciler: shared registry resources are never disposed", () =>
     expect(disposeSpy).not.toHaveBeenCalled();
     const remainingMesh = afterRemoval.children[0] as THREE.Mesh;
     expect(remainingMesh.geometry).toBe(sharedGeometry);
+  });
+});
+
+describe("createReconciler: frame-resolved camera Property<T> fields", () => {
+  const fovTrack: KeyframeTrack<number> = {
+    type: "keyframeTrack",
+    keyframes: [
+      { frame: 0, value: 40 },
+      { frame: 100, value: 100 },
+    ],
+  };
+  const targetTrack: KeyframeTrack<[number, number, number]> = {
+    type: "keyframeTrack",
+    keyframes: [
+      { frame: 0, value: [0, 0, 0] },
+      { frame: 100, value: [10, 0, 0] },
+    ],
+  };
+
+  function animatedCamera(id: string): SceneNode {
+    const node: CameraNode = {
+      id,
+      kind: "camera",
+      transform: transformAt(),
+      visible: true,
+      children: [],
+      fov: fovTrack,
+      near: 0.1,
+      far: 1000,
+      target: targetTrack,
+    };
+    return node;
+  }
+
+  it("resolves a keyframed fov to the track's start value at frame 0", () => {
+    const reconciler = createReconciler();
+    const result = reconciler.reconcile(animatedCamera("root"), 0) as THREE.PerspectiveCamera;
+    expect(result.fov).toBe(40);
+  });
+
+  it("resolves a keyframed fov to the linearly interpolated midpoint value at frame 50", () => {
+    const reconciler = createReconciler();
+    const result = reconciler.reconcile(animatedCamera("root"), 50) as THREE.PerspectiveCamera;
+    expect(result.fov).toBe(70);
+  });
+
+  it("resolves a keyframed fov to the track's end value at frame 100", () => {
+    const reconciler = createReconciler();
+    const result = reconciler.reconcile(animatedCamera("root"), 100) as THREE.PerspectiveCamera;
+    expect(result.fov).toBe(100);
+  });
+
+  it("resolves a keyframed target (a second animated field) via lookAt at each frame", () => {
+    const lookAtSpy = vi.spyOn(THREE.Object3D.prototype, "lookAt");
+    const reconciler = createReconciler();
+
+    reconciler.reconcile(animatedCamera("root"), 0);
+    expect(lookAtSpy).toHaveBeenLastCalledWith(0, 0, 0);
+
+    reconciler.reconcile(animatedCamera("root"), 50);
+    expect(lookAtSpy).toHaveBeenLastCalledWith(5, 0, 0);
+
+    reconciler.reconcile(animatedCamera("root"), 100);
+    expect(lookAtSpy).toHaveBeenLastCalledWith(10, 0, 0);
+
+    lookAtSpy.mockRestore();
+  });
+
+  it("re-resolves the same live Object3D in place across frames, rather than creating a new one", () => {
+    const reconciler = createReconciler();
+    const first = reconciler.reconcile(animatedCamera("root"), 0) as THREE.PerspectiveCamera;
+    const second = reconciler.reconcile(animatedCamera("root"), 50) as THREE.PerspectiveCamera;
+    expect(second).toBe(first);
+    expect(second.fov).toBe(70);
+  });
+
+  it("still applies a plain, non-keyframed near/far unaffected by frame", () => {
+    const reconciler = createReconciler();
+    const atFrame0 = reconciler.reconcile(animatedCamera("root"), 0) as THREE.PerspectiveCamera;
+    const atFrame50 = reconciler.reconcile(animatedCamera("root"), 50) as THREE.PerspectiveCamera;
+    expect(atFrame0.near).toBe(0.1);
+    expect(atFrame0.far).toBe(1000);
+    expect(atFrame50.near).toBe(0.1);
+    expect(atFrame50.far).toBe(1000);
   });
 });
 
