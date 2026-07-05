@@ -1,0 +1,38 @@
+{
+  "name": "cadra",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Code-first, agent-first 3D video animation framework and studio built on Three.js and WebGPU",
+  "license": "MIT",
+  "packageManager": "pnpm@10.22.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "turbo run build",
+    "lint": "turbo run lint && pnpm run check:no-em-dash",
+    "lint:eslint": "eslint .",
+    "check:no-em-dash": "node scripts/check-no-em-dash.mjs",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "@typescript-eslint/eslint-plugin": "^8.20.0",
+    "@typescript-eslint/parser": "^8.20.0",
+    "@vitest/coverage-v8": "^2.1.8",
+    "eslint": "^9.18.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-import": "^2.31.0",
+    "eslint-plugin-simple-import-sort": "^12.1.1",
+    "globals": "^17.7.0",
+    "prettier": "^3.4.2",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.20.0",
+    "vitest": "^2.1.8"
+  }
+}
