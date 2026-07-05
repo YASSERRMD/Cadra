@@ -4,9 +4,10 @@
  * Scene graph, deterministic clock, timeline, primitives, and interpolation
  * for the Cadra 3D video animation framework.
  *
- * The scene graph data model (Project, Composition, Track, Clip, SceneNode)
- * and its pure tree operations are implemented; the deterministic clock and
- * remaining framework logic land in later phases.
+ * The scene graph data model (Project, Composition, Track, Clip, SceneNode),
+ * its pure tree operations, and the deterministic frame/time model
+ * (FrameContext, seeded per-frame randomness, frame/time conversions) are
+ * implemented; the timeline resolver and interpolation land in later phases.
  */
 
 export const VERSION = "0.0.0";
@@ -17,4 +18,5 @@ export const VERSION = "0.0.0";
  */
 export const PACKAGE_NAME = "@cadra/core";
 
+export * from "./frame/index.js";
 export * from "./scene-graph/index.js";
