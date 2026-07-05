@@ -1,17 +1,28 @@
-import { createIdentityTransform, type Transform, type Vector3 } from "../scene-graph/primitives.js";
+import type { Property } from "../keyframes/keyframe-track.js";
+import {
+  createIdentityTransform,
+  type Transform,
+  type Vector3,
+} from "../scene-graph/primitives.js";
 import type { CameraNode } from "../scene-graph/scene-node.js";
 
-/** Props for `Camera`. Only `id` is required; everything else defaults. */
+/**
+ * Props for `Camera`. Only `id` is required; everything else defaults.
+ *
+ * `fov`, `near`, `far`, and `target` accept either a plain value or a
+ * `KeyframeTrack` (Phase 10's `Property<T>`); passing a plain value, as
+ * every existing caller does, keeps working unchanged.
+ */
 export interface CameraProps {
   id: string;
   name?: string;
   transform?: Transform;
   visible?: boolean;
   children?: CameraNode["children"];
-  fov?: number;
-  near?: number;
-  far?: number;
-  target?: Vector3;
+  fov?: Property<number>;
+  near?: Property<number>;
+  far?: Property<number>;
+  target?: Property<Vector3>;
 }
 
 /**
