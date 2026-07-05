@@ -27,14 +27,20 @@ describe("@cadra/renderer public surface", () => {
 });
 
 /**
- * Guards against Three.js leaking into this package's public surface.
+ * Guards against Three.js leaking into the `Renderer`-facing part of this
+ * package's public surface (`Renderer`, `RenderableScene`, `createRenderer`,
+ * and friends). Deliberately does not cover `./reconciler`: that module is
+ * additive, separate, and exists specifically to expose real `THREE.Object3D`
+ * types, so scanning it for "no Three.js" would contradict its own purpose
+ * (see `./reconciler/index.ts`'s module doc).
  *
- * What this proves: none of the source files that make up the public entry
- * point's export graph (`index.ts` itself, plus every local module it
- * re-exports types or values from) contain a `from "three"` or `from
- * "three/*"` import. Since those are exactly the files whose declared
- * export shapes become `@cadra/renderer`'s public `.d.ts` surface, this
- * rules out a `three` type reaching an exported signature.
+ * What this proves: none of the source files that make up the `Renderer`-facing
+ * export graph (`index.ts` itself, plus every local module it re-exports
+ * types or values from, excluding `./reconciler/*`) contain a `from "three"`
+ * or `from "three/*"` import. Since those are exactly the files whose
+ * declared export shapes become that part of `@cadra/renderer`'s public
+ * `.d.ts` surface, this rules out a `three` type reaching an exported
+ * `Renderer`-facing signature.
  *
  * What this does not prove: it does not catch a `three` type smuggled in
  * through a type-only re-export several modules deep that this list doesn't
@@ -44,7 +50,7 @@ describe("@cadra/renderer public surface", () => {
  * `createRenderer`'s public parameter and return types are built entirely
  * from types declared in the files this test scans.
  */
-describe("@cadra/renderer public surface has no Three.js leakage", () => {
+describe("@cadra/renderer Renderer-facing surface has no Three.js leakage", () => {
   const currentDir = dirname(fileURLToPath(import.meta.url));
   // Every source file reachable from index.ts's export statements. Extend
   // this list if index.ts starts re-exporting from a new local module.

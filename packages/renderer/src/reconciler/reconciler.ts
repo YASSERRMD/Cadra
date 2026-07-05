@@ -1,0 +1,221 @@
+import type { SceneNode, SceneNodeKind } from "@cadra/core";
+import type * as THREE from "three";
+
+import {
+  applyNodeProperties,
+  createThreeObject,
+  type NodeFactoryContext,
+  type OwnedResources,
+} from "./node-factory.js";
+import {
+  createDefaultGeometryRegistry,
+  createDefaultMaterialRegistry,
+  type GeometryRegistry,
+  type MaterialRegistry,
+} from "./registries.js";
+
+/** What the reconciler remembers about one previously-built `SceneNode`. */
+interface ReconciledEntry {
+  object3D: THREE.Object3D;
+  kind: SceneNodeKind;
+  owned: OwnedResources | undefined;
+}
+
+/** Dependencies a `Reconciler` resolves `mesh` geometry/material refs against. Both are optional; omitted registries default to the small in-memory seed set in `registries.ts`. */
+export interface ReconcilerOptions {
+  geometryRegistry?: GeometryRegistry;
+  materialRegistry?: MaterialRegistry;
+}
+
+/**
+ * Diffs a `SceneNode` tree from `@cadra/core` against whatever it built last
+ * time, and applies the minimal set of mutations to a live `THREE.Object3D`
+ * tree: create new objects, update existing ones in place (preserving
+ * identity), reorder/reparent moved ones, and dispose removed ones.
+ *
+ * Stateful across calls: `reconcile` always diffs against its own previous
+ * output, not against whatever the caller separately remembers.
+ */
+export interface Reconciler {
+  /**
+   * Reconciles `nextRoot` against the tree this reconciler built on its last
+   * call (or nothing, on the first call). Returns the root `Object3D`, or
+   * `null` if `nextRoot` is `null` (which also tears down and disposes the
+   * entire current tree).
+   */
+  reconcile(nextRoot: SceneNode | null): THREE.Object3D | null;
+}
+
+/**
+ * Creates a `Reconciler`. With no `options`, `mesh` nodes resolve geometry
+ * and material against the small in-memory default registries seeded in
+ * `registries.ts`; pass real registries (Phase 12's asset pipeline, once it
+ * exists) to override either or both.
+ */
+export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
+  const ctx: NodeFactoryContext = {
+    geometryRegistry: options.geometryRegistry ?? createDefaultGeometryRegistry(),
+    materialRegistry: options.materialRegistry ?? createDefaultMaterialRegistry(),
+  };
+
+  const entries = new Map<string, ReconciledEntry>();
+
+  /**
+   * Runs in three passes, in this order, because pruning must see the
+   * pre-reorder Three.js tree: `updateOrCreate` never removes a child from
+   * its old parent's `children` array (only `pruneRemoved`'s `removeFromParent`
+   * does that, via `THREE.Object3D.remove`'s `children.indexOf` lookup), so
+   * a removed node is still findable there when pruning runs. Reordering
+   * only after pruning means it only ever reorders children that actually
+   * survived into the next tree.
+   *
+   * 1. updateOrCreate: create/update/reparent every node in `nextRoot`,
+   *    collecting which ids are still present.
+   * 2. pruneRemoved: detach and dispose every previously-known id absent
+   *    from that set.
+   * 3. reorderAll: fix up each surviving parent's children order to match
+   *    `nextRoot`.
+   */
+  function reconcile(nextRoot: SceneNode | null): THREE.Object3D | null {
+    if (nextRoot === null) {
+      teardownAll();
+      return null;
+    }
+
+    const visited = new Set<string>();
+    const rootObject = updateOrCreate(nextRoot, null, visited);
+    pruneRemoved(visited);
+    reorderAll(nextRoot);
+    return rootObject;
+  }
+
+  /**
+   * Creates a brand new node, reuses an existing same-kind node in place, or
+   * fully replaces a kind-changed node, then recurses into `node`'s children.
+   * Attaches/reparents `object3D` under `parentObject3D` (skipped for the
+   * tree root, which has no Three.js parent for this reconciler to manage).
+   * Deliberately does not touch `object3D.children`'s order; see `reconcile`.
+   */
+  function updateOrCreate(
+    node: SceneNode,
+    parentObject3D: THREE.Object3D | null,
+    visited: Set<string>,
+  ): THREE.Object3D {
+    visited.add(node.id);
+    const existing = entries.get(node.id);
+
+    let object3D: THREE.Object3D;
+    if (existing === undefined) {
+      object3D = createEntry(node);
+    } else if (existing.kind === node.kind) {
+      object3D = existing.object3D;
+    } else {
+      // Kind changed on the same id: full replace. Dispose whatever the old
+      // kind owned, drop the old object from its parent, build fresh.
+      disposeEntry(existing);
+      object3D = createEntry(node);
+    }
+
+    applyNodeProperties(node, object3D, ctx);
+
+    if (parentObject3D !== null && object3D.parent !== parentObject3D) {
+      // Either brand new, or an existing node that moved to a different
+      // parent (reparenting): either way, `add` both attaches it and detaches
+      // it from any prior parent first, so this one call covers both cases.
+      parentObject3D.add(object3D);
+    }
+
+    for (const child of node.children) {
+      updateOrCreate(child, object3D, visited);
+    }
+
+    return object3D;
+  }
+
+  /** Builds a brand new `Object3D` for `node` via the node factory and records it in `entries`. */
+  function createEntry(node: SceneNode): THREE.Object3D {
+    const built = createThreeObject(node, ctx);
+    entries.set(node.id, { object3D: built.object3D, kind: node.kind, owned: built.owned });
+    return built.object3D;
+  }
+
+  /**
+   * Removes and disposes every `entries` id not present in `visited`. Must
+   * run before any children-array reordering: a removed node is still
+   * sitting in its old parent's live `children` array at this point (nothing
+   * upstream of this ever spliced it out), which is exactly what
+   * `removeFromParent` needs to find and detach it correctly.
+   */
+  function pruneRemoved(visited: Set<string>): void {
+    for (const [id, entry] of entries) {
+      if (!visited.has(id)) {
+        disposeEntry(entry);
+        entries.delete(id);
+      }
+    }
+  }
+
+  /**
+   * Walks `root` and reorders each node's Three.js `children` to match its
+   * `SceneNode.children` order. Runs last, after removed nodes are already
+   * pruned, so every id it looks up is guaranteed to still be in `entries`.
+   */
+  function reorderAll(node: SceneNode): void {
+    const object3D = entries.get(node.id)?.object3D;
+    if (object3D === undefined) {
+      return;
+    }
+    const orderedChildren = node.children.map((child) => {
+      // Safe: every child id was just created-or-reused in updateOrCreate
+      // above and survived pruneRemoved, so it is always present here.
+      const childObject3D = entries.get(child.id)?.object3D;
+      return childObject3D as THREE.Object3D;
+    });
+    reorderChildren(object3D, orderedChildren);
+    for (const child of node.children) {
+      reorderAll(child);
+    }
+  }
+
+  /**
+   * Reassigns `parent.children` to `orderedChildren` directly rather than
+   * through repeated `remove`/`add` calls: every element is already a member
+   * of `parent.children` with `.parent` already correctly set, so this is a
+   * pure order fix with no add/remove side effects, and a no-op when the
+   * order already matches.
+   */
+  function reorderChildren(parent: THREE.Object3D, orderedChildren: THREE.Object3D[]): void {
+    const currentOrder = parent.children;
+    if (currentOrder.length === orderedChildren.length) {
+      let matches = true;
+      for (let i = 0; i < orderedChildren.length; i += 1) {
+        if (currentOrder[i] !== orderedChildren[i]) {
+          matches = false;
+          break;
+        }
+      }
+      if (matches) {
+        return;
+      }
+    }
+    parent.children = orderedChildren;
+  }
+
+  /** Detaches `entry.object3D` from its parent and disposes exactly the resources it owns. */
+  function disposeEntry(entry: ReconciledEntry): void {
+    entry.object3D.removeFromParent();
+    if (entry.owned !== undefined) {
+      entry.owned.material.dispose();
+    }
+  }
+
+  /** Tears down the entire current tree: every entry is disposed and `entries` is cleared. */
+  function teardownAll(): void {
+    for (const entry of entries.values()) {
+      disposeEntry(entry);
+    }
+    entries.clear();
+  }
+
+  return { reconcile };
+}
