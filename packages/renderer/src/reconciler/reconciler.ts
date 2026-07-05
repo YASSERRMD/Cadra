@@ -42,8 +42,13 @@ export interface Reconciler {
    * call (or nothing, on the first call). Returns the root `Object3D`, or
    * `null` if `nextRoot` is `null` (which also tears down and disposes the
    * entire current tree).
+   *
+   * `frame` is the frame every animatable `Property<T>` this reconciler
+   * knows how to resolve (currently only a `camera` node's `fov`/`near`/
+   * `far`/`target`) is evaluated at; every other node kind's own fields are
+   * still plain values, so `frame` has no effect on them.
    */
-  reconcile(nextRoot: SceneNode | null): THREE.Object3D | null;
+  reconcile(nextRoot: SceneNode | null, frame: number): THREE.Object3D | null;
 }
 
 /**
@@ -76,14 +81,14 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
    * 3. reorderAll: fix up each surviving parent's children order to match
    *    `nextRoot`.
    */
-  function reconcile(nextRoot: SceneNode | null): THREE.Object3D | null {
+  function reconcile(nextRoot: SceneNode | null, frame: number): THREE.Object3D | null {
     if (nextRoot === null) {
       teardownAll();
       return null;
     }
 
     const visited = new Set<string>();
-    const rootObject = updateOrCreate(nextRoot, null, visited);
+    const rootObject = updateOrCreate(nextRoot, null, visited, frame);
     pruneRemoved(visited);
     reorderAll(nextRoot);
     return rootObject;
@@ -100,6 +105,7 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
     node: SceneNode,
     parentObject3D: THREE.Object3D | null,
     visited: Set<string>,
+    frame: number,
   ): THREE.Object3D {
     visited.add(node.id);
     const existing = entries.get(node.id);
@@ -116,7 +122,7 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
       object3D = createEntry(node);
     }
 
-    applyNodeProperties(node, object3D, ctx);
+    applyNodeProperties(node, object3D, ctx, frame);
 
     if (parentObject3D !== null && object3D.parent !== parentObject3D) {
       // Either brand new, or an existing node that moved to a different
@@ -126,7 +132,7 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
     }
 
     for (const child of node.children) {
-      updateOrCreate(child, object3D, visited);
+      updateOrCreate(child, object3D, visited, frame);
     }
 
     return object3D;

@@ -37,11 +37,11 @@ describe("createReconciler: add-then-remove leak stress test", () => {
     const disposeSpy = vi.spyOn(THREE.MeshBasicMaterial.prototype, "dispose");
     const seenObjects = new Set<THREE.Object3D>();
 
-    reconciler.reconcile(rootGroup([]));
+    reconciler.reconcile(rootGroup([]), 0);
     expect(disposeSpy).toHaveBeenCalledTimes(0);
 
     for (let cycle = 0; cycle < CYCLE_COUNT; cycle += 1) {
-      const afterAdd = reconciler.reconcile(rootGroup([textLeaf()])) as THREE.Group;
+      const afterAdd = reconciler.reconcile(rootGroup([textLeaf()]), 0) as THREE.Group;
       expect(afterAdd.children).toHaveLength(1);
       const leafObject = afterAdd.children[0];
       expect(leafObject).toBeDefined();
@@ -56,7 +56,7 @@ describe("createReconciler: add-then-remove leak stress test", () => {
       expect(seenObjects.has(leafObject as THREE.Object3D)).toBe(false);
       seenObjects.add(leafObject as THREE.Object3D);
 
-      const afterRemove = reconciler.reconcile(rootGroup([])) as THREE.Group;
+      const afterRemove = reconciler.reconcile(rootGroup([]), 0) as THREE.Group;
       expect(afterRemove.children).toHaveLength(0);
 
       // One text node created and removed per cycle means exactly one owned
@@ -73,18 +73,18 @@ describe("createReconciler: add-then-remove leak stress test", () => {
 
   it("tears down cleanly via reconcile(null) even after many prior add/remove cycles", () => {
     const reconciler = createReconciler();
-    reconciler.reconcile(rootGroup([]));
+    reconciler.reconcile(rootGroup([]), 0);
 
     for (let cycle = 0; cycle < 500; cycle += 1) {
-      reconciler.reconcile(rootGroup([textLeaf()]));
-      reconciler.reconcile(rootGroup([]));
+      reconciler.reconcile(rootGroup([textLeaf()]), 0);
+      reconciler.reconcile(rootGroup([]), 0);
     }
 
-    const rootObject = reconciler.reconcile(rootGroup([textLeaf()])) as THREE.Group;
+    const rootObject = reconciler.reconcile(rootGroup([textLeaf()]), 0) as THREE.Group;
     const leafObject = rootObject.children[0] as THREE.Mesh;
     const disposeSpy = vi.spyOn(leafObject.material as THREE.Material, "dispose");
 
-    const result = reconciler.reconcile(null);
+    const result = reconciler.reconcile(null, 0);
 
     expect(result).toBeNull();
     expect(disposeSpy).toHaveBeenCalledTimes(1);
