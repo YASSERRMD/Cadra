@@ -6,6 +6,39 @@ import simpleImportSort from "eslint-plugin-simple-import-sort";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
+/**
+ * Wall-clock and unseeded-random APIs that break frame determinism: reading
+ * any of them from scene/frame-evaluation source would make a frame's
+ * output depend on when or how fast it happened to run, rather than being a
+ * pure function of a `FrameContext`. Shared as a list (rather than inlined
+ * into a single rule config) so a later phase can reuse it verbatim in a
+ * second `no-restricted-properties` block scoped to a different `files`
+ * glob, once other packages (renderer, player, headless) grow their own
+ * scene-evaluation code.
+ *
+ * @type {Array<{ object: string, property: string, message: string }>}
+ */
+const NON_DETERMINISTIC_PROPERTY_RESTRICTIONS = [
+  {
+    object: "Date",
+    property: "now",
+    message:
+      "Date.now() is wall-clock time and non-deterministic. Derive time from a FrameContext (frame / fps) instead.",
+  },
+  {
+    object: "performance",
+    property: "now",
+    message:
+      "performance.now() is wall-clock time and non-deterministic. Derive time from a FrameContext (frame / fps) instead.",
+  },
+  {
+    object: "Math",
+    property: "random",
+    message:
+      "Math.random() is unseeded and non-deterministic. Use FrameContext.random() (or createFrameRandom) for reproducible per-frame randomness instead.",
+  },
+];
+
 export default tseslint.config(
   {
     ignores: [
@@ -49,6 +82,17 @@ export default tseslint.config(
       globals: {
         ...globals.node,
       },
+    },
+  },
+  {
+    // Scoped to Phase 2/3's scene-graph and frame-evaluation source only.
+    // Extend this `files` list with further `packages/<name>/src/**/*.ts`
+    // globs as later phases (renderer, player, headless) grow their own
+    // scene-evaluation code; the restriction list above needs no changes.
+    files: ["packages/core/src/**/*.ts"],
+    ignores: ["**/*.test.ts"],
+    rules: {
+      "no-restricted-properties": ["error", ...NON_DETERMINISTIC_PROPERTY_RESTRICTIONS],
     },
   },
   prettierConfig,
