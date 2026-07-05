@@ -76,10 +76,7 @@ describe("waitForAssets", () => {
 
   it("rejects if any one pending item rejects", async () => {
     const failure = new Error("asset failed to load");
-    const items: Pending[] = [
-      { ready: Promise.resolve("ok") },
-      { ready: Promise.reject(failure) },
-    ];
+    const items: Pending[] = [{ ready: Promise.resolve("ok") }, { ready: Promise.reject(failure) }];
 
     await expect(waitForAssets(items)).rejects.toThrow(failure);
   });
