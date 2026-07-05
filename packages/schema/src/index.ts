@@ -51,4 +51,11 @@ export {
   sceneNodeSchema,
   textNodeSchema,
 } from "./scene-node.js";
-export { clipSchema, compositionSchema, projectSchema, trackSchema } from "./timeline.js";
+export {
+  activeCameraEntrySchema,
+  clipSchema,
+  compositionSchema,
+  projectSchema,
+  trackSchema,
+  transitionSchema,
+} from "./timeline.js";

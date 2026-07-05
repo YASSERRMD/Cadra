@@ -92,6 +92,42 @@
                           "node": {
                             "description": "The root of the scene-node subtree this clip contributes.",
                             "$ref": "#/$defs/__schema1"
+                          },
+                          "transitionIn": {
+                            "description": "Optional transition this clip blends in with. Omitted means an instant cut.",
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "fade",
+                                  "wipe",
+                                  "crossDissolve"
+                                ],
+                                "description": "Which kind of transition this is. 'cut' is the absence of a transition."
+                              },
+                              "durationInFrames": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991,
+                                "description": "How many frames the transition takes to complete, once the incoming clip starts."
+                              },
+                              "direction": {
+                                "description": "Which edge a 'wipe' sweeps in from. Only meaningful (and only allowed) for type: 'wipe'.",
+                                "type": "string",
+                                "enum": [
+                                  "left",
+                                  "right",
+                                  "up",
+                                  "down"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "durationInFrames"
+                            ],
+                            "additionalProperties": false
                           }
                         },
                         "required": [
@@ -112,6 +148,37 @@
                   "additionalProperties": false
                 },
                 "description": "The tracks of clips that populate this composition."
+              },
+              "activeCameraTrack": {
+                "description": "Optional lane naming which camera is active at each frame, independent of tracks.",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "startFrame": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991,
+                      "description": "The frame, relative to the start of the composition, this entry begins on."
+                    },
+                    "durationInFrames": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "description": "How many frames this entry's camera stays active for."
+                    },
+                    "cameraNodeId": {
+                      "type": "string",
+                      "description": "Id of the CameraNode active for this window, resolved elsewhere in the scene graph."
+                    }
+                  },
+                  "required": [
+                    "startFrame",
+                    "durationInFrames",
+                    "cameraNodeId"
+                  ],
+                  "additionalProperties": false
+                }
               }
             },
             "required": [
@@ -451,34 +518,293 @@
               "description": "Whether this node (and its subtree) should be rendered."
             },
             "fov": {
-              "type": "number",
-              "description": "Vertical field of view, in degrees."
-            },
-            "near": {
-              "type": "number",
-              "description": "Distance to the near clipping plane."
-            },
-            "far": {
-              "type": "number",
-              "description": "Distance to the far clipping plane."
-            },
-            "target": {
-              "type": "array",
-              "prefixItems": [
+              "anyOf": [
                 {
-                  "type": "number",
-                  "description": "The x component of the vector."
+                  "type": "number"
                 },
                 {
-                  "type": "number",
-                  "description": "The y component of the vector."
-                },
-                {
-                  "type": "number",
-                  "description": "The z component of the vector."
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "number",
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
                 }
               ],
-              "description": "The world-space point the camera looks at."
+              "description": "Vertical field of view, in degrees. A plain number or a keyframe track."
+            },
+            "near": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "number",
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Distance to the near clipping plane. A plain number or a keyframe track."
+            },
+            "far": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "number",
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Distance to the far clipping plane. A plain number or a keyframe track."
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "A 3-component numeric tuple, typically a world-space position or axis."
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "number",
+                                "description": "The x component of the vector."
+                              },
+                              {
+                                "type": "number",
+                                "description": "The y component of the vector."
+                              },
+                              {
+                                "type": "number",
+                                "description": "The z component of the vector."
+                              }
+                            ],
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "The world-space point the camera looks at. A plain Vector3 or a keyframe track."
             },
             "children": {
               "type": "array",
