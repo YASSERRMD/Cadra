@@ -8,8 +8,9 @@
  * its pure tree operations, the deterministic frame/time model (FrameContext,
  * seeded per-frame randomness, frame/time conversions), the authoring
  * primitives library (createComposition, Sequence, Series, Shape, Text,
- * Image, Camera, Light), and the timeline resolver (resolveSceneAtFrame) are
- * implemented; interpolation lands in a later phase.
+ * Image, Camera, Light), the timeline resolver (resolveSceneAtFrame), and the
+ * deterministic interpolation toolkit (interpolate, spring, easing curves,
+ * cubicBezier) are implemented.
  */
 
 export const VERSION = "0.0.0";
@@ -21,6 +22,7 @@ export const VERSION = "0.0.0";
 export const PACKAGE_NAME = "@cadra/core";
 
 export * from "./frame/index.js";
+export * from "./interpolation/index.js";
 // Not a plain `export *`: `./scene-graph/index.js` already exports the
 // `Composition` data-shape type, so the primitives barrel's own factory
 // function is named `createComposition` (see `composition.ts`) to keep both
