@@ -1,3 +1,4 @@
+import type { Property } from "../keyframes/keyframe-track.js";
 import type { ColorRGBA, Transform, Vector3 } from "./primitives.js";
 
 /**
@@ -10,13 +11,7 @@ import type { ColorRGBA, Transform, Vector3 } from "./primitives.js";
  * resolved tree in at this point.
  */
 export type SceneNodeKind =
-  | "group"
-  | "mesh"
-  | "camera"
-  | "light"
-  | "text"
-  | "image"
-  | "compositionRef";
+  "group" | "mesh" | "camera" | "light" | "text" | "image" | "compositionRef";
 
 /** Fields shared by every scene node, regardless of kind. */
 interface SceneNodeBase<Kind extends SceneNodeKind> {
@@ -43,12 +38,22 @@ export interface MeshNode extends SceneNodeBase<"mesh"> {
   materialRef: string;
 }
 
-/** A camera. `target` is the world-space point the camera looks at. */
+/**
+ * A camera. `target` is the world-space point the camera looks at.
+ *
+ * `fov`, `near`, `far`, and `target` are `Property<T>` (Phase 10's generic
+ * keyframe/property model), so each may be a plain constant or a
+ * `KeyframeTrack` animating it over time. Only these camera-specific fields
+ * are animatable this way; the shared `Transform` (`position`/`rotation`/
+ * `scale`) stays a plain, non-animatable value for every node kind,
+ * `CameraNode` included, since animating `Transform` itself is a separate,
+ * larger effort spanning every node kind.
+ */
 export interface CameraNode extends SceneNodeBase<"camera"> {
-  fov: number;
-  near: number;
-  far: number;
-  target: Vector3;
+  fov: Property<number>;
+  near: Property<number>;
+  far: Property<number>;
+  target: Property<Vector3>;
 }
 
 /** The kind of light source a `LightNode` represents. */
@@ -91,10 +96,4 @@ export interface CompositionRefNode extends SceneNodeBase<"compositionRef"> {
  * rather than an easily-typo'd `unknown`.
  */
 export type SceneNode =
-  | GroupNode
-  | MeshNode
-  | CameraNode
-  | LightNode
-  | TextNode
-  | ImageNode
-  | CompositionRefNode;
+  GroupNode | MeshNode | CameraNode | LightNode | TextNode | ImageNode | CompositionRefNode;

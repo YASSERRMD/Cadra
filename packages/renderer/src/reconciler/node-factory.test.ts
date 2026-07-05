@@ -39,7 +39,7 @@ describe("node-factory: unresolved mesh refs fall back to shared singletons, not
     const built = createThreeObject(meshNode("missing-a", "missing-x"), ctx);
     const initialGeometry = (built.object3D as THREE.Mesh).geometry;
 
-    applyNodeProperties(meshNode("missing-a", "missing-x"), built.object3D, ctx);
+    applyNodeProperties(meshNode("missing-a", "missing-x"), built.object3D, ctx, 0);
 
     expect((built.object3D as THREE.Mesh).geometry).toBe(initialGeometry);
   });

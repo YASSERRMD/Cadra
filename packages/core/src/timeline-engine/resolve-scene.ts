@@ -1,8 +1,15 @@
 import { resolveSequenceFrame } from "../primitives/sequence.js";
 import type { SceneNode } from "../scene-graph/scene-node.js";
-import type { Clip, Composition, Project, Track } from "../scene-graph/timeline.js";
+import type {
+  ActiveCameraEntry,
+  Clip,
+  Composition,
+  Project,
+  Track,
+} from "../scene-graph/timeline.js";
 import { CompositionCycleError, CompositionNotFoundError } from "./errors.js";
 import type { ResolvedLayer, SceneState } from "./scene-state.js";
+import { resolveTransitionBlend } from "./transition.js";
 
 /**
  * Per-`Project` memoization cache. Keyed by object reference (`WeakMap`) so a
@@ -97,16 +104,77 @@ function resolveComposition(
     resolveTrack(project, composition, track, frame, nextChain, pending);
   }
 
+  const activeCameraNodeId = resolveActiveCameraNodeId(composition.activeCameraTrack, frame);
+
   return {
     compositionId: composition.id,
     frame,
     width: composition.width,
     height: composition.height,
     layers: pending.map((layer, index) => ({ ...layer, zIndex: index })),
+    ...(activeCameraNodeId !== undefined && { activeCameraNodeId }),
   };
 }
 
-/** Appends every layer `track`'s clips contribute at `frame`, in track/clip order, to `pending`. */
+/**
+ * Finds which `ActiveCameraEntry` in `activeCameraTrack` (if any) covers
+ * `frame`, reusing `resolveSequenceFrame`'s visibility math: an
+ * `ActiveCameraEntry` has the same `startFrame`/`durationInFrames`
+ * half-open-window shape as a `Clip`, so the same "is `frame` inside
+ * `[startFrame, startFrame + durationInFrames)`" rule applies unchanged.
+ *
+ * Returns `undefined` when `activeCameraTrack` is absent or empty, or when no
+ * entry covers `frame` (e.g. a gap between two entries): this is a normal,
+ * unexceptional outcome, not an error, so a composition authored without an
+ * active-camera concept at all keeps resolving exactly as before.
+ */
+function resolveActiveCameraNodeId(
+  activeCameraTrack: readonly ActiveCameraEntry[] | undefined,
+  frame: number,
+): string | undefined {
+  if (activeCameraTrack === undefined) {
+    return undefined;
+  }
+  const covering = activeCameraTrack.find((entry) => resolveSequenceFrame(entry, frame).visible);
+  return covering?.cameraNodeId;
+}
+
+/**
+ * True when `clip.transitionIn` is currently overlapping `frame`, i.e.
+ * `frame` falls in the half-open window `[clip.startFrame, clip.startFrame +
+ * transitionIn.durationInFrames)`. `framesIntoTransition` (`frame -
+ * clip.startFrame`) doubles as the clip's own `localFrame` while its
+ * transition is active, since both count frames from the same origin.
+ */
+function activeTransitionAt(
+  clip: Clip,
+  frame: number,
+): { transitionIn: NonNullable<Clip["transitionIn"]>; framesIntoTransition: number } | undefined {
+  const { transitionIn } = clip;
+  if (transitionIn === undefined) {
+    return undefined;
+  }
+  const framesIntoTransition = frame - clip.startFrame;
+  if (framesIntoTransition < 0 || framesIntoTransition >= transitionIn.durationInFrames) {
+    return undefined;
+  }
+  return { transitionIn, framesIntoTransition };
+}
+
+/**
+ * Appends every layer `track`'s clips contribute at `frame`, in track/clip
+ * order, to `pending`.
+ *
+ * Iterates by index so a clip whose `transitionIn` is currently active can
+ * look back at `track.clips[index - 1]` (the clip immediately preceding it
+ * in authoring order): when that is the case, this function emits the
+ * preceding clip's content first (opacity `1 - blend`, extending its
+ * visibility past its own natural end for the overlap) followed by the
+ * current clip's content (opacity `blend`). The preceding clip's own turn in
+ * the loop later checks whether its *next* clip has an active transition
+ * right now and, if so, skips its normal-visibility branch, so it is never
+ * emitted a second time.
+ */
 function resolveTrack(
   project: Project,
   composition: Composition,
@@ -115,12 +183,65 @@ function resolveTrack(
   chain: readonly string[],
   pending: PendingLayer[],
 ): void {
-  for (const clip of track.clips) {
+  const { clips } = track;
+
+  for (let index = 0; index < clips.length; index += 1) {
+    const clip = clips[index];
+    if (clip === undefined) {
+      continue;
+    }
+
+    const active = activeTransitionAt(clip, frame);
+    if (active !== undefined) {
+      const blend = resolveTransitionBlend(active.transitionIn, active.framesIntoTransition);
+      const previousClip = clips[index - 1];
+      if (previousClip !== undefined) {
+        const previousLocalFrame = frame - previousClip.startFrame;
+        resolveClipContent(
+          project,
+          composition,
+          track,
+          previousClip,
+          previousClip.node,
+          previousLocalFrame,
+          1 - blend,
+          chain,
+          pending,
+        );
+      }
+      resolveClipContent(
+        project,
+        composition,
+        track,
+        clip,
+        clip.node,
+        active.framesIntoTransition,
+        blend,
+        chain,
+        pending,
+      );
+      continue;
+    }
+
+    // Not currently the incoming half of an active transition. Skip this
+    // clip's own normal-visibility branch if the *next* clip's transitionIn
+    // is active right now: that next clip's own branch above already emitted
+    // this clip (as the outgoing half, at 1 - blend), so emitting it again
+    // here via its ordinary visibility window would double it up. This only
+    // matters when authored clips overlap in their raw start/duration
+    // windows; the common back-to-back case never reaches this branch for
+    // the outgoing clip, since its own natural visibility has already ended
+    // by the time the next clip's transition window opens.
+    const nextClip = clips[index + 1];
+    if (nextClip !== undefined && activeTransitionAt(nextClip, frame) !== undefined) {
+      continue;
+    }
+
     const { visible, localFrame } = resolveSequenceFrame(clip, frame);
     if (!visible) {
       continue;
     }
-    resolveClipContent(project, composition, track, clip, clip.node, localFrame, chain, pending);
+    resolveClipContent(project, composition, track, clip, clip.node, localFrame, 1, chain, pending);
   }
 }
 
@@ -137,6 +258,11 @@ function resolveTrack(
  * Phase 6 reconciler already treats a `compositionRef` it encounters
  * directly, so a resolved layer's node tree never contains a `compositionRef`
  * a downstream renderer would have to special-case.
+ *
+ * `opacity` is stamped onto every layer this call (and its recursive splices)
+ * produces: a nested composition spliced in via `compositionRef` inherits the
+ * enclosing clip's transition opacity uniformly across all of its own
+ * resolved layers, rather than each nested layer defaulting back to `1`.
  */
 function resolveClipContent(
   project: Project,
@@ -145,12 +271,13 @@ function resolveClipContent(
   clip: Clip,
   node: SceneNode,
   localFrame: number,
+  opacity: number,
   chain: readonly string[],
   pending: PendingLayer[],
 ): void {
   if (node.kind === "compositionRef") {
     const nested = resolveComposition(project, node.compositionId, localFrame, chain);
-    pending.push(...nested.layers);
+    pending.push(...nested.layers.map((layer) => ({ ...layer, opacity })));
     return;
   }
 
@@ -161,6 +288,7 @@ function resolveClipContent(
       clipId: clip.id,
       node,
       localFrame,
+      opacity,
     });
     return;
   }
@@ -172,7 +300,17 @@ function resolveClipContent(
   // too would emit it as a second, duplicate layer.
   for (const child of node.children) {
     if (containsCompositionRef(child)) {
-      resolveClipContent(project, composition, track, clip, child, localFrame, chain, pending);
+      resolveClipContent(
+        project,
+        composition,
+        track,
+        clip,
+        child,
+        localFrame,
+        opacity,
+        chain,
+        pending,
+      );
     }
   }
 
@@ -182,6 +320,7 @@ function resolveClipContent(
     clipId: clip.id,
     node: pruneCompositionRefs(node),
     localFrame,
+    opacity,
   });
 }
 

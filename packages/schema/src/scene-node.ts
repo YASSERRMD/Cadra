@@ -12,6 +12,7 @@ import type {
 } from "@cadra/core";
 import { z } from "zod";
 
+import { propertySchema } from "./keyframes.js";
 import { colorRgbaSchema, transformSchema, vector3Schema } from "./primitives.js";
 
 /**
@@ -105,7 +106,15 @@ export const meshNodeSchema = z.strictObject({
 
 type _CheckMeshNode = AssertTrue<AssertEqual<z.infer<typeof meshNodeSchema>, MeshNode>>;
 
-/** A camera. `target` is the world-space point the camera looks at. */
+/**
+ * A camera. `target` is the world-space point the camera looks at.
+ *
+ * `fov`, `near`, `far`, and `target` each accept either a plain value or a
+ * keyframe track, via `propertySchema` (mirroring `Property<T>` on
+ * `CameraNode` in `@cadra/core`): these are the only fields on any node kind
+ * animatable this way so far, since `Transform` itself stays plain for every
+ * kind including `camera`.
+ */
 export const cameraNodeSchema = z.strictObject({
   id: z.string().describe("Unique identifier for this scene node within the project."),
   kind: z.literal("camera").describe("Discriminant identifying this node as a camera."),
@@ -115,10 +124,18 @@ export const cameraNodeSchema = z.strictObject({
     .describe("Optional human-readable label, purely for authoring and debugging."),
   transform: transformSchema.describe("The position, rotation, and scale of this node."),
   visible: z.boolean().describe("Whether this node (and its subtree) should be rendered."),
-  fov: z.number().describe("Vertical field of view, in degrees."),
-  near: z.number().describe("Distance to the near clipping plane."),
-  far: z.number().describe("Distance to the far clipping plane."),
-  target: vector3Schema.describe("The world-space point the camera looks at."),
+  fov: propertySchema(z.number()).describe(
+    "Vertical field of view, in degrees. A plain number or a keyframe track.",
+  ),
+  near: propertySchema(z.number()).describe(
+    "Distance to the near clipping plane. A plain number or a keyframe track.",
+  ),
+  far: propertySchema(z.number()).describe(
+    "Distance to the far clipping plane. A plain number or a keyframe track.",
+  ),
+  target: propertySchema(vector3Schema).describe(
+    "The world-space point the camera looks at. A plain Vector3 or a keyframe track.",
+  ),
   get children(): z.ZodArray<typeof sceneNodeSchema> {
     return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
   },

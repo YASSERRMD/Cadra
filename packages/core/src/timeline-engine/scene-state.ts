@@ -34,6 +34,17 @@ export interface ResolvedLayer {
    * at, and the frame a nested composition's own resolution used internally.
    */
   localFrame: number;
+  /**
+   * Blend/opacity this layer should render at, in `[0, 1]`. Defaults to `1`
+   * for a layer with no active transition. When the layer's clip has a
+   * `transitionIn` overlapping the current frame, this is the incoming
+   * clip's blend factor (see `resolveTransitionBlend`); when this layer was
+   * emitted as the outgoing half of a preceding clip's overlap, it is
+   * `1 - blend` instead. Purely numeric metadata: actually compositing two
+   * layers at less-than-full opacity (a real fade/wipe/cross-dissolve
+   * shader) is a future renderer concern, not the timeline engine's.
+   */
+  opacity: number;
 }
 
 /**
@@ -57,4 +68,13 @@ export interface SceneState {
   width: number;
   height: number;
   layers: ResolvedLayer[];
+  /**
+   * Id of the `CameraNode` active at `frame`, per the composition's own
+   * `activeCameraTrack` (see `Composition.activeCameraTrack`). `undefined`
+   * when the composition has no `activeCameraTrack` at all, or when none of
+   * its entries cover `frame`: deciding which camera to actually render with
+   * in that case is left to a later phase (Phase 13's player runtime), not
+   * modeled as an error here.
+   */
+  activeCameraNodeId?: string;
 }

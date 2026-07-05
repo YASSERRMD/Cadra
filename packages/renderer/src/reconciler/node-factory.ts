@@ -1,4 +1,11 @@
-import type { LightNode, LightType, SceneNode, Transform } from "@cadra/core";
+import {
+  type LightNode,
+  type LightType,
+  resolveNumberProperty,
+  resolveVector3Property,
+  type SceneNode,
+  type Transform,
+} from "@cadra/core";
 import * as THREE from "three";
 
 import type { GeometryRegistry, MaterialRegistry } from "./registries.js";
@@ -85,8 +92,12 @@ export function createThreeObject(node: SceneNode, ctx: NodeFactoryContext): Bui
     }
 
     case "camera": {
-      const camera = new THREE.PerspectiveCamera(node.fov, 1, node.near, node.far);
-      return { object3D: camera, owned: undefined };
+      // fov/near/far are Property<number> now, not resolved to a concrete
+      // value here: applyNodeProperties (called unconditionally right after
+      // this, for every node on every reconcile) sets the real,
+      // frame-resolved values, so the constructor's own defaults are never
+      // actually observed.
+      return { object3D: new THREE.PerspectiveCamera(), owned: undefined };
     }
 
     case "light":
@@ -112,11 +123,17 @@ export function createThreeObject(node: SceneNode, ctx: NodeFactoryContext): Bui
  * fields. Called on every `reconcile`, even for structurally-unchanged
  * nodes, since property values (color, intensity, fov, ...) may have changed
  * frame to frame without the node's id/kind/hierarchy changing at all.
+ *
+ * `frame` is only consumed by the `camera` branch, to resolve `fov`/`near`/
+ * `far`/`target` (all `Property<T>` since Phase 11) to concrete values via
+ * `resolveNumberProperty`/`resolveVector3Property`. Every other kind's own
+ * fields are still plain values, so `frame` is unused there.
  */
 export function applyNodeProperties(
   node: SceneNode,
   object3D: THREE.Object3D,
   ctx: NodeFactoryContext,
+  frame: number,
 ): void {
   applyTransform(node.transform, object3D);
   object3D.visible = node.visible;
@@ -135,12 +152,13 @@ export function applyNodeProperties(
 
     case "camera": {
       const camera = object3D as THREE.PerspectiveCamera;
-      camera.fov = node.fov;
-      camera.near = node.near;
-      camera.far = node.far;
+      camera.fov = resolveNumberProperty(node.fov, frame);
+      camera.near = resolveNumberProperty(node.near, frame);
+      camera.far = resolveNumberProperty(node.far, frame);
       camera.aspect = 1; // Nothing in this phase's scope sets aspect from anywhere else.
       camera.updateProjectionMatrix();
-      camera.lookAt(node.target[0], node.target[1], node.target[2]);
+      const target = resolveVector3Property(node.target, frame);
+      camera.lookAt(target[0], target[1], target[2]);
       return;
     }
 
