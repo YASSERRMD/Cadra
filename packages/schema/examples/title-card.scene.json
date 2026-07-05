@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "id": "project-title-card",
+    "name": "Title Card Example",
+    "compositions": [
+      {
+        "id": "comp-title-card",
+        "name": "Main",
+        "fps": 30,
+        "durationInFrames": 90,
+        "width": 1920,
+        "height": 1080,
+        "tracks": [
+          {
+            "id": "track-title-card",
+            "name": "Title",
+            "clips": [
+              {
+                "id": "clip-title-card",
+                "startFrame": 0,
+                "durationInFrames": 90,
+                "node": {
+                  "id": "root-title-card",
+                  "kind": "group",
+                  "name": "Title Card Root",
+                  "transform": {
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1]
+                  },
+                  "visible": true,
+                  "children": [
+                    {
+                      "id": "background-plane",
+                      "kind": "mesh",
+                      "name": "Background",
+                      "transform": {
+                        "position": [0, 0, -1],
+                        "rotation": [0, 0, 0],
+                        "scale": [16, 9, 1]
+                      },
+                      "visible": true,
+                      "geometryRef": "geometry-plane",
+                      "materialRef": "material-background-navy",
+                      "children": []
+                    },
+                    {
+                      "id": "title-text",
+                      "kind": "text",
+                      "name": "Title",
+                      "transform": {
+                        "position": [0, 0, 0],
+                        "rotation": [0, 0, 0],
+                        "scale": [1, 1, 1]
+                      },
+                      "visible": true,
+                      "content": "Cadra",
+                      "fontRef": "font-inter-bold",
+                      "fontSize": 96,
+                      "color": [1, 1, 1, 1],
+                      "children": []
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

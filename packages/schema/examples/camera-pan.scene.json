@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "id": "project-camera-pan",
+    "name": "Camera Pan Example",
+    "compositions": [
+      {
+        "id": "comp-camera-pan",
+        "name": "Main",
+        "fps": 30,
+        "durationInFrames": 120,
+        "width": 1920,
+        "height": 1080,
+        "tracks": [
+          {
+            "id": "track-camera-pan",
+            "name": "Camera",
+            "clips": [
+              {
+                "id": "clip-camera-start",
+                "startFrame": 0,
+                "durationInFrames": 60,
+                "node": {
+                  "id": "camera-start",
+                  "kind": "camera",
+                  "name": "Camera (start)",
+                  "transform": {
+                    "position": [-6, 2, 8],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1]
+                  },
+                  "visible": true,
+                  "fov": 50,
+                  "near": 0.1,
+                  "far": 1000,
+                  "target": [-2, 0, 0],
+                  "children": []
+                }
+              },
+              {
+                "id": "clip-camera-end",
+                "startFrame": 60,
+                "durationInFrames": 60,
+                "node": {
+                  "id": "camera-end",
+                  "kind": "camera",
+                  "name": "Camera (end)",
+                  "transform": {
+                    "position": [6, 2, 8],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1]
+                  },
+                  "visible": true,
+                  "fov": 50,
+                  "near": 0.1,
+                  "far": 1000,
+                  "target": [2, 0, 0],
+                  "children": []
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
