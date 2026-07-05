@@ -6,10 +6,10 @@
  *
  * The scene graph data model (Project, Composition, Track, Clip, SceneNode),
  * its pure tree operations, the deterministic frame/time model (FrameContext,
- * seeded per-frame randomness, frame/time conversions), and the authoring
+ * seeded per-frame randomness, frame/time conversions), the authoring
  * primitives library (createComposition, Sequence, Series, Shape, Text,
- * Image, Camera, Light) are implemented; the timeline resolver and
- * interpolation land in later phases.
+ * Image, Camera, Light), and the timeline resolver (resolveSceneAtFrame) are
+ * implemented; interpolation lands in a later phase.
  */
 
 export const VERSION = "0.0.0";
@@ -55,3 +55,4 @@ export {
   TEXT_ANIMATABLE_PROPERTIES,
 } from "./primitives/index.js";
 export * from "./scene-graph/index.js";
+export * from "./timeline-engine/index.js";
