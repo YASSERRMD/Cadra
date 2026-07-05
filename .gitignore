@@ -29,3 +29,9 @@ pnpm-debug.log*
 .env.local
 .env.*.local
 
+# Generated JSON Schema artifact for the scene DSL: intentionally committed
+# so consumers always have a build-free source of truth, even though the
+# rest of dist/ is build output and stays ignored.
+!packages/schema/dist/
+packages/schema/dist/*
+!packages/schema/dist/scene.schema.json

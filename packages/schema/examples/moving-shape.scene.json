@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "id": "project-moving-shape",
+    "name": "Moving Shape Example",
+    "compositions": [
+      {
+        "id": "comp-moving-shape",
+        "name": "Main",
+        "fps": 30,
+        "durationInFrames": 90,
+        "width": 1920,
+        "height": 1080,
+        "tracks": [
+          {
+            "id": "track-moving-shape",
+            "name": "Shape",
+            "clips": [
+              {
+                "id": "clip-shape-left",
+                "startFrame": 0,
+                "durationInFrames": 30,
+                "node": {
+                  "id": "shape-left",
+                  "kind": "mesh",
+                  "name": "Shape (left)",
+                  "transform": {
+                    "position": [-4, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1]
+                  },
+                  "visible": true,
+                  "geometryRef": "geometry-box",
+                  "materialRef": "material-shape-gold",
+                  "children": []
+                }
+              },
+              {
+                "id": "clip-shape-center",
+                "startFrame": 30,
+                "durationInFrames": 30,
+                "node": {
+                  "id": "shape-center",
+                  "kind": "mesh",
+                  "name": "Shape (center)",
+                  "transform": {
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0.7853981633974483, 0],
+                    "scale": [1, 1, 1]
+                  },
+                  "visible": true,
+                  "geometryRef": "geometry-box",
+                  "materialRef": "material-shape-gold",
+                  "children": []
+                }
+              },
+              {
+                "id": "clip-shape-right",
+                "startFrame": 60,
+                "durationInFrames": 30,
+                "node": {
+                  "id": "shape-right",
+                  "kind": "mesh",
+                  "name": "Shape (right)",
+                  "transform": {
+                    "position": [4, 0, 0],
+                    "rotation": [0, 1.5707963267948966, 0],
+                    "scale": [1, 1, 1]
+                  },
+                  "visible": true,
+                  "geometryRef": "geometry-box",
+                  "materialRef": "material-shape-gold",
+                  "children": []
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
