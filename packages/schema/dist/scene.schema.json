@@ -1,0 +1,1021 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1,
+      "description": "The scene document schema version this document was authored against."
+    },
+    "project": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for this project."
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-readable name of this project."
+        },
+        "compositions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique identifier for this composition within the project."
+              },
+              "name": {
+                "type": "string",
+                "description": "Human-readable name of this composition."
+              },
+              "fps": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "description": "Frames per second this composition runs at."
+              },
+              "durationInFrames": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "description": "Total integer length of this composition, in frames."
+              },
+              "width": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "description": "Output width of this composition, in pixels."
+              },
+              "height": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "description": "Output height of this composition, in pixels."
+              },
+              "tracks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Unique identifier for this track within the project."
+                    },
+                    "name": {
+                      "description": "Optional human-readable label, purely for authoring and debugging.",
+                      "type": "string"
+                    },
+                    "clips": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "description": "Unique identifier for this clip within the project."
+                          },
+                          "startFrame": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991,
+                            "description": "The frame, relative to the start of its composition, this clip begins on."
+                          },
+                          "durationInFrames": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991,
+                            "description": "How many frames this clip is visible for."
+                          },
+                          "node": {
+                            "description": "The root of the scene-node subtree this clip contributes.",
+                            "$ref": "#/$defs/__schema1"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "startFrame",
+                          "durationInFrames",
+                          "node"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered clips placed on this track."
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "clips"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "The tracks of clips that populate this composition."
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "fps",
+              "durationInFrames",
+              "width",
+              "height",
+              "tracks"
+            ],
+            "additionalProperties": false
+          },
+          "description": "The named compositions that make up this project."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "compositions"
+      ],
+      "additionalProperties": false,
+      "description": "The full project this document describes."
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "project"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "__schema0": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for this scene node within the project."
+        },
+        "kind": {
+          "type": "string",
+          "const": "group",
+          "description": "Discriminant identifying this node as a group."
+        },
+        "name": {
+          "description": "Optional human-readable label, purely for authoring and debugging.",
+          "type": "string"
+        },
+        "transform": {
+          "type": "object",
+          "properties": {
+            "position": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number",
+                  "description": "The x component of the vector."
+                },
+                {
+                  "type": "number",
+                  "description": "The y component of the vector."
+                },
+                {
+                  "type": "number",
+                  "description": "The z component of the vector."
+                }
+              ],
+              "description": "World-space translation of the node."
+            },
+            "rotation": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number",
+                  "description": "The x component of the vector."
+                },
+                {
+                  "type": "number",
+                  "description": "The y component of the vector."
+                },
+                {
+                  "type": "number",
+                  "description": "The z component of the vector."
+                }
+              ],
+              "description": "Euler rotation in radians, applied in intrinsic XYZ order."
+            },
+            "scale": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number",
+                  "description": "The x component of the vector."
+                },
+                {
+                  "type": "number",
+                  "description": "The y component of the vector."
+                },
+                {
+                  "type": "number",
+                  "description": "The z component of the vector."
+                }
+              ],
+              "description": "Per-axis scale factor of the node."
+            }
+          },
+          "required": [
+            "position",
+            "rotation",
+            "scale"
+          ],
+          "additionalProperties": false,
+          "description": "The position, rotation, and scale of this node."
+        },
+        "visible": {
+          "type": "boolean",
+          "description": "Whether this node (and its subtree) should be rendered."
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "description": "Child scene nodes nested under this node."
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "transform",
+        "visible",
+        "children"
+      ],
+      "additionalProperties": false
+    },
+    "__schema1": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/__schema0"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Unique identifier for this scene node within the project."
+            },
+            "kind": {
+              "type": "string",
+              "const": "mesh",
+              "description": "Discriminant identifying this node as a mesh."
+            },
+            "name": {
+              "description": "Optional human-readable label, purely for authoring and debugging.",
+              "type": "string"
+            },
+            "transform": {
+              "type": "object",
+              "properties": {
+                "position": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "World-space translation of the node."
+                },
+                "rotation": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "Euler rotation in radians, applied in intrinsic XYZ order."
+                },
+                "scale": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "Per-axis scale factor of the node."
+                }
+              },
+              "required": [
+                "position",
+                "rotation",
+                "scale"
+              ],
+              "additionalProperties": false,
+              "description": "The position, rotation, and scale of this node."
+            },
+            "visible": {
+              "type": "boolean",
+              "description": "Whether this node (and its subtree) should be rendered."
+            },
+            "geometryRef": {
+              "type": "string",
+              "description": "Id of a geometry asset, resolved against a geometry registry by the renderer."
+            },
+            "materialRef": {
+              "type": "string",
+              "description": "Id of a material asset, resolved against a material registry by the renderer."
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "description": "Child scene nodes nested under this node."
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "transform",
+            "visible",
+            "geometryRef",
+            "materialRef",
+            "children"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Unique identifier for this scene node within the project."
+            },
+            "kind": {
+              "type": "string",
+              "const": "camera",
+              "description": "Discriminant identifying this node as a camera."
+            },
+            "name": {
+              "description": "Optional human-readable label, purely for authoring and debugging.",
+              "type": "string"
+            },
+            "transform": {
+              "type": "object",
+              "properties": {
+                "position": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "World-space translation of the node."
+                },
+                "rotation": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "Euler rotation in radians, applied in intrinsic XYZ order."
+                },
+                "scale": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "Per-axis scale factor of the node."
+                }
+              },
+              "required": [
+                "position",
+                "rotation",
+                "scale"
+              ],
+              "additionalProperties": false,
+              "description": "The position, rotation, and scale of this node."
+            },
+            "visible": {
+              "type": "boolean",
+              "description": "Whether this node (and its subtree) should be rendered."
+            },
+            "fov": {
+              "type": "number",
+              "description": "Vertical field of view, in degrees."
+            },
+            "near": {
+              "type": "number",
+              "description": "Distance to the near clipping plane."
+            },
+            "far": {
+              "type": "number",
+              "description": "Distance to the far clipping plane."
+            },
+            "target": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number",
+                  "description": "The x component of the vector."
+                },
+                {
+                  "type": "number",
+                  "description": "The y component of the vector."
+                },
+                {
+                  "type": "number",
+                  "description": "The z component of the vector."
+                }
+              ],
+              "description": "The world-space point the camera looks at."
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "description": "Child scene nodes nested under this node."
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "transform",
+            "visible",
+            "fov",
+            "near",
+            "far",
+            "target",
+            "children"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Unique identifier for this scene node within the project."
+            },
+            "kind": {
+              "type": "string",
+              "const": "light",
+              "description": "Discriminant identifying this node as a light."
+            },
+            "name": {
+              "description": "Optional human-readable label, purely for authoring and debugging.",
+              "type": "string"
+            },
+            "transform": {
+              "type": "object",
+              "properties": {
+                "position": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "World-space translation of the node."
+                },
+                "rotation": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "Euler rotation in radians, applied in intrinsic XYZ order."
+                },
+                "scale": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "Per-axis scale factor of the node."
+                }
+              },
+              "required": [
+                "position",
+                "rotation",
+                "scale"
+              ],
+              "additionalProperties": false,
+              "description": "The position, rotation, and scale of this node."
+            },
+            "visible": {
+              "type": "boolean",
+              "description": "Whether this node (and its subtree) should be rendered."
+            },
+            "lightType": {
+              "type": "string",
+              "enum": [
+                "ambient",
+                "directional",
+                "point",
+                "spot"
+              ],
+              "description": "The kind of light source this light node represents."
+            },
+            "color": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The red channel, in the inclusive range 0 to 1."
+                },
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The green channel, in the inclusive range 0 to 1."
+                },
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The blue channel, in the inclusive range 0 to 1."
+                },
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The alpha channel, in the inclusive range 0 to 1."
+                }
+              ],
+              "description": "The color this light emits."
+            },
+            "intensity": {
+              "type": "number",
+              "description": "The brightness of this light source."
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "description": "Child scene nodes nested under this node."
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "transform",
+            "visible",
+            "lightType",
+            "color",
+            "intensity",
+            "children"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Unique identifier for this scene node within the project."
+            },
+            "kind": {
+              "type": "string",
+              "const": "text",
+              "description": "Discriminant identifying this node as text."
+            },
+            "name": {
+              "description": "Optional human-readable label, purely for authoring and debugging.",
+              "type": "string"
+            },
+            "transform": {
+              "type": "object",
+              "properties": {
+                "position": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "World-space translation of the node."
+                },
+                "rotation": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "Euler rotation in radians, applied in intrinsic XYZ order."
+                },
+                "scale": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "Per-axis scale factor of the node."
+                }
+              },
+              "required": [
+                "position",
+                "rotation",
+                "scale"
+              ],
+              "additionalProperties": false,
+              "description": "The position, rotation, and scale of this node."
+            },
+            "visible": {
+              "type": "boolean",
+              "description": "Whether this node (and its subtree) should be rendered."
+            },
+            "content": {
+              "type": "string",
+              "description": "The text string to render."
+            },
+            "fontRef": {
+              "description": "Id of a registered font asset. Omitted means the renderer's default.",
+              "type": "string"
+            },
+            "fontSize": {
+              "type": "number",
+              "description": "The size to render the text at."
+            },
+            "color": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The red channel, in the inclusive range 0 to 1."
+                },
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The green channel, in the inclusive range 0 to 1."
+                },
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The blue channel, in the inclusive range 0 to 1."
+                },
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "The alpha channel, in the inclusive range 0 to 1."
+                }
+              ],
+              "description": "The color to render the text in."
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "description": "Child scene nodes nested under this node."
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "transform",
+            "visible",
+            "content",
+            "fontSize",
+            "color",
+            "children"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Unique identifier for this scene node within the project."
+            },
+            "kind": {
+              "type": "string",
+              "const": "image",
+              "description": "Discriminant identifying this node as an image."
+            },
+            "name": {
+              "description": "Optional human-readable label, purely for authoring and debugging.",
+              "type": "string"
+            },
+            "transform": {
+              "type": "object",
+              "properties": {
+                "position": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "World-space translation of the node."
+                },
+                "rotation": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "Euler rotation in radians, applied in intrinsic XYZ order."
+                },
+                "scale": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "Per-axis scale factor of the node."
+                }
+              },
+              "required": [
+                "position",
+                "rotation",
+                "scale"
+              ],
+              "additionalProperties": false,
+              "description": "The position, rotation, and scale of this node."
+            },
+            "visible": {
+              "type": "boolean",
+              "description": "Whether this node (and its subtree) should be rendered."
+            },
+            "assetRef": {
+              "type": "string",
+              "description": "Id of an image asset, resolved against an asset registry by the renderer."
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "description": "Child scene nodes nested under this node."
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "transform",
+            "visible",
+            "assetRef",
+            "children"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Unique identifier for this scene node within the project."
+            },
+            "kind": {
+              "type": "string",
+              "const": "compositionRef",
+              "description": "Discriminant identifying this node as a composition reference."
+            },
+            "name": {
+              "description": "Optional human-readable label, purely for authoring and debugging.",
+              "type": "string"
+            },
+            "transform": {
+              "type": "object",
+              "properties": {
+                "position": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "World-space translation of the node."
+                },
+                "rotation": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "Euler rotation in radians, applied in intrinsic XYZ order."
+                },
+                "scale": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "Per-axis scale factor of the node."
+                }
+              },
+              "required": [
+                "position",
+                "rotation",
+                "scale"
+              ],
+              "additionalProperties": false,
+              "description": "The position, rotation, and scale of this node."
+            },
+            "visible": {
+              "type": "boolean",
+              "description": "Whether this node (and its subtree) should be rendered."
+            },
+            "compositionId": {
+              "type": "string",
+              "description": "Id of the composition this node embeds, resolved by the timeline resolver."
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "description": "Child scene nodes nested under this node."
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "transform",
+            "visible",
+            "compositionId",
+            "children"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}
