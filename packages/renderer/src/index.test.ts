@@ -59,6 +59,14 @@ describe("@cadra/renderer Renderer-facing surface has no Three.js leakage", () =
     "renderer.ts",
     "create-renderer.ts",
     "capability-detection.ts",
+    "assets/asset-loader-orchestrator.ts",
+    "assets/audio-loader.ts",
+    "assets/font-loader.ts",
+    "assets/gltf-loader.ts",
+    "assets/image-loader.ts",
+    "assets/render-when-ready.ts",
+    "assets/types.ts",
+    "assets/video-loader.ts",
   ];
   const threeImportPattern = /from\s+["']three(\/[^"']*)?["']/;
 
