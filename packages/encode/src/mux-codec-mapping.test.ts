@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import { DEFAULT_AUDIO_CODEC_PREFERENCES } from "./audio-codec-probe.js";
 import { DEFAULT_CODEC_PREFERENCES } from "./codec-probe.js";
 import {
+  toMp4AudioCodec,
   toMp4VideoCodec,
+  toWebmAudioCodec,
   toWebmVideoCodec,
+  UnsupportedMuxAudioCodecError,
   UnsupportedMuxCodecError,
   Vp8NotSupportedInMp4Error,
 } from "./mux-codec-mapping.js";
@@ -54,5 +58,36 @@ describe("toWebmVideoCodec", () => {
 
   it("throws UnsupportedMuxCodecError for an unrecognized codec string", () => {
     expect(() => toWebmVideoCodec("opus")).toThrow(UnsupportedMuxCodecError);
+  });
+});
+
+describe("toMp4AudioCodec", () => {
+  it("maps the AAC entry from DEFAULT_AUDIO_CODEC_PREFERENCES to mp4-muxer's 'aac'", () => {
+    const aac = DEFAULT_AUDIO_CODEC_PREFERENCES.find((preference) => preference.label === "AAC");
+    expect(toMp4AudioCodec(aac!.codec)).toBe("aac");
+  });
+
+  it("maps an 'opus' codec string to mp4-muxer's 'opus'", () => {
+    expect(toMp4AudioCodec("opus")).toBe("opus");
+  });
+
+  it("throws UnsupportedMuxAudioCodecError for an unrecognized codec string", () => {
+    expect(() => toMp4AudioCodec("av01.0.08M.08")).toThrow(UnsupportedMuxAudioCodecError);
+    expect(() => toMp4AudioCodec("av01.0.08M.08")).toThrow(/av01\.0\.08M\.08/);
+  });
+});
+
+describe("toWebmAudioCodec", () => {
+  it("maps the Opus entry from DEFAULT_AUDIO_CODEC_PREFERENCES to webm-muxer's 'A_OPUS'", () => {
+    const opus = DEFAULT_AUDIO_CODEC_PREFERENCES.find((preference) => preference.label === "Opus");
+    expect(toWebmAudioCodec(opus!.codec)).toBe("A_OPUS");
+  });
+
+  it("maps a 'mp4a.40.2' (AAC) codec string to webm-muxer's 'A_AAC'", () => {
+    expect(toWebmAudioCodec("mp4a.40.2")).toBe("A_AAC");
+  });
+
+  it("throws UnsupportedMuxAudioCodecError for an unrecognized codec string", () => {
+    expect(() => toWebmAudioCodec("vp09.00.10.08")).toThrow(UnsupportedMuxAudioCodecError);
   });
 });
