@@ -113,6 +113,19 @@ export interface Transport {
   on<Name extends TransportEventName>(event: Name, handler: TransportEventHandler<Name>): void;
   /** Unsubscribes `handler` from `event`. */
   off<Name extends TransportEventName>(event: Name, handler: TransportEventHandler<Name>): void;
+  /**
+   * Cancels any in-flight scheduled tick (the same cleanup `pause()` already
+   * does) and marks this transport disposed. Idempotent: calling it again is
+   * a no-op.
+   *
+   * Every other method becomes a no-op after `dispose()` (not a throw): a
+   * host's unmount cleanup routinely fires a trailing `pause()`/`seek()` from
+   * an event handler that was already in flight when `dispose()` ran, and
+   * that caller should not have to guard each such call. `on`/`off` in
+   * particular still accept subscriptions without error, they simply never
+   * fire again, since nothing this transport does post-dispose changes state.
+   */
+  dispose(): void;
   /** Whether `play()` has been called without a matching `pause()`/end-of-playback since. */
   readonly isPlaying: boolean;
   /** The frame currently resolved and rendered. */
@@ -178,6 +191,7 @@ export function createTransport(options: TransportOptions): Transport {
   let isPlaying = false;
   let isBuffering = false;
   let hasEnded = false;
+  let isDisposed = false;
   let scheduledHandle: number | undefined;
 
   // Anchor for the elapsed-time formula: reset on every play()/seek()/
@@ -302,7 +316,7 @@ export function createTransport(options: TransportOptions): Transport {
   }
 
   function play(): void {
-    if (isPlaying) {
+    if (isDisposed || isPlaying) {
       return;
     }
     // Starting again after a prior natural end (no loop) restarts from
@@ -329,7 +343,20 @@ export function createTransport(options: TransportOptions): Transport {
     }
   }
 
+  function dispose(): void {
+    if (isDisposed) {
+      return;
+    }
+    // Same in-flight-tick cleanup pause() already does, so a disposed
+    // transport never leaves a scheduleFrame callback pending.
+    pause();
+    isDisposed = true;
+  }
+
   function seek(frame: number): void {
+    if (isDisposed) {
+      return;
+    }
     const clamped = Math.min(Math.max(Math.trunc(frame), 0), Math.max(durationInFrames - 1, 0));
     hasEnded = false;
     if (clamped !== currentFrame) {
@@ -348,6 +375,9 @@ export function createTransport(options: TransportOptions): Transport {
   }
 
   function setPlaybackRate(rate: number): void {
+    if (isDisposed) {
+      return;
+    }
     if (isPlaying) {
       // Settle whatever frame the *old* rate had already reached (rendering
       // and emitting frameChanged if it differs from what is currently
@@ -377,6 +407,7 @@ export function createTransport(options: TransportOptions): Transport {
     pause,
     seek,
     setPlaybackRate,
+    dispose,
     on(event, handler) {
       (handlers[event] as Set<typeof handler>).add(handler);
     },
