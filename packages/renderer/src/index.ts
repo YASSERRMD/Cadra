@@ -97,12 +97,6 @@ export {
   createPixelReadableRenderer,
   PixelReadableRendererNotInitializedError,
 } from "./pixel-readable-three-renderer.js";
-export type { ThreeRendererDependencies, ThreeRendererFactory } from "./three-renderer.js";
-export {
-  defaultThreeRendererDependencies,
-  RendererNotInitializedError,
-  ThreeRenderer,
-} from "./three-renderer.js";
 export type {
   NodeFactoryContext,
   OwnedResources,
@@ -124,6 +118,12 @@ export type {
   RenderSize,
   RenderTarget,
 } from "./renderer.js";
+export type { ThreeRendererDependencies, ThreeRendererFactory } from "./three-renderer.js";
+export {
+  defaultThreeRendererDependencies,
+  RendererNotInitializedError,
+  ThreeRenderer,
+} from "./three-renderer.js";
 export type {
   CreateBestAvailableRendererOptions,
   CreateWorkerFn,
