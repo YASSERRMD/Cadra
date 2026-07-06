@@ -57,6 +57,8 @@ export type {
   SceneParseSuccess,
 } from "./parse.js";
 export { parseScene } from "./parse.js";
+export type { PathSegment } from "./patch-path.js";
+export { applyPatchAtPath, InvalidPathError, parsePath, PathTraversalError } from "./patch-path.js";
 export { colorRgbaSchema, transformSchema, vector2Schema, vector3Schema } from "./primitives.js";
 export {
   cameraNodeSchema,

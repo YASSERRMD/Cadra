@@ -5,7 +5,8 @@ import { createIdentityTransform } from "@cadra/core";
 import { describe, expect, it } from "vitest";
 
 import { CURRENT_SCHEMA_VERSION } from "./envelope.js";
-import { parseScene } from "./parse.js";
+import { DIAGNOSTIC_CODES, parseScene, type SceneParseDiagnostic } from "./parse.js";
+import { applyPatchAtPath } from "./patch-path.js";
 
 const EXAMPLE_NAMES = [
   "title-card",
@@ -306,9 +307,447 @@ describe("parseScene: diagnostics include expected and suggestedFix", () => {
     if (result.success) {
       return;
     }
-    const diagnostic = result.diagnostics.find((entry) => entry.path === "project.compositions[0]");
+    // One diagnostic per offending key, named by the key's own path (not just
+    // the containing object's path), so each carries its own independently
+    // appliable `suggestedPatch`; see `unrecognizedKeysToDiagnostics` in
+    // `./parse.ts`.
+    const diagnostic = result.diagnostics.find(
+      (entry) => entry.path === "project.compositions[0].framesPerSecond",
+    );
     expect(diagnostic, JSON.stringify(result.diagnostics, null, 2)).toBeDefined();
     expect(diagnostic?.expected).toEqual(expect.stringMatching(/.+/));
     expect(diagnostic?.suggestedFix).toEqual(expect.stringMatching(/.+/));
+  });
+});
+
+/**
+ * Applies `diagnostic.suggestedPatch` (which must be present) to `document`
+ * via `applyPatchAtPath`, returning the patched document. Shared by every
+ * "applying the suggestedPatch fixes the document" test below so each test
+ * body reads as "corrupt, find, apply, re-parse, expect success" with no
+ * repeated plumbing.
+ */
+function applySuggestedPatch(document: unknown, diagnostic: SceneParseDiagnostic | undefined): unknown {
+  expect(diagnostic?.suggestedPatch, "expected this diagnostic to carry a suggestedPatch").toBeDefined();
+  const patch = diagnostic!.suggestedPatch!;
+  return applyPatchAtPath(document, patch.path, patch.op, patch.value);
+}
+
+describe("parseScene: diagnostics carry a stable code and JSON-serializable received value", () => {
+  it("tags a missing required field as MISSING_REQUIRED_FIELD with no received value", () => {
+    const document = minimalValidDocument();
+    const node = document.project.compositions[0]?.tracks[0]?.clips[0]?.node as { transform?: unknown };
+    delete node.transform;
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const diagnostic = result.diagnostics.find(
+      (entry) => entry.path === "project.compositions[0].tracks[0].clips[0].node.transform",
+    );
+    expect(diagnostic?.code).toBe(DIAGNOSTIC_CODES.MISSING_REQUIRED_FIELD);
+    // The field was absent, so there is no "actual value" to report.
+    expect(diagnostic?.received).toBeUndefined();
+  });
+
+  it("tags a wrong-type field as WRONG_TYPE with the actual received value", () => {
+    const document = minimalValidDocument();
+    const composition = document.project.compositions[0] as { fps: unknown };
+    composition.fps = "thirty";
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const diagnostic = result.diagnostics.find((entry) => entry.path === "project.compositions[0].fps");
+    expect(diagnostic?.code).toBe(DIAGNOSTIC_CODES.WRONG_TYPE);
+    expect(diagnostic?.received).toBe("thirty");
+  });
+
+  it("tags an unknown node kind as UNKNOWN_NODE_KIND", () => {
+    const document = minimalValidDocument();
+    const node = document.project.compositions[0]?.tracks[0]?.clips[0]?.node as { kind: unknown };
+    node.kind = "sprite";
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const diagnostic = result.diagnostics.find((entry) =>
+      entry.path.startsWith("project.compositions[0].tracks[0].clips[0].node"),
+    );
+    expect(diagnostic?.code).toBe(DIAGNOSTIC_CODES.UNKNOWN_NODE_KIND);
+  });
+
+  it("tags an out-of-range value as VALUE_OUT_OF_RANGE with the actual received value", () => {
+    const document = minimalValidDocument();
+    const composition = document.project.compositions[0] as { fps: unknown };
+    composition.fps = -30;
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const diagnostic = result.diagnostics.find((entry) => entry.path === "project.compositions[0].fps");
+    expect(diagnostic?.code).toBe(DIAGNOSTIC_CODES.VALUE_OUT_OF_RANGE);
+    expect(diagnostic?.received).toBe(-30);
+  });
+
+  it("tags an unrecognized field as UNRECOGNIZED_FIELD", () => {
+    const document = minimalValidDocument();
+    const composition = document.project.compositions[0] as Record<string, unknown>;
+    composition.framesPerSecond = 30;
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const diagnostic = result.diagnostics.find(
+      (entry) => entry.path === "project.compositions[0].framesPerSecond",
+    );
+    expect(diagnostic?.code).toBe(DIAGNOSTIC_CODES.UNRECOGNIZED_FIELD);
+  });
+
+  it("tags an unsupported schemaVersion as UNSUPPORTED_SCHEMA_VERSION with the actual received value", () => {
+    const document = { ...minimalValidDocument(), schemaVersion: 999 };
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    expect(result.diagnostics[0]?.code).toBe(DIAGNOSTIC_CODES.UNSUPPORTED_SCHEMA_VERSION);
+    expect(result.diagnostics[0]?.received).toBe(999);
+  });
+
+  it("tags a blank assetRef as INVALID_ASSET_REF", () => {
+    const document = minimalValidDocument();
+    const clip = document.project.compositions[0]?.tracks[0]?.clips[0] as { node: unknown };
+    clip.node = {
+      id: "image-1",
+      kind: "image",
+      transform: createIdentityTransform(),
+      visible: true,
+      assetRef: "   ",
+      children: [],
+    };
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const diagnostic = result.diagnostics.find(
+      (entry) => entry.path === "project.compositions[0].tracks[0].clips[0].node.assetRef",
+    );
+    expect(diagnostic?.code).toBe(DIAGNOSTIC_CODES.INVALID_ASSET_REF);
+  });
+
+  it("only flags a blank assetRef once the rest of the document is otherwise schema-valid", () => {
+    // A blank assetRef alongside an unrelated structural error should not
+    // also flood in a secondary INVALID_ASSET_REF diagnostic: the asset-ref
+    // walk only runs once schema validation has already succeeded.
+    const document = minimalValidDocument();
+    const composition = document.project.compositions[0] as { fps: unknown };
+    composition.fps = "not-a-number";
+    const clip = document.project.compositions[0]?.tracks[0]?.clips[0] as { node: unknown };
+    clip.node = {
+      id: "image-1",
+      kind: "image",
+      transform: createIdentityTransform(),
+      visible: true,
+      assetRef: "",
+      children: [],
+    };
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    expect(result.diagnostics.some((entry) => entry.code === DIAGNOSTIC_CODES.INVALID_ASSET_REF)).toBe(
+      false,
+    );
+  });
+
+  it("does not flag an absent optional fontRef as INVALID_ASSET_REF", () => {
+    const document = minimalValidDocument();
+    const clip = document.project.compositions[0]?.tracks[0]?.clips[0] as { node: unknown };
+    clip.node = {
+      id: "text-1",
+      kind: "text",
+      transform: createIdentityTransform(),
+      visible: true,
+      content: "hello",
+      fontSize: 16,
+      color: [1, 1, 1, 1],
+      children: [],
+      // fontRef omitted entirely.
+    };
+
+    const result = parseScene(document);
+    expect(result.success).toBe(true);
+  });
+});
+
+/**
+ * End-to-end coverage for task 6: for every common error class this phase
+ * gives a `suggestedPatch`, deliberately produce that error, apply the
+ * resulting patch via `applyPatchAtPath`, and assert the patched document
+ * now passes `parseScene`. Each of these is the exact "corrupt -> patch ->
+ * re-validate" loop `repair_scene` automates end to end.
+ */
+describe("parseScene: suggestedPatch fixes the document when applied", () => {
+  it("MISSING_REQUIRED_FIELD (a numeric field with a known safe default): adding the patch's value passes validation", () => {
+    const document = minimalValidDocument();
+    const composition = document.project.compositions[0] as { fps?: unknown };
+    delete composition.fps;
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const diagnostic = result.diagnostics.find((entry) => entry.path === "project.compositions[0].fps");
+    expect(diagnostic?.code).toBe(DIAGNOSTIC_CODES.MISSING_REQUIRED_FIELD);
+    expect(diagnostic?.suggestedPatch).toEqual({
+      op: "add",
+      path: "project.compositions[0].fps",
+      value: 30,
+    });
+
+    const patched = applySuggestedPatch(document, diagnostic);
+    expect(parseScene(patched).success).toBe(true);
+  });
+
+  it("VALUE_OUT_OF_RANGE (too_small, a negative fps): clamping to the patch's value passes validation", () => {
+    const document = minimalValidDocument();
+    const composition = document.project.compositions[0] as { fps: unknown };
+    composition.fps = -30;
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const diagnostic = result.diagnostics.find((entry) => entry.path === "project.compositions[0].fps");
+    expect(diagnostic?.code).toBe(DIAGNOSTIC_CODES.VALUE_OUT_OF_RANGE);
+    // fps must be positive (min exclusive at 0), so the clamp lands at 1.
+    expect(diagnostic?.suggestedPatch).toEqual({
+      op: "replace",
+      path: "project.compositions[0].fps",
+      value: 1,
+    });
+
+    const patched = applySuggestedPatch(document, diagnostic);
+    expect(parseScene(patched).success).toBe(true);
+  });
+
+  it("VALUE_OUT_OF_RANGE (too_big, an out-of-range color channel): clamping to the patch's value passes validation", () => {
+    const document = minimalValidDocument();
+    const clip = document.project.compositions[0]?.tracks[0]?.clips[0] as { node: unknown };
+    clip.node = {
+      id: "light-1",
+      kind: "light",
+      transform: createIdentityTransform(),
+      visible: true,
+      lightType: "point",
+      color: [2, 1, 1, 1],
+      intensity: 1,
+      children: [],
+    };
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const diagnostic = result.diagnostics.find((entry) =>
+      entry.path.endsWith("color[0]"),
+    );
+    expect(diagnostic?.code).toBe(DIAGNOSTIC_CODES.VALUE_OUT_OF_RANGE);
+    expect(diagnostic?.suggestedPatch?.value).toBe(1);
+
+    const patched = applySuggestedPatch(document, diagnostic);
+    expect(parseScene(patched).success).toBe(true);
+  });
+
+  it("UNRECOGNIZED_FIELD (a typo'd field name): removing it via the patch passes validation", () => {
+    const document = minimalValidDocument();
+    const composition = document.project.compositions[0] as Record<string, unknown>;
+    composition.framesPerSecond = 30;
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const diagnostic = result.diagnostics.find(
+      (entry) => entry.path === "project.compositions[0].framesPerSecond",
+    );
+    expect(diagnostic?.code).toBe(DIAGNOSTIC_CODES.UNRECOGNIZED_FIELD);
+    expect(diagnostic?.suggestedPatch).toEqual({
+      op: "remove",
+      path: "project.compositions[0].framesPerSecond",
+    });
+
+    const patched = applySuggestedPatch(document, diagnostic);
+    expect(parseScene(patched).success).toBe(true);
+  });
+
+  it("INVALID_ASSET_REF (whitespace-padded but otherwise real ref): trimming via the patch passes validation", () => {
+    const document = minimalValidDocument();
+    const clip = document.project.compositions[0]?.tracks[0]?.clips[0] as { node: unknown };
+    clip.node = {
+      id: "image-1",
+      kind: "image",
+      transform: createIdentityTransform(),
+      visible: true,
+      assetRef: "  cadra-asset://abc123  ",
+      children: [],
+    };
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const diagnostic = result.diagnostics.find(
+      (entry) => entry.path === "project.compositions[0].tracks[0].clips[0].node.assetRef",
+    );
+    expect(diagnostic?.code).toBe(DIAGNOSTIC_CODES.INVALID_ASSET_REF);
+    expect(diagnostic?.suggestedPatch).toEqual({
+      op: "replace",
+      path: "project.compositions[0].tracks[0].clips[0].node.assetRef",
+      value: "cadra-asset://abc123",
+    });
+
+    const patched = applySuggestedPatch(document, diagnostic);
+    expect(parseScene(patched).success).toBe(true);
+  });
+});
+
+/**
+ * The flip side of the above: error classes that are genuinely ambiguous or
+ * unfixable with a single safe patch must leave `suggestedPatch` undefined,
+ * not fabricate a guess. See `deriveSuggestedPatch` in `./parse.ts` for the
+ * reasoning behind each of these.
+ */
+describe("parseScene: genuinely unfixable/ambiguous errors are left unpatched", () => {
+  it("UNKNOWN_NODE_KIND: no suggestedPatch (guessing a replacement kind is not safe)", () => {
+    const document = minimalValidDocument();
+    const node = document.project.compositions[0]?.tracks[0]?.clips[0]?.node as { kind: unknown };
+    node.kind = "sprite";
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const diagnostic = result.diagnostics.find(
+      (entry) => entry.code === DIAGNOSTIC_CODES.UNKNOWN_NODE_KIND,
+    );
+    expect(diagnostic).toBeDefined();
+    expect(diagnostic?.suggestedPatch).toBeUndefined();
+  });
+
+  it("INVALID_ENUM_VALUE (bad lightType): no suggestedPatch (ambiguous which of several values was meant)", () => {
+    const document = minimalValidDocument();
+    const clip = document.project.compositions[0]?.tracks[0]?.clips[0] as { node: unknown };
+    clip.node = {
+      id: "light-1",
+      kind: "light",
+      transform: createIdentityTransform(),
+      visible: true,
+      lightType: "neon",
+      color: [1, 1, 1, 1],
+      intensity: 1,
+      children: [],
+    };
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const diagnostic = result.diagnostics.find(
+      (entry) => entry.path === "project.compositions[0].tracks[0].clips[0].node.lightType",
+    );
+    expect(diagnostic?.code).toBe(DIAGNOSTIC_CODES.INVALID_ENUM_VALUE);
+    expect(diagnostic?.suggestedPatch).toBeUndefined();
+  });
+
+  it("WRONG_TYPE (a present but wrong-type value): no suggestedPatch (ambiguous what value was actually meant)", () => {
+    const document = minimalValidDocument();
+    const composition = document.project.compositions[0] as { fps: unknown };
+    composition.fps = "thirty";
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const diagnostic = result.diagnostics.find((entry) => entry.path === "project.compositions[0].fps");
+    expect(diagnostic?.code).toBe(DIAGNOSTIC_CODES.WRONG_TYPE);
+    expect(diagnostic?.suggestedPatch).toBeUndefined();
+  });
+
+  it("MISSING_REQUIRED_FIELD with no known safe default (a missing id): no suggestedPatch", () => {
+    const document = minimalValidDocument();
+    const node = document.project.compositions[0]?.tracks[0]?.clips[0]?.node as { id?: unknown };
+    delete node.id;
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const diagnostic = result.diagnostics.find(
+      (entry) => entry.path === "project.compositions[0].tracks[0].clips[0].node.id",
+    );
+    expect(diagnostic?.code).toBe(DIAGNOSTIC_CODES.MISSING_REQUIRED_FIELD);
+    expect(diagnostic?.suggestedPatch).toBeUndefined();
+  });
+
+  it("INVALID_ASSET_REF (empty string, nothing to trim): no suggestedPatch (no way to know which asset was meant)", () => {
+    const document = minimalValidDocument();
+    const clip = document.project.compositions[0]?.tracks[0]?.clips[0] as { node: unknown };
+    clip.node = {
+      id: "image-1",
+      kind: "image",
+      transform: createIdentityTransform(),
+      visible: true,
+      assetRef: "",
+      children: [],
+    };
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const diagnostic = result.diagnostics.find(
+      (entry) => entry.code === DIAGNOSTIC_CODES.INVALID_ASSET_REF,
+    );
+    expect(diagnostic).toBeDefined();
+    expect(diagnostic?.suggestedPatch).toBeUndefined();
+  });
+
+  it("UNSUPPORTED_SCHEMA_VERSION: no suggestedPatch (setting the number alone without migrating would silently corrupt semantics)", () => {
+    const document = { ...minimalValidDocument(), schemaVersion: 999 };
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    expect(result.diagnostics[0]?.code).toBe(DIAGNOSTIC_CODES.UNSUPPORTED_SCHEMA_VERSION);
+    expect(result.diagnostics[0]?.suggestedPatch).toBeUndefined();
   });
 });
