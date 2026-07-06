@@ -129,8 +129,9 @@ export function mountPreview(container: HTMLElement, options: MountPreviewOption
   // repeated seeks collapse to the last one, matching how a user rapidly
   // dragging a scrubber before the renderer is ready only cares about where
   // they finally let go.
-  const pendingActions: Array<{ kind: "seek"; frame: number } | { kind: "play" } | { kind: "pause" }> =
-    [];
+  const pendingActions: Array<
+    { kind: "seek"; frame: number } | { kind: "play" } | { kind: "pause" }
+  > = [];
   let pendingFrameForGetFrame = 0;
 
   // --- DOM construction ---

@@ -32,7 +32,11 @@ export type { FitSize } from "./preview/aspect-fit.js";
 export { computeAspectFitSize } from "./preview/aspect-fit.js";
 export type { MountPreviewOptions, PreviewHandle } from "./preview/mount-preview.js";
 export { mountPreview } from "./preview/mount-preview.js";
-export type { ObservedSize, ObserveResizeFn, UnobserveResizeFn } from "./preview/resize-observation.js";
+export type {
+  ObservedSize,
+  ObserveResizeFn,
+  UnobserveResizeFn,
+} from "./preview/resize-observation.js";
 export { observeResizeWithResizeObserver } from "./preview/resize-observation.js";
 export type { ScrubberPointerPosition } from "./preview/scrubber-math.js";
 export { pointerPositionToFrame } from "./preview/scrubber-math.js";

@@ -7,10 +7,7 @@ describe("computeAspectFitSize", () => {
     // Composition 4:3 (ratio 1.333), container 21:9 (2100x900, ratio 2.333):
     // container is relatively much wider than the composition, so height
     // binds to the container's full height and width shrinks.
-    const size = computeAspectFitSize(
-      { width: 2100, height: 900 },
-      { width: 800, height: 600 },
-    );
+    const size = computeAspectFitSize({ width: 2100, height: 900 }, { width: 800, height: 600 });
     expect(size.height).toBe(900);
     expect(size.width).toBeCloseTo(1200, 5); // 900 * (800/600) = 1200
   });
@@ -19,10 +16,7 @@ describe("computeAspectFitSize", () => {
     // Composition 16:9 (1920x1080, ratio 1.778), container 4:3 (800x600,
     // ratio 1.333): container is relatively narrower, so width binds to the
     // container's full width and height shrinks below the container's.
-    const size = computeAspectFitSize(
-      { width: 800, height: 600 },
-      { width: 1920, height: 1080 },
-    );
+    const size = computeAspectFitSize({ width: 800, height: 600 }, { width: 1920, height: 1080 });
     expect(size.width).toBe(800);
     expect(size.height).toBeCloseTo(450, 5); // 800 / (1920/1080) = 450
   });

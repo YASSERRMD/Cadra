@@ -60,8 +60,11 @@ function createFakeRenderer(): Renderer & {
     resize: vi.fn((_size: RenderSize) => undefined),
     dispose: vi.fn(() => undefined),
     backend: "webgl2",
-    capabilities: { backend: "webgl2", isFallback: true, maxTextureSize: 4096 } as
-      RendererCapabilities,
+    capabilities: {
+      backend: "webgl2",
+      isFallback: true,
+      maxTextureSize: 4096,
+    } as RendererCapabilities,
   };
 }
 
@@ -330,7 +333,9 @@ describe("mountPreview: step back/forward controls", () => {
   });
 
   it("the step-forward button moves exactly one frame forward", () => {
-    const stepForward = container.querySelector(".cadra-preview__step-forward") as HTMLButtonElement;
+    const stepForward = container.querySelector(
+      ".cadra-preview__step-forward",
+    ) as HTMLButtonElement;
     stepForward.click();
     expect(handle.getFrame()).toBe(11);
   });
@@ -342,7 +347,9 @@ describe("mountPreview: step back/forward controls", () => {
   });
 
   it("clicking step-forward repeatedly advances one frame per click", () => {
-    const stepForward = container.querySelector(".cadra-preview__step-forward") as HTMLButtonElement;
+    const stepForward = container.querySelector(
+      ".cadra-preview__step-forward",
+    ) as HTMLButtonElement;
     stepForward.click();
     stepForward.click();
     stepForward.click();

@@ -54,8 +54,11 @@ function createFakeRenderer(): Renderer & {
     resize: vi.fn((_size: RenderSize) => undefined),
     dispose: vi.fn(() => undefined),
     backend: "webgl2",
-    capabilities: { backend: "webgl2", isFallback: true, maxTextureSize: 4096 } as
-      RendererCapabilities,
+    capabilities: {
+      backend: "webgl2",
+      isFallback: true,
+      maxTextureSize: 4096,
+    } as RendererCapabilities,
   };
 }
 
@@ -97,7 +100,11 @@ function createFakeScheduler(): {
 }
 
 /** A fake `now()`: starts at `initial`, settable directly so tests control elapsed time exactly. */
-function createFakeClock(initial = 0): { now: NowFn; set: (value: number) => void; advance: (deltaMs: number) => void } {
+function createFakeClock(initial = 0): {
+  now: NowFn;
+  set: (value: number) => void;
+  advance: (deltaMs: number) => void;
+} {
   let current = initial;
   return {
     now: () => current,
@@ -114,9 +121,9 @@ describe("createTransport: construction", () => {
   it("throws CompositionNotFoundForTransportError for an unknown compositionId", () => {
     const project = buildProject();
     const renderer = createFakeRenderer();
-    expect(() =>
-      createTransport({ project, compositionId: "does-not-exist", renderer }),
-    ).toThrow(CompositionNotFoundForTransportError);
+    expect(() => createTransport({ project, compositionId: "does-not-exist", renderer })).toThrow(
+      CompositionNotFoundForTransportError,
+    );
   });
 
   it("exposes fps and durationInFrames read from the composition", () => {
