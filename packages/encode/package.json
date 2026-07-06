@@ -25,7 +25,9 @@
   "dependencies": {
     "@cadra/core": "workspace:*",
     "@cadra/headless": "workspace:*",
-    "@cadra/renderer": "workspace:*"
+    "@cadra/renderer": "workspace:*",
+    "mp4-muxer": "^5.2.2",
+    "webm-muxer": "^5.1.4"
   },
   "devDependencies": {
     "typescript": "^5.7.3",
