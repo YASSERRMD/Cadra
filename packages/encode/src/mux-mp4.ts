@@ -1,8 +1,10 @@
 import { ArrayBufferTarget, Muxer as Mp4Muxer, StreamTarget as Mp4StreamTarget } from "mp4-muxer";
 
+import type { EncodedAudioChunkResult } from "./encode-audio.js";
 import type { EncodedChunkResult } from "./encode-frames.js";
-import { extractRawChunkBytes } from "./mux-chunk-bytes.js";
-import { toMp4VideoCodec } from "./mux-codec-mapping.js";
+import { mergeVideoAndAudioChunks } from "./mux-audio-video-merge.js";
+import { extractRawAudioChunkBytes, extractRawChunkBytes } from "./mux-chunk-bytes.js";
+import { toMp4AudioCodec, toMp4VideoCodec } from "./mux-codec-mapping.js";
 import type { NodeWritableLike, WebWritableStreamLike } from "./mux-stream-target.js";
 import { toSequentialOnData } from "./mux-stream-target.js";
 
@@ -22,22 +24,69 @@ export interface MuxMp4Options {
 }
 
 /**
- * Consumes `chunks` (Phase 20's `encodeFrames` output) into `muxer` in
- * arrival order, then finalizes. Shared by every `muxToMp4*` entry point
- * below so the actual chunk-feeding loop has exactly one implementation.
+ * Describes an optional audio track to mux alongside the video track, i.e.
+ * Phase 22's `encodeAudio` output. Omitted entirely for a composition with
+ * no audio (see this phase's own spec: `resolveAudioMixdown` already
+ * returns an empty `segments` array for a composition with no
+ * `audioTracks`, and a caller detecting that should skip audio
+ * encoding/muxing altogether rather than pass a track with zero chunks
+ * here), so every `muxToMp4*` function's video-only behavior (and call
+ * signature, for every existing positional argument) is entirely unchanged
+ * when this parameter is omitted.
+ */
+export interface MuxMp4AudioTrackOptions {
+  /** The encoded audio chunk stream, i.e. `encodeAudio`'s output. */
+  chunks: AsyncGenerator<EncodedAudioChunkResult>;
+  /** WebCodecs codec string from the first chunk's `metadata.decoderConfig.codec` (mirrors `firstChunkCodec`'s video-side role). */
+  codec: string;
+  /** Number of audio channels; must match what `encodeAudio`/`renderAudioMixdown` were configured with. */
+  numberOfChannels: number;
+  /** Sample rate in Hz; must match what `encodeAudio`/`renderAudioMixdown` were configured with. */
+  sampleRate: number;
+}
+
+/**
+ * Consumes `chunks` (Phase 20's `encodeFrames` output) and, when `audio` is
+ * given, Phase 22's `encodeAudio` output too, into `muxer`, then finalizes.
+ * Shared by every `muxToMp4*` entry point below so the actual chunk-feeding
+ * loop has exactly one implementation.
  *
- * Uses `addVideoChunkRaw` rather than `addVideoChunk`: see
- * `mux-chunk-bytes.ts`'s own doc for why (in short, `addVideoChunk`
- * requires a real `instanceof EncodedVideoChunk`, which only a genuine
+ * Uses `addVideoChunkRaw`/`addAudioChunkRaw` rather than `addVideoChunk`/
+ * `addAudioChunk`: see `mux-chunk-bytes.ts`'s own doc for why (in short,
+ * `addVideoChunk`/`addAudioChunk` require a real `instanceof
+ * EncodedVideoChunk`/`EncodedAudioChunk`, which only a genuine
  * WebCodecs-capable environment provides).
+ *
+ * When `audio` is provided, both streams are consumed concurrently via
+ * `mergeVideoAndAudioChunks` rather than draining `chunks` fully before
+ * starting on `audio.chunks` (or vice versa): see that function's own doc
+ * for why interleaving call order does not matter to either muxer, only
+ * within-track ordering does.
  */
 async function feedChunksIntoMuxer(
   muxer: Mp4Muxer<ArrayBufferTarget | Mp4StreamTarget>,
   chunks: AsyncGenerator<EncodedChunkResult>,
+  audio?: MuxMp4AudioTrackOptions,
 ): Promise<void> {
-  for await (const { frame, chunk, metadata } of chunks) {
-    const raw = extractRawChunkBytes(chunk, frame);
-    muxer.addVideoChunkRaw(raw.data, raw.type, raw.timestamp, raw.duration, metadata);
+  if (audio === undefined) {
+    for await (const { frame, chunk, metadata } of chunks) {
+      const raw = extractRawChunkBytes(chunk, frame);
+      muxer.addVideoChunkRaw(raw.data, raw.type, raw.timestamp, raw.duration, metadata);
+    }
+    muxer.finalize();
+    return;
+  }
+
+  for await (const merged of mergeVideoAndAudioChunks(chunks, audio.chunks)) {
+    if (merged.kind === "video") {
+      const { frame, chunk, metadata } = merged.result;
+      const raw = extractRawChunkBytes(chunk, frame);
+      muxer.addVideoChunkRaw(raw.data, raw.type, raw.timestamp, raw.duration, metadata);
+    } else {
+      const { chunkIndex, chunk, metadata } = merged.result;
+      const raw = extractRawAudioChunkBytes(chunk, chunkIndex);
+      muxer.addAudioChunkRaw(raw.data, raw.type, raw.timestamp, raw.duration, metadata);
+    }
   }
   muxer.finalize();
 }
@@ -55,11 +104,16 @@ async function feedChunksIntoMuxer(
  * function exists separately for callers that want the raw bytes (e.g. to
  * write to a file themselves, or hand to another API expecting an
  * `ArrayBuffer` directly).
+ *
+ * `audio` is optional and defaults to omitted (video-only output): see
+ * `MuxMp4AudioTrackOptions`'s own doc for why a silent composition should
+ * omit it entirely rather than pass a track with zero chunks.
  */
 export async function muxToMp4Buffer(
   chunks: AsyncGenerator<EncodedChunkResult>,
   options: MuxMp4Options,
   firstChunkCodec: string,
+  audio?: MuxMp4AudioTrackOptions,
 ): Promise<ArrayBuffer> {
   const target = new ArrayBufferTarget();
   const muxer = new Mp4Muxer({
@@ -71,9 +125,16 @@ export async function muxToMp4Buffer(
       height: options.height,
       frameRate: options.fps,
     },
+    ...(audio !== undefined && {
+      audio: {
+        codec: toMp4AudioCodec(audio.codec),
+        numberOfChannels: audio.numberOfChannels,
+        sampleRate: audio.sampleRate,
+      },
+    }),
   });
 
-  await feedChunksIntoMuxer(muxer, chunks);
+  await feedChunksIntoMuxer(muxer, chunks, audio);
   return target.buffer;
 }
 
@@ -81,14 +142,16 @@ export async function muxToMp4Buffer(
  * Muxes `chunks` into an MP4 file and returns it as a `Blob`
  * (`video/mp4`), ready to be wrapped in `URL.createObjectURL` for a browser
  * download link or `<video>` source. See `muxToMp4Buffer`'s doc for why
- * `fastStart: 'in-memory'` is used unconditionally on this path.
+ * `fastStart: 'in-memory'` is used unconditionally on this path, and for
+ * `audio`'s optionality.
  */
 export async function muxToMp4Blob(
   chunks: AsyncGenerator<EncodedChunkResult>,
   options: MuxMp4Options,
   firstChunkCodec: string,
+  audio?: MuxMp4AudioTrackOptions,
 ): Promise<Blob> {
-  const buffer = await muxToMp4Buffer(chunks, options, firstChunkCodec);
+  const buffer = await muxToMp4Buffer(chunks, options, firstChunkCodec, audio);
   return new Blob([buffer], { type: "video/mp4" });
 }
 
@@ -112,12 +175,16 @@ export async function muxToMp4Blob(
  * see this module's own top-level doc and the phase's spec for why `false`
  * (regular MP4, moov at the end, worse playback-before-full-download
  * behavior) is not used here instead.
+ *
+ * `audio` is optional; see `muxToMp4Buffer`'s doc for its optionality
+ * rationale.
  */
 export async function muxToMp4Stream(
   chunks: AsyncGenerator<EncodedChunkResult>,
   options: MuxMp4Options,
   firstChunkCodec: string,
   destination: NodeWritableLike | WebWritableStreamLike,
+  audio?: MuxMp4AudioTrackOptions,
 ): Promise<void> {
   const target = new Mp4StreamTarget({
     onData: toSequentialOnData(destination),
@@ -131,7 +198,14 @@ export async function muxToMp4Stream(
       height: options.height,
       frameRate: options.fps,
     },
+    ...(audio !== undefined && {
+      audio: {
+        codec: toMp4AudioCodec(audio.codec),
+        numberOfChannels: audio.numberOfChannels,
+        sampleRate: audio.sampleRate,
+      },
+    }),
   });
 
-  await feedChunksIntoMuxer(muxer, chunks);
+  await feedChunksIntoMuxer(muxer, chunks, audio);
 }
