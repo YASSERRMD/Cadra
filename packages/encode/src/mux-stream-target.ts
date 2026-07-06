@@ -48,14 +48,42 @@ export class NonSequentialMuxWriteError extends Error {
 }
 
 /**
- * Builds an `onData(data, position)` callback (mp4-muxer's/webm-muxer's
- * `StreamTarget` constructor option) that forwards each `data` chunk into
- * `destination` in the order received, for either a Node `Writable`-like
- * object (`.write(chunk)`, fire-and-forget from this adapter's perspective
- * since mp4-muxer/webm-muxer do not await `onData`'s return value either) or
- * a web `WritableStream`-like object (via a single `getWriter()` writer,
- * reused across the whole muxing session so writes stay ordered and the
- * stream is not locked/unlocked repeatedly).
+ * `toSequentialOnData`'s return value: the `onData` callback itself, plus a
+ * `close` to call once muxing is completely finished (after the muxer's own
+ * `finalize()`).
+ */
+export interface SequentialOnDataTarget {
+  /** Forwards one chunk of muxer output into the destination, in call order. */
+  onData: (data: Uint8Array, position: number) => void;
+  /**
+   * Finalizes the destination once every chunk has been written, i.e. after
+   * the muxer's own `finalize()` call has returned. For a
+   * `WebWritableStreamLike` destination, this calls the held writer's own
+   * `close()` exactly once, releasing the writer lock and signaling
+   * completion to whatever is reading the other end of that
+   * `WritableStream` (this package's own headless-server browser-side
+   * bridge, `@cadra/encode`'s `browser-headless-render-entry.ts`, awaits
+   * exactly this `close()` call before reporting the render complete to its
+   * Node-side caller). For a `NodeWritableLike` destination, this is a
+   * deliberate no-op: `NodeWritableLike`'s structural type carries no
+   * `end`/`close` method at all (see its own doc for why), so a Node
+   * `Writable` destination's lifecycle (calling `.end()` on it once muxing
+   * finishes) remains the caller's own responsibility, exactly as before
+   * this function existed.
+   */
+  close: () => Promise<void>;
+}
+
+/**
+ * Builds a `SequentialOnDataTarget` (an `onData(data, position)` callback,
+ * mp4-muxer's/webm-muxer's `StreamTarget` constructor option, plus a
+ * matching `close`) that forwards each `data` chunk into `destination` in
+ * the order received, for either a Node `Writable`-like object
+ * (`.write(chunk)`, fire-and-forget from this adapter's perspective since
+ * mp4-muxer/webm-muxer do not await `onData`'s return value either) or a web
+ * `WritableStream`-like object (via a single `getWriter()` writer, reused
+ * across the whole muxing session so writes stay ordered and the stream is
+ * not locked/unlocked repeatedly).
  *
  * Asserts strictly sequential, contiguous `position` values (each call's
  * `position` must equal the running total of bytes written so far): both
@@ -68,29 +96,36 @@ export class NonSequentialMuxWriteError extends Error {
  */
 export function toSequentialOnData(
   destination: NodeWritableLike | WebWritableStreamLike,
-): (data: Uint8Array, position: number) => void {
+): SequentialOnDataTarget {
   let expectedPosition = 0;
 
   if (isWebWritableStreamLike(destination)) {
     const writer = destination.getWriter();
-    return (data, position) => {
+    return {
+      onData: (data, position) => {
+        if (position !== expectedPosition) {
+          throw new NonSequentialMuxWriteError(position, expectedPosition);
+        }
+        expectedPosition += data.byteLength;
+        // Not awaited: onData's own contract (both muxers) is synchronous
+        // and fire-and-forget. The writer's internal queue preserves write
+        // order across overlapping unawaited writes, matching how a real
+        // FileSystemWritableFileStream-backed StreamTarget usage would
+        // behave.
+        void writer.write(data);
+      },
+      close: () => writer.close(),
+    };
+  }
+
+  return {
+    onData: (data, position) => {
       if (position !== expectedPosition) {
         throw new NonSequentialMuxWriteError(position, expectedPosition);
       }
       expectedPosition += data.byteLength;
-      // Not awaited: onData's own contract (both muxers) is synchronous and
-      // fire-and-forget. The writer's internal queue preserves write order
-      // across overlapping unawaited writes, matching how a real
-      // FileSystemWritableFileStream-backed StreamTarget usage would behave.
-      void writer.write(data);
-    };
-  }
-
-  return (data, position) => {
-    if (position !== expectedPosition) {
-      throw new NonSequentialMuxWriteError(position, expectedPosition);
-    }
-    expectedPosition += data.byteLength;
-    destination.write(data);
+      destination.write(data);
+    },
+    close: () => Promise.resolve(),
   };
 }
