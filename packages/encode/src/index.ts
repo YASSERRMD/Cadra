@@ -23,9 +23,17 @@
  * `captureFrames`'s ownership contract) and flushes/closes the encoder on
  * completion or early termination.
  *
- * Muxing the encoded chunks into a container (e.g. an MP4/WebM file) is a
- * later phase's job, not this one's: this module's scope ends at "encoded
- * chunks, in order, with the metadata needed to mux them."
+ * `muxToMp4Blob`/`muxToMp4Buffer`/`muxToMp4Stream` and `muxToWebmBlob`/
+ * `muxToWebmBuffer`/`muxToWebmStream` are the third stage: given
+ * `encodeFrames`'s `EncodedChunkResult` stream, they multiplex it into a
+ * standard MP4 (via `mp4-muxer`) or WebM (via `webm-muxer`) container,
+ * either fully in memory (`*Buffer`/`*Blob`, for a browser download link or
+ * an `ArrayBuffer` a caller wants directly) or written incrementally to a
+ * Node `Writable`/spec `WritableStream` (`*Stream`, for `@cadra/headless`'s
+ * server-side rendering path). `readMp4MovieHeader`/`readWebmSegmentInfo`
+ * parse a produced file's own container-level duration/timescale metadata
+ * back out, for validating muxer output against what was fed into it
+ * without needing a real media player available.
  */
 
 export const VERSION = "0.0.0";
@@ -56,6 +64,29 @@ export {
   encodeFrames,
   WebCodecsUnavailableForEncodingError,
 } from "./encode-frames.js";
+export type { Mp4VideoCodec, WebmVideoCodec } from "./mux-codec-mapping.js";
+export {
+  toMp4VideoCodec,
+  toWebmVideoCodec,
+  UnsupportedMuxCodecError,
+  Vp8NotSupportedInMp4Error,
+} from "./mux-codec-mapping.js";
+export type { MuxMp4Options } from "./mux-mp4.js";
+export { muxToMp4Blob, muxToMp4Buffer, muxToMp4Stream } from "./mux-mp4.js";
+export type { NodeWritableLike, WebWritableStreamLike } from "./mux-stream-target.js";
+export { NonSequentialMuxWriteError, toSequentialOnData } from "./mux-stream-target.js";
+export {
+  expectedDurationSeconds,
+  expectedMp4DurationTicks,
+  expectedWebmDurationTicks,
+  WEBM_TIMESTAMP_SCALE_NANOSECONDS,
+} from "./mux-timescale.js";
+export type { Mp4MovieHeader } from "./mux-validate-mp4.js";
+export { Mp4ParseError, readMp4MovieHeader } from "./mux-validate-mp4.js";
+export type { WebmSegmentInfo } from "./mux-validate-webm.js";
+export { readWebmSegmentInfo, WebmParseError } from "./mux-validate-webm.js";
+export type { MuxWebmOptions } from "./mux-webm.js";
+export { muxToWebmBlob, muxToWebmBuffer, muxToWebmStream } from "./mux-webm.js";
 export type { IsConfigSupportedFn, VideoEncoderConstructor } from "./video-encoder-factory.js";
 export {
   getGlobalIsConfigSupported,
