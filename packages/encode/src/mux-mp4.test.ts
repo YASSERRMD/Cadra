@@ -169,7 +169,10 @@ describe("muxToMp4Blob", () => {
 
 describe("muxToMp4Stream", () => {
   /** A fake `NodeWritableLike` that concatenates every written chunk into one buffer on demand. */
-  function createCollectingWritable(): { destination: NodeWritableLike; toUint8Array: () => Uint8Array } {
+  function createCollectingWritable(): {
+    destination: NodeWritableLike;
+    toUint8Array: () => Uint8Array;
+  } {
     const chunks: Uint8Array[] = [];
     return {
       destination: {

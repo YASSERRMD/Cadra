@@ -92,3 +92,33 @@ export function expectedWebmDurationTicks(
       timestampScaleNanoseconds,
   );
 }
+
+/**
+ * webm-muxer's own `Segment.Info.Duration` is, by that library's own
+ * implementation (not a Matroska spec requirement, and not something this
+ * package's `muxToWebmBuffer`/`muxToWebmStream` can influence through any
+ * documented option), tracked as "the highest video chunk timestamp seen so
+ * far, converted to milliseconds," with no addition for that last chunk's
+ * own duration. Concretely: `floor(lastChunk.timestamp / 1000)`, where
+ * `timestamp` is in the WebCodecs-standard whole microseconds this
+ * codebase's chunks always carry (see `capture-timestamp.ts`).
+ *
+ * This makes webm-muxer's `Duration` intrinsically one frame-duration
+ * short of `expectedWebmDurationTicks(durationInFrames, fps)` (the
+ * spec-conformant, "full presentation span including the last frame's own
+ * extent" value): the last frame, at index `durationInFrames - 1`, starts
+ * at `(durationInFrames - 1) / fps` seconds but is never credited with the
+ * further `1 / fps` seconds it itself spans. `mux-webm.ts`'s own doc
+ * documents this as a known limitation of the underlying library (distinct
+ * from, and in addition to, WebM having no faststart equivalent); this
+ * function exists so a test (or any caller who needs to predict
+ * webm-muxer's literal output rather than the spec-conformant ideal) has an
+ * exact, single source of truth for it, rather than an approximation that
+ * could disagree by a rounding-direction difference.
+ */
+export function expectedWebmMuxerDurationTicksFromLastChunkTimestamp(
+  lastChunkTimestampMicroseconds: number,
+): number {
+  const MICROSECONDS_PER_MILLISECOND = 1000;
+  return Math.floor(lastChunkTimestampMicroseconds / MICROSECONDS_PER_MILLISECOND);
+}

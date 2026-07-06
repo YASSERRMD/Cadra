@@ -81,6 +81,7 @@ export {
   expectedDurationSeconds,
   expectedMp4DurationTicks,
   expectedWebmDurationTicks,
+  expectedWebmMuxerDurationTicksFromLastChunkTimestamp,
   WEBM_TIMESTAMP_SCALE_NANOSECONDS,
 } from "./mux-timescale.js";
 export type { Mp4MovieHeader } from "./mux-validate-mp4.js";

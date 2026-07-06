@@ -1,10 +1,31 @@
-import { ArrayBufferTarget, Muxer as WebmMuxer, StreamTarget as WebmStreamTarget } from "webm-muxer";
+import {
+  ArrayBufferTarget,
+  Muxer as WebmMuxer,
+  StreamTarget as WebmStreamTarget,
+} from "webm-muxer";
 
 import type { EncodedChunkResult } from "./encode-frames.js";
 import { extractRawChunkBytes } from "./mux-chunk-bytes.js";
 import { toWebmVideoCodec } from "./mux-codec-mapping.js";
 import type { NodeWritableLike, WebWritableStreamLike } from "./mux-stream-target.js";
 import { toSequentialOnData } from "./mux-stream-target.js";
+
+/**
+ * A known, documented limitation of webm-muxer itself (not something any
+ * option to `Muxer`'s constructor changes): the `Segment.Info.Duration` it
+ * writes (when it writes one at all; see `muxToWebmStream`'s own doc for
+ * when it does not) is tracked internally as "the highest video chunk
+ * timestamp seen so far," with no addition for that last chunk's own
+ * duration. This makes it intrinsically one frame-duration short of
+ * `durationInFrames / fps` (this codebase's definition of a composition's
+ * full duration, including the last frame's own extent): the true final
+ * frame (index `durationInFrames - 1`) is credited only with its own start
+ * time, never the further `1 / fps` seconds it itself spans. See
+ * `mux-timescale.ts`'s `expectedWebmMuxerDurationTicksFromLastChunkTimestamp`
+ * for the exact value this produces (used by this package's own test suite
+ * to assert against webm-muxer's real, documented behavior rather than a
+ * value it cannot actually produce).
+ */
 
 /** Options accepted by `muxToWebmBlob`/`muxToWebmBuffer`/`muxToWebmStream`. */
 export interface MuxWebmOptions {
