@@ -1,10 +1,10 @@
-import type { FrameContext } from "@cadra/core";
+import type { FrameContext, SceneNode, SceneState } from "@cadra/core";
 import * as THREE from "three";
 import { WebGPURenderer, type WebGPURendererParameters } from "three/webgpu";
 
 import { detectWebGpuSupport, type WebGpuDetector } from "./capability-detection.js";
+import { createReconciler, type Reconciler } from "./reconciler/reconciler.js";
 import type {
-  RenderableScene,
   Renderer,
   RendererBackend,
   RendererCapabilities,
@@ -63,35 +63,101 @@ export const defaultThreeRendererDependencies: ThreeRendererDependencies = {
   createWebGl2Renderer: createRealWebGl2Renderer,
 };
 
-/** Builds the tiny internal Three.js scene for one `RenderableScene`, fresh every call. */
-function buildScene(sceneState: RenderableScene): { scene: THREE.Scene; camera: THREE.Camera } {
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(
-    sceneState.background[0],
-    sceneState.background[1],
-    sceneState.background[2],
-  );
+/**
+ * Stable id for the synthetic wrapper root `SceneNode` `renderFrame` builds
+ * around a `SceneState`'s layers every call. Never collides with an authored
+ * node id in practice (authored ids come from `createIdGenerator`/user
+ * authoring, never this literal), and staying constant across calls is what
+ * lets the reconciler recognize it as "the same node" frame to frame, so its
+ * `Object3D` identity (and therefore everything parented under it) is
+ * preserved rather than torn down and rebuilt.
+ */
+const SCENE_STATE_ROOT_ID = "__cadra_scene_state_root__";
 
-  for (const primitive of sceneState.primitives) {
-    const geometry =
-      primitive.shape === "sphere"
-        ? new THREE.SphereGeometry(1, 16, 12)
-        : new THREE.BoxGeometry(1, 1, 1);
-    const material = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(primitive.color[0], primitive.color[1], primitive.color[2]),
-    });
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(primitive.position[0], primitive.position[1], primitive.position[2]);
-    scene.add(mesh);
+/**
+ * Wraps `sceneState.layers` in a single synthetic `group` `SceneNode` so one
+ * `reconciler.reconcile` call handles every layer at once, in the same
+ * stacking order `SceneState.layers` already defines. Identity transform and
+ * always visible: this node exists purely for grouping, contributing no
+ * visual effect of its own.
+ */
+function buildSceneStateRoot(sceneState: SceneState): SceneNode {
+  return {
+    id: SCENE_STATE_ROOT_ID,
+    kind: "group",
+    transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    visible: true,
+    children: sceneState.layers.map((layer) => layer.node),
+  };
+}
+
+/**
+ * Applies `opacity` to every mesh material in `subtree`, mutating in place.
+ * Skipped entirely for `opacity === 1` (the overwhelmingly common case, no
+ * active transition): nothing to change, and every material stays exactly
+ * the shared/pooled instance the mesh registry handed out.
+ *
+ * For `opacity !== 1`, each mesh's material is cloned before mutation rather
+ * than mutated in place. This matters because `GeometryRegistry`/
+ * `MaterialRegistry` deliberately pool one shared `THREE.Material` instance
+ * across every node referencing the same `materialRef` (see
+ * `reconciler/registries.ts` and the "shared registry resources are never
+ * disposed" tests in `reconciler.test.ts`): setting `.opacity`/`.transparent`
+ * directly on that shared instance would leak onto every *other* node using
+ * the same `materialRef`, including ones with no active transition of their
+ * own, which is exactly the corruption this clone avoids. The clone is cheap
+ * and never accumulates: `applyNodeProperties` unconditionally reassigns
+ * `mesh.material` back to the registry's shared instance on every
+ * `reconcile()` call (see `node-factory.ts`), so each `renderFrame` starts
+ * from a clean shared reference and this function's clone is simply garbage
+ * after that next reconcile, not a growing leak.
+ */
+function applyLayerOpacity(subtree: THREE.Object3D, opacity: number): void {
+  if (opacity === 1) {
+    return;
   }
 
-  // A fixed default camera: framing scene content is a Phase 6 reconciler
-  // concern (cameras will come from the real scene graph's CameraNode), not
-  // this placeholder's.
-  const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
-  camera.position.set(0, 0, 5);
+  subtree.traverse((object3D) => {
+    if (!(object3D instanceof THREE.Mesh)) {
+      return;
+    }
+    const materials = Array.isArray(object3D.material) ? object3D.material : [object3D.material];
+    object3D.material = Array.isArray(object3D.material)
+      ? materials.map((material) => cloneWithOpacity(material, opacity))
+      : cloneWithOpacity(materials[0] as THREE.Material, opacity);
+  });
+}
 
-  return { scene, camera };
+/** Clones `material`, then sets `transparent`/`opacity` on the clone only. */
+function cloneWithOpacity(material: THREE.Material, opacity: number): THREE.Material {
+  const clone = material.clone();
+  clone.transparent = true;
+  clone.opacity = opacity;
+  return clone;
+}
+
+/**
+ * Searches `root` for a reconciled `Object3D` tagged (via `.name`, set by
+ * `createThreeObject` in `node-factory.ts`) with `cameraNodeId`. Returns
+ * `undefined` if `cameraNodeId` is `undefined` or no matching camera is
+ * found in the current tree, leaving the caller to fall back to the
+ * renderer's own default camera.
+ */
+function findActiveCamera(
+  root: THREE.Object3D,
+  cameraNodeId: string | undefined,
+): THREE.Camera | undefined {
+  if (cameraNodeId === undefined) {
+    return undefined;
+  }
+
+  let found: THREE.Camera | undefined;
+  root.traverse((object3D) => {
+    if (found === undefined && object3D.name === cameraNodeId && object3D instanceof THREE.Camera) {
+      found = object3D;
+    }
+  });
+  return found;
 }
 
 /**
@@ -106,8 +172,28 @@ export class ThreeRenderer implements Renderer {
   private resolvedBackend: RendererBackend | undefined;
   private wasFallback = false;
 
+  /**
+   * One `Reconciler` for this renderer's entire lifetime, constructed once
+   * and reused across every `renderFrame` call (exactly like `threeRenderer`/
+   * `resolvedBackend` above): the reconciler's own incremental-update
+   * guarantees (stable `Object3D` identity for an unchanged node id) only
+   * hold if it is the same instance diffing against its own prior output
+   * frame to frame, not a fresh one built per call.
+   */
+  private readonly reconciler: Reconciler = createReconciler();
+  /** The one persistent Three.js scene every reconciled wrapper root is attached under. */
+  private readonly scene = new THREE.Scene();
+  /**
+   * Fallback camera used whenever `sceneState.activeCameraNodeId` is unset or
+   * does not resolve to a camera in the current reconciled tree: keeps the
+   * renderer usable for scenes authored with no camera node yet, matching
+   * the placeholder's original always-available default camera.
+   */
+  private readonly defaultCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
+
   constructor(deps: ThreeRendererDependencies = defaultThreeRendererDependencies) {
     this.deps = deps;
+    this.defaultCamera.position.set(0, 0, 5);
   }
 
   async init(target: RenderTarget, size: RenderSize): Promise<void> {
@@ -128,10 +214,41 @@ export class ThreeRenderer implements Renderer {
     this.threeRenderer.setSize(size.width, size.height, false);
   }
 
-  renderFrame(sceneState: RenderableScene, _frameContext: FrameContext): void {
+  renderFrame(sceneState: SceneState, frameContext: FrameContext): void {
     const renderer = this.requireInitialized();
-    const { scene, camera } = buildScene(sceneState);
-    renderer.render(scene, camera);
+
+    const wrapperRoot = buildSceneStateRoot(sceneState);
+    const reconciled = this.reconciler.reconcile(wrapperRoot, frameContext.frame);
+    if (reconciled === null) {
+      // `buildSceneStateRoot` always returns a non-null SceneNode, so
+      // `reconcile` never actually returns null here; this satisfies the
+      // Reconciler interface's nullable return type without a non-null
+      // assertion.
+      return;
+    }
+
+    if (reconciled.parent !== this.scene) {
+      // Only true on the very first call (or if the reconciler ever handed
+      // back a different root instance): the reconciler preserves Object3D
+      // identity for an unchanged id/kind across calls, so in steady state
+      // this add() is a no-op re-parent onto the same parent it is already
+      // under.
+      this.scene.add(reconciled);
+    }
+
+    // wrapperRoot.children is sceneState.layers.map(layer => layer.node), in
+    // the same order, so reconciled.children[i] is the layer at index i:
+    // the reconciler preserves child order (see reconciler.ts's reorderAll).
+    sceneState.layers.forEach((layer, index) => {
+      const layerObject3D = reconciled.children[index];
+      if (layerObject3D !== undefined) {
+        applyLayerOpacity(layerObject3D, layer.opacity);
+      }
+    });
+
+    const camera =
+      findActiveCamera(reconciled, sceneState.activeCameraNodeId) ?? this.defaultCamera;
+    renderer.render(this.scene, camera);
   }
 
   resize(size: RenderSize): void {

@@ -1,4 +1,4 @@
-import type { ColorRGBA, FrameContext, Vector3 } from "@cadra/core";
+import type { FrameContext, SceneState } from "@cadra/core";
 
 /**
  * A canvas-like render target: either a real `HTMLCanvasElement` or an
@@ -40,36 +40,6 @@ export interface RendererCapabilities {
 }
 
 /**
- * A single, very simple built-in shape usable as test/placeholder scene
- * content: a solid-colored primitive at a position. Not part of the real
- * scene graph; see `RenderableScene` for why this exists at all.
- */
-export interface SimplePrimitive {
-  /** Which built-in shape to draw. Kept to a minimal set on purpose. */
-  shape: "cube" | "sphere";
-  position: Vector3;
-  color: ColorRGBA;
-}
-
-/**
- * Placeholder scene-content type accepted by `renderFrame` for Phase 5.
- *
- * Phase 6 owns the real reconciler that turns a `SceneNode` tree from
- * `@cadra/core` into live Three.js objects; that is explicitly out of scope
- * here. This type exists only so the render pipeline (backend selection,
- * lifecycle, determinism) can be proven end to end with real pixel output,
- * without anticipating Phase 6's design. Expect `renderFrame`'s first
- * parameter type to be replaced (not just extended) once the reconciler
- * lands.
- */
-export interface RenderableScene {
-  /** Background/clear color for the frame. */
-  background: ColorRGBA;
-  /** A handful of simple test primitives to draw, if any. */
-  primitives: SimplePrimitive[];
-}
-
-/**
  * The public rendering abstraction downstream Cadra packages depend on.
  * Nothing in this interface (or anything reachable from it) is a Three.js
  * type: callers select and swap the underlying graphics API (WebGPU,
@@ -93,11 +63,12 @@ export interface Renderer {
    */
   init(target: RenderTarget, size: RenderSize): Promise<void> | void;
   /**
-   * Draws one frame of `sceneState` as evaluated at `frameContext`. Pure
-   * with respect to its arguments: no hidden state influences the result,
-   * and this method never advances any clock of its own.
+   * Draws one frame of `sceneState` (the timeline engine's `resolveSceneAtFrame`
+   * output from `@cadra/core`) as evaluated at `frameContext`. Pure with
+   * respect to its arguments: no hidden state influences the result, and
+   * this method never advances any clock of its own.
    */
-  renderFrame(sceneState: RenderableScene, frameContext: FrameContext): void;
+  renderFrame(sceneState: SceneState, frameContext: FrameContext): void;
   /** Resizes the render target. Safe to call any number of times after `init`. */
   resize(size: RenderSize): void;
   /** Releases GPU resources held by this renderer. Not safe to use afterward. */

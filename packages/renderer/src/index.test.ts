@@ -28,8 +28,8 @@ describe("@cadra/renderer public surface", () => {
 
 /**
  * Guards against Three.js leaking into the `Renderer`-facing part of this
- * package's public surface (`Renderer`, `RenderableScene`, `createRenderer`,
- * and friends). Deliberately does not cover `./reconciler`: that module is
+ * package's public surface (`Renderer`, `SceneState`, `createRenderer`, and
+ * friends). Deliberately does not cover `./reconciler`: that module is
  * additive, separate, and exists specifically to expose real `THREE.Object3D`
  * types, so scanning it for "no Three.js" would contradict its own purpose
  * (see `./reconciler/index.ts`'s module doc).

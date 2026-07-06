@@ -6,11 +6,11 @@
  * Deliberately its own module, separate from the `Renderer`-facing exports in
  * `../index.ts`: unlike `Renderer` (whose whole point is to hide Three.js),
  * this reconciler's whole point is to produce real `THREE.Object3D` values,
- * so its public surface legitimately exposes Three.js types. Wiring this into
- * `Renderer.renderFrame` (which still takes the Phase 5 `RenderableScene`
- * placeholder) is deferred: Phase 8 defines what a resolved scene state is,
- * and Phase 13's player runtime is the first to call a scene resolver and
- * `renderFrame` together.
+ * so its public surface legitimately exposes Three.js types. `ThreeRenderer`
+ * (see `../three-renderer.ts`) holds one `Reconciler` instance for its
+ * lifetime and drives it from `renderFrame`'s real `SceneState` input, so
+ * this module's Three.js-shaped exports never themselves cross into the
+ * `Renderer`-facing public surface.
  */
 
 export type { NodeFactoryContext, OwnedResources } from "./node-factory.js";
