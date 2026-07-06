@@ -430,6 +430,103 @@ function readBlockPrelude(view: DataView, payloadStart: number): BlockPrelude {
 }
 
 /**
+ * Element IDs valid as a direct child of `Cluster`, per the Matroska spec:
+ * `Timestamp`, `SimpleBlock`, and `BlockGroup` (the only three this parser
+ * ever needs to recognize; a real `Cluster` may also carry a handful of
+ * other optional children this parser has no use for and does not
+ * classify, e.g. `SilentTracks`/`PrevSize`/`Position`, none of which
+ * webm-muxer itself ever writes into a `Cluster` it produces). Used by
+ * `findClusterEnd` to recognize "we have walked past this `Cluster`'s own
+ * content" once an element ID outside this set is encountered.
+ */
+const CLUSTER_CHILD_IDS: ReadonlySet<number> = new Set([
+  ELEMENT_ID.timestamp,
+  ELEMENT_ID.simpleBlock,
+  ELEMENT_ID.blockGroup,
+]);
+
+/**
+ * Determines a `Cluster`'s real end offset when it was written with
+ * unknown declared size (`muxToWebmStream`'s `streaming: true`; see
+ * `mux-webm.ts`'s own doc): unlike `Segment` (whose unknown-size case is
+ * unambiguous, since nothing meaningful exists in this codebase's own
+ * files after the single top-level `Segment`), a `Cluster` with unknown
+ * size is followed by further sibling content within the same `Segment`
+ * (another `Cluster`, or a `Cues` element), so its real end must be found
+ * by scanning forward through its own children (`Timestamp`/
+ * `SimpleBlock`/`BlockGroup`, each of which always has a real, finite
+ * declared size of its own, even when the enclosing `Cluster` does not)
+ * until an element ID outside `CLUSTER_CHILD_IDS` is encountered, or
+ * `hardEnd` (the whole buffer) is reached.
+ *
+ * This mirrors exactly how a real Matroska demuxer resolves an
+ * unknown-size `Cluster`'s boundary: there is no dedicated "end of
+ * cluster" marker element in the format itself, only the arrival of the
+ * next element that could not itself be a `Cluster` child.
+ */
+function findClusterEnd(view: DataView, clusterPayloadStart: number, hardEnd: number): number {
+  let offset = clusterPayloadStart;
+  while (offset < hardEnd) {
+    const header = readElementHeader(view, offset, hardEnd);
+    if (!CLUSTER_CHILD_IDS.has(header.id)) {
+      return offset;
+    }
+    if (header.payloadEnd === UNKNOWN_SIZE) {
+      // None of Timestamp/SimpleBlock/BlockGroup are ever themselves
+      // written with unknown size by webm-muxer (only Cluster and Segment
+      // are); reaching this would mean a file shape this parser does not
+      // support.
+      throw new WebmParseError(
+        `element 0x${header.id.toString(16)} at offset ${offset} (a Cluster child) has unknown size, which this parser does not support`,
+      );
+    }
+    offset = header.payloadEnd;
+  }
+  return hardEnd;
+}
+
+/**
+ * Scans `Segment`'s direct children for every top-level `Cluster`,
+ * returning each one's `ElementHeader` with its `payloadEnd` always
+ * resolved to a real, finite offset (never `UNKNOWN_SIZE`): unlike
+ * `findAllChildElements` (which assumes every sibling's own declared
+ * `payloadEnd` is immediately usable to advance the scan), this
+ * specifically resolves an unknown-size `Cluster`'s real end via
+ * `findClusterEnd` before continuing the outer scan past it, since
+ * `muxToWebmStream`'s `streaming: true` output writes every `Cluster`
+ * (not just `Segment` itself) with unknown declared size.
+ */
+function findClustersWithResolvedEnd(
+  view: DataView,
+  segment: ElementHeader,
+  hardEnd: number,
+): ElementHeader[] {
+  const scanEnd = segment.payloadEnd === UNKNOWN_SIZE ? hardEnd : segment.payloadEnd;
+  const clusters: ElementHeader[] = [];
+  let offset = segment.payloadStart;
+  while (offset < scanEnd) {
+    const header = readElementHeader(view, offset, scanEnd);
+    if (header.id !== ELEMENT_ID.cluster) {
+      if (header.payloadEnd === UNKNOWN_SIZE) {
+        throw new WebmParseError(
+          `element 0x${header.id.toString(16)} at offset ${offset} has unknown size but is not a "Cluster"; cannot locate its end`,
+        );
+      }
+      offset = header.payloadEnd;
+      continue;
+    }
+
+    const resolvedEnd =
+      header.payloadEnd === UNKNOWN_SIZE
+        ? findClusterEnd(view, header.payloadStart, scanEnd)
+        : header.payloadEnd;
+    clusters.push({ id: header.id, payloadStart: header.payloadStart, payloadEnd: resolvedEnd });
+    offset = resolvedEnd;
+  }
+  return clusters;
+}
+
+/**
  * Finds the largest end timestamp (`clusterTimestamp + relativeTimestamp +
  * blockDuration`, in `Segment.Info.TimestampScale` ticks) across every
  * `Cluster`'s `BlockGroup.Block` (and bare `SimpleBlock`, included for
@@ -450,10 +547,25 @@ function readBlockPrelude(view: DataView, payloadStart: number): BlockPrelude {
  * A `SimpleBlock` (no `BlockDuration` available) contributes only its own
  * start timestamp, not a duration-extended end timestamp: this parser has
  * no way to know a bare `SimpleBlock`'s own duration (Matroska does not
- * store one for that element kind), so a caller comparing this end
- * timestamp against another track's should expect this function to
- * underreport for a file mixing `SimpleBlock` samples; not a concern for
- * this package's own muxing output, which always uses `BlockGroup`.
+ * store one for that element kind). This is not a rare edge case for this
+ * package's own muxing output specifically: webm-muxer's own
+ * `addVideoChunkRaw`/`addAudioChunkRaw` (see `mux-webm.ts`'s own doc)
+ * never thread a duration through to the internal chunk object at all
+ * (neither raw method's signature even accepts one), so every block this
+ * package's `muxToWebmBuffer`/`muxToWebmBlob`/`muxToWebmStream` ever
+ * writes, video or audio, is always a bare `SimpleBlock`, never a
+ * `BlockGroup`. Consequently, this function's return value always
+ * underreports the true final span by roughly the last matched block's
+ * own duration (one video frame's worth for the video track, one audio
+ * chunk's worth for the audio track): a caller comparing this value
+ * across the two tracks should tolerate a difference on that order,
+ * rather than expect exact equality, and a caller wanting the
+ * spec-conformant "full presentation span including the last sample's own
+ * extent" should add back that known quantity itself (e.g.
+ * `durationInFrames / fps` for video, `chunkFrames / sampleRate` for the
+ * last audio chunk), the same way `mux-timescale.ts`'s
+ * `expectedWebmMuxerDurationTicksFromLastChunkTimestamp` already documents
+ * for `Segment.Info.Duration` itself.
  *
  * @throws {WebmParseError} if `bytes` is not well-formed, or the `Segment`
  *   has no `Cluster` elements.
@@ -463,13 +575,7 @@ function findLastBlockEndTimestampForTrack(
   segment: ElementHeader,
   trackNumber: number,
 ): number {
-  const clusters = findAllChildElements(
-    view,
-    segment.payloadStart,
-    segment.payloadEnd,
-    view.byteLength,
-    ELEMENT_ID.cluster,
-  );
+  const clusters = findClustersWithResolvedEnd(view, segment, view.byteLength);
   if (clusters.length === 0) {
     throw new WebmParseError('no "Cluster" element found inside "Segment"');
   }
