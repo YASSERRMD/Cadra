@@ -4,7 +4,15 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { createBestAvailableRenderer, createRenderer, createWorkerRenderer, PACKAGE_NAME, VERSION } from "./index.js";
+import {
+  createBestAvailableRenderer,
+  createRenderer,
+  createWorkerRenderer,
+  defaultThreeRendererDependencies,
+  PACKAGE_NAME,
+  ThreeRenderer,
+  VERSION,
+} from "./index.js";
 
 describe("@cadra/renderer package identity", () => {
   it("exports the expected VERSION", () => {
@@ -43,6 +51,14 @@ describe("@cadra/renderer public surface", () => {
     expect(typeof renderer.resize).toBe("function");
     expect(typeof renderer.dispose).toBe("function");
   });
+
+  it("exposes a constructible ThreeRenderer plus its default dependency set from the package entry point (Phase 24's injection seam for @cadra/headless's experimental native-GPU path)", () => {
+    const renderer = new ThreeRenderer(defaultThreeRendererDependencies);
+    expect(typeof renderer.init).toBe("function");
+    expect(typeof renderer.renderFrame).toBe("function");
+    expect(typeof renderer.resize).toBe("function");
+    expect(typeof renderer.dispose).toBe("function");
+  });
 });
 
 /**
@@ -53,13 +69,27 @@ describe("@cadra/renderer public surface", () => {
  * types, so scanning it for "no Three.js" would contradict its own purpose
  * (see `./reconciler/index.ts`'s module doc).
  *
+ * `three-renderer.ts` is excluded for the same reason, as of Phase 24:
+ * `index.ts` now additively exports `ThreeRenderer`/`ThreeRendererDependencies`/
+ * `defaultThreeRendererDependencies` specifically so a caller (namely
+ * `@cadra/headless`'s experimental native-GPU headless render path) can
+ * construct a `ThreeRenderer` with its own substituted `createWebGpuRenderer`
+ * factory. `ThreeRendererFactory`'s own signature already only takes/returns
+ * plain `RenderTarget`/`RenderSize`/`ThreeRendererLike`-shaped values (no
+ * `three` type crosses that boundary; see `three-renderer.ts`'s own
+ * `ThreeRendererLike` comment), so this export intentionally exposes the
+ * *class* and its *dependency-injection seam*, not a `three` type on any
+ * exported signature; scanning this file's imports for "no Three.js" would
+ * contradict that this is exactly the file whose whole purpose is
+ * constructing real Three.js renderers.
+ *
  * What this proves: none of the source files that make up the `Renderer`-facing
  * export graph (`index.ts` itself, plus every local module it re-exports
- * types or values from, excluding `./reconciler/*`) contain a `from "three"`
- * or `from "three/*"` import. Since those are exactly the files whose
- * declared export shapes become that part of `@cadra/renderer`'s public
- * `.d.ts` surface, this rules out a `three` type reaching an exported
- * `Renderer`-facing signature.
+ * types or values from, excluding `./reconciler/*` and `three-renderer.ts`)
+ * contain a `from "three"` or `from "three/*"` import. Since those are
+ * exactly the files whose declared export shapes become that part of
+ * `@cadra/renderer`'s public `.d.ts` surface, this rules out a `three` type
+ * reaching an exported `Renderer`-facing signature through any *other* file.
  *
  * What this does not prove: it does not catch a `three` type smuggled in
  * through a type-only re-export several modules deep that this list doesn't

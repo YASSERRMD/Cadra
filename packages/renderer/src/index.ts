@@ -40,6 +40,21 @@
  * environment, so it is always injected, matching every other GPU-touching
  * seam in this package), and `createWorkerRenderer` implements it directly
  * via the worker protocol's `readPixels`/`readPixelsAck` message pair.
+ *
+ * `ThreeRenderer`/`ThreeRendererDependencies`/`defaultThreeRendererDependencies`
+ * are additively exported (Phase 24) so a caller outside this package can
+ * construct a `ThreeRenderer` with its own substituted `createWebGpuRenderer`
+ * factory, the same injection seam this package's own tests already use
+ * internally to swap in a fake. This is what lets `@cadra/headless`'s
+ * experimental native-GPU headless render path (`createNativeGpuHeadlessRenderer`,
+ * clearly marked experimental) inject a real native `GPUDevice` (from the
+ * `webgpu` npm package, no browser) into a real `ThreeRenderer` instead of
+ * writing a second, disconnected scene-graph-to-Three.js pipeline: it reuses
+ * this exact same reconciler/opacity/camera-resolution logic, differing only
+ * in how the underlying `THREE.WebGPURenderer` is constructed and which
+ * `RenderTarget`/`GPUCanvasContext` it is handed. See that package's own
+ * `render-frame-native-gpu.ts` module doc for the full design and its
+ * documented platform caveats.
  */
 
 export const VERSION = "0.0.0";
@@ -82,6 +97,12 @@ export {
   createPixelReadableRenderer,
   PixelReadableRendererNotInitializedError,
 } from "./pixel-readable-three-renderer.js";
+export type { ThreeRendererDependencies, ThreeRendererFactory } from "./three-renderer.js";
+export {
+  defaultThreeRendererDependencies,
+  RendererNotInitializedError,
+  ThreeRenderer,
+} from "./three-renderer.js";
 export type {
   NodeFactoryContext,
   OwnedResources,
