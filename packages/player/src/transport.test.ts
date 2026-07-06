@@ -54,8 +54,11 @@ function createFakeRenderer(): Renderer & {
     resize: vi.fn((_size: RenderSize) => undefined),
     dispose: vi.fn(() => undefined),
     backend: "webgl2",
-    capabilities: { backend: "webgl2", isFallback: true, maxTextureSize: 4096 } as
-      RendererCapabilities,
+    capabilities: {
+      backend: "webgl2",
+      isFallback: true,
+      maxTextureSize: 4096,
+    } as RendererCapabilities,
   };
 }
 
@@ -97,7 +100,11 @@ function createFakeScheduler(): {
 }
 
 /** A fake `now()`: starts at `initial`, settable directly so tests control elapsed time exactly. */
-function createFakeClock(initial = 0): { now: NowFn; set: (value: number) => void; advance: (deltaMs: number) => void } {
+function createFakeClock(initial = 0): {
+  now: NowFn;
+  set: (value: number) => void;
+  advance: (deltaMs: number) => void;
+} {
   let current = initial;
   return {
     now: () => current,
@@ -114,9 +121,9 @@ describe("createTransport: construction", () => {
   it("throws CompositionNotFoundForTransportError for an unknown compositionId", () => {
     const project = buildProject();
     const renderer = createFakeRenderer();
-    expect(() =>
-      createTransport({ project, compositionId: "does-not-exist", renderer }),
-    ).toThrow(CompositionNotFoundForTransportError);
+    expect(() => createTransport({ project, compositionId: "does-not-exist", renderer })).toThrow(
+      CompositionNotFoundForTransportError,
+    );
   });
 
   it("exposes fps and durationInFrames read from the composition", () => {
@@ -757,6 +764,136 @@ describe("createTransport: playback rate", () => {
     expect(sceneStateAtRate1).toEqual(sceneStateAtRate3);
     expect(sceneStateAtRate1.frame).toBe(20);
     expect(sceneStateAtRate3.frame).toBe(20);
+  });
+});
+
+describe("createTransport: dispose", () => {
+  it("cancels an in-flight scheduled tick, same as pause()", () => {
+    const project = buildProject();
+    const renderer = createFakeRenderer();
+    const clock = createFakeClock(0);
+    const scheduler = createFakeScheduler();
+    const transport = createTransport({
+      project,
+      compositionId: "comp-1",
+      renderer,
+      now: clock.now,
+      scheduleFrame: scheduler.scheduleFrame,
+      cancelFrame: scheduler.cancelFrame,
+    });
+
+    transport.play();
+    expect(scheduler.pendingCount()).toBe(1);
+
+    transport.dispose();
+
+    expect(scheduler.pendingCount()).toBe(0);
+    expect(transport.isPlaying).toBe(false);
+  });
+
+  it("is idempotent: calling dispose() a second time does not throw", () => {
+    const project = buildProject();
+    const renderer = createFakeRenderer();
+    const transport = createTransport({ project, compositionId: "comp-1", renderer });
+
+    transport.dispose();
+
+    expect(() => transport.dispose()).not.toThrow();
+  });
+
+  it("play() after dispose() is a no-op: isPlaying stays false and no tick is scheduled", () => {
+    const project = buildProject();
+    const renderer = createFakeRenderer();
+    const clock = createFakeClock(0);
+    const scheduler = createFakeScheduler();
+    const transport = createTransport({
+      project,
+      compositionId: "comp-1",
+      renderer,
+      now: clock.now,
+      scheduleFrame: scheduler.scheduleFrame,
+      cancelFrame: scheduler.cancelFrame,
+    });
+
+    transport.dispose();
+    transport.play();
+
+    expect(transport.isPlaying).toBe(false);
+    expect(scheduler.pendingCount()).toBe(0);
+  });
+
+  it("seek() after dispose() is a no-op: currentFrame is unchanged and no additional render happens", () => {
+    const project = buildProject();
+    const renderer = createFakeRenderer();
+    const transport = createTransport({ project, compositionId: "comp-1", renderer });
+    transport.seek(10);
+    const frameBeforeDispose = transport.currentFrame;
+
+    transport.dispose();
+    renderer.renderFrame.mockClear();
+    transport.seek(50);
+
+    expect(transport.currentFrame).toBe(frameBeforeDispose);
+    expect(renderer.renderFrame).not.toHaveBeenCalled();
+  });
+
+  it("setPlaybackRate() after dispose() is a no-op", () => {
+    const project = buildProject();
+    const renderer = createFakeRenderer();
+    const clock = createFakeClock(0);
+    const scheduler = createFakeScheduler();
+    const transport = createTransport({
+      project,
+      compositionId: "comp-1",
+      renderer,
+      now: clock.now,
+      scheduleFrame: scheduler.scheduleFrame,
+      cancelFrame: scheduler.cancelFrame,
+    });
+
+    transport.dispose();
+
+    expect(() => transport.setPlaybackRate(2)).not.toThrow();
+  });
+
+  it("on()/off() after dispose() do not throw, and no further events fire", () => {
+    const project = buildProject();
+    const renderer = createFakeRenderer();
+    const transport = createTransport({ project, compositionId: "comp-1", renderer });
+    const handler = vi.fn();
+
+    transport.dispose();
+
+    expect(() => transport.on("frameChanged", handler)).not.toThrow();
+    expect(() => transport.off("frameChanged", handler)).not.toThrow();
+    transport.seek(20); // would emit frameChanged if not disposed
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("dispose() while playing stops further frame advancement even if the clock keeps advancing", () => {
+    const project = buildProject();
+    const renderer = createFakeRenderer();
+    const clock = createFakeClock(0);
+    const scheduler = createFakeScheduler();
+    const transport = createTransport({
+      project,
+      compositionId: "comp-1",
+      renderer,
+      now: clock.now,
+      scheduleFrame: scheduler.scheduleFrame,
+      cancelFrame: scheduler.cancelFrame,
+    });
+
+    transport.play();
+    clock.advance(500);
+    scheduler.fireNext();
+    const frameAtDispose = transport.currentFrame;
+
+    transport.dispose();
+    clock.advance(10000);
+
+    expect(transport.currentFrame).toBe(frameAtDispose);
+    expect(scheduler.pendingCount()).toBe(0);
   });
 });
 
