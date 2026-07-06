@@ -13,10 +13,19 @@
  * ownership contract (the consumer closes every yielded `VideoFrame`) and
  * the default color space it stamps onto constructed frames.
  *
- * Encoding the yielded frames with a real `VideoEncoder` and muxing the
- * result into a container are later phases' jobs, not this one's: this
- * module's scope ends at "one `VideoFrame` (or raw `PixelBuffer` fallback)
- * per rendered frame, in order, with a correct timestamp."
+ * `encodeFrames` is the second stage: given `captureFrames`'s
+ * `CapturedVideoFrame` output, it configures a `VideoEncoder` (probing a
+ * codec preference list for the first supported one), encodes each frame in
+ * order (forcing keyframes at a configurable interval), applies backpressure
+ * off `encoder.encodeQueueSize`/`dequeue` so encoding never falls arbitrarily
+ * far behind rendering, and streams out `EncodedChunkResult`s as they
+ * become available. It closes every `videoFrame` it receives (continuing
+ * `captureFrames`'s ownership contract) and flushes/closes the encoder on
+ * completion or early termination.
+ *
+ * Muxing the encoded chunks into a container (e.g. an MP4/WebM file) is a
+ * later phase's job, not this one's: this module's scope ends at "encoded
+ * chunks, in order, with the metadata needed to mux them."
  */
 
 export const VERSION = "0.0.0";
@@ -34,5 +43,23 @@ export type {
 } from "./capture-frames.js";
 export { captureFrames, DEFAULT_CAPTURE_COLOR_SPACE } from "./capture-frames.js";
 export { frameToMicrosecondTimestamp } from "./capture-timestamp.js";
+export type { CodecPreference, CodecProbeTarget } from "./codec-probe.js";
+export {
+  DEFAULT_CODEC_PREFERENCES,
+  NoSupportedCodecError,
+  probeSupportedCodec,
+} from "./codec-probe.js";
+export type { EncodedChunkResult, EncodeFramesOptions } from "./encode-frames.js";
+export {
+  DEFAULT_KEYFRAME_INTERVAL_FRAMES,
+  DEFAULT_MAX_QUEUE_SIZE,
+  encodeFrames,
+  WebCodecsUnavailableForEncodingError,
+} from "./encode-frames.js";
+export type { IsConfigSupportedFn, VideoEncoderConstructor } from "./video-encoder-factory.js";
+export {
+  getGlobalIsConfigSupported,
+  getGlobalVideoEncoderConstructor,
+} from "./video-encoder-factory.js";
 export type { VideoFrameConstructor, WebCodecsDetector } from "./video-frame-factory.js";
 export { detectWebCodecsSupport, getGlobalVideoFrameConstructor } from "./video-frame-factory.js";
