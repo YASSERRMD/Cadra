@@ -10,14 +10,20 @@
  * update, and validate scene documents: `create_scene`, `get_scene`,
  * `update_scene` (patch or replace), `validate_scene`, and `list_scenes`,
  * each persisting scenes as one JSON file per scene under the configured
- * `workspaceRoot`'s `scenes` directory. A single minimal `ping` diagnostic
- * tool remains registered alongside them.
+ * `workspaceRoot`'s `scenes` directory. Phase 30 closes the loop from prompt
+ * to finished video: `render_scene` submits a render job for one composition
+ * within an existing scene to `@cadra/encode`'s Phase 25 render-job
+ * orchestrator and returns a job id immediately, `get_render_status` polls
+ * that job's live per-range progress, and `get_render_output` returns a
+ * reference to the finished file once done; `upload_asset` stores an asset
+ * (by URL or by raw base64 bytes) content-addressed under the workspace and
+ * returns a `cadra-asset://<hash>` ref usable directly in a scene node's
+ * `assetRef` field, and `list_assets` lists everything stored. A single
+ * minimal `ping` diagnostic tool remains registered alongside them all.
  *
- * Scope boundary: this package does not yet register any render/asset tools
- * (`render_scene` and similar land in Phase 30, along with the deeper
- * workspace/output sandboxing those tools need), and `providerKeys` in
- * `./config.ts` is a typed, unwired placeholder ahead of Phase 34's actual
- * generative-video provider integrations.
+ * Scope boundary: `providerKeys` in `./config.ts` remains a typed, unwired
+ * placeholder ahead of Phase 34's actual generative-video provider
+ * integrations.
  *
  * Entry points:
  *   - `createCadraMcpServer` (`./server.ts`): builds an `McpServer` with no
@@ -37,6 +43,19 @@ export const VERSION = "0.0.0";
  */
 export const PACKAGE_NAME = "@cadra/mcp-server";
 
+export type { AssetMetadata, StoredAssetSummary } from "./asset-store.js";
+export {
+  ASSET_REF_SCHEME,
+  buildAssetRef,
+  listStoredAssets,
+  parseAssetRef,
+  readAssetBytes,
+  readAssetMetadata,
+  resolveAssetExtension,
+  sanitizeAssetExtension,
+  writeAssetFile,
+} from "./asset-store.js";
+export { LIST_ASSETS_TOOL_NAME, registerCadraAssetTools, UPLOAD_ASSET_TOOL_NAME } from "./asset-tools.js";
 export type { CadraMcpServerConfig, CadraMcpServerConfigInput, ProviderKeys } from "./config.js";
 export {
   OUTPUT_DIRECTORY_ENV_VAR,
@@ -53,6 +72,27 @@ export type {
 export { DEFAULT_MCP_PATH, HEALTH_CHECK_PATH, startCadraMcpServerHttp } from "./http.js";
 export type { LogEntry, LogFields, Logger, LogLevel, LogSink } from "./logger.js";
 export { createLogger } from "./logger.js";
+export type {
+  RenderJobRecord,
+  SerializedJobStatus,
+  SerializedRangeError,
+  SerializedRangeState,
+} from "./render-store.js";
+export {
+  getRenderJobRecord,
+  mintRenderJobId,
+  registerRenderJob,
+  resolveRenderOutputPath,
+  serializeJobStatus,
+  setRenderJobOutcome,
+  trackRenderJobOutcome,
+} from "./render-store.js";
+export {
+  GET_RENDER_OUTPUT_TOOL_NAME,
+  GET_RENDER_STATUS_TOOL_NAME,
+  registerCadraRenderTools,
+  RENDER_SCENE_TOOL_NAME,
+} from "./render-tools.js";
 export {
   applyScenePatchOperation,
   applyScenePatchOperations,
