@@ -293,6 +293,21 @@ something empirically reproduced against a second vendor in this exercise.
   inside a passing test, mirroring `@cadra/encode`'s own real-browser e2e
   test convention) rather than failing `pnpm -w test` outright when
   acquisition itself fails.
+- **`pnpm install` prints "Ignored build scripts: webgpu" by default**
+  (pnpm's own default security posture: it does not run an installed
+  package's `postinstall` script unless explicitly approved via
+  `pnpm approve-builds`). On macOS specifically, the `webgpu` package's own
+  `postinstall` strips Apple's Gatekeeper quarantine attribute
+  (`com.apple.quarantine`) from its prebuilt native binary, if present.
+  Verified on this machine: the downloaded binary actually carried
+  `com.apple.provenance` (a lighter tracking attribute Apple introduced more
+  recently), not the blocking `com.apple.quarantine` attribute, so the
+  skipped postinstall would have been a no-op here regardless; every test
+  and benchmark in this ADR ran correctly with the postinstall script
+  un-run. This may not hold on every macOS download/configuration, so a
+  team adopting this path should run `pnpm approve-builds` (or otherwise
+  confirm the binary loads) rather than assume this exact outcome
+  generalizes.
 - **A native Node addon (Dawn's `dawn.node`) is a materially different
   operational profile than a browser binary.** Chromium's own headless mode
   is an extremely well-trodden, widely-deployed deployment target (this
