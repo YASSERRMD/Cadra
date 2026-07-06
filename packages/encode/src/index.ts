@@ -84,7 +84,11 @@ export type {
   CaptureFramesOptions,
 } from "./capture-frames.js";
 export { captureFrames, DEFAULT_CAPTURE_COLOR_SPACE } from "./capture-frames.js";
-export { frameToMicrosecondTimestamp } from "./capture-timestamp.js";
+export {
+  frameToMicrosecondTimestamp,
+  MICROSECONDS_PER_SECOND,
+  secondsToMicrosecondTimestamp,
+} from "./capture-timestamp.js";
 export type { CodecPreference, CodecProbeTarget } from "./codec-probe.js";
 export {
   DEFAULT_CODEC_PREFERENCES,

@@ -9,6 +9,7 @@ import {
   getGlobalIsAudioConfigSupported,
   type IsAudioConfigSupportedFn,
 } from "./audio-encoder-factory.js";
+import { secondsToMicrosecondTimestamp } from "./capture-timestamp.js";
 import type { AudioBufferLike } from "./offline-audio-context-like.js";
 
 /**
@@ -158,10 +159,18 @@ function* drainReadyChunks(
  *
  * Each `AudioData`'s `timestamp` is in whole microseconds from the start of
  * `buffer` (chunk index times `chunkFrames`, converted via the buffer's own
- * `sampleRate`), so a chunk's position in the final encoded/muxed output
- * always traces back to its exact sample-accurate offset in the rendered
- * mixdown, keeping audio and video aligned to the same zero point once
- * muxed (this phase's own acceptance criteria).
+ * `sampleRate`, through `secondsToMicrosecondTimestamp`: the exact same
+ * shared seconds-to-WebCodecs-microseconds conversion
+ * `frameToMicrosecondTimestamp` (video's own frame-to-timestamp path;
+ * see `capture-timestamp.ts`) reduces to internally), so a chunk's position
+ * in the final encoded/muxed output always traces back to its exact
+ * sample-accurate offset in the rendered mixdown. Since `buffer` itself
+ * (via `renderAudioMixdown`) always starts at frame 0 of the composition
+ * regardless of where its own audio content begins, and this function's
+ * first chunk (`frameOffset` 0) always converts to timestamp 0 through
+ * that same shared conversion `capture-frames.ts` uses for frame 0, both
+ * tracks share the same zero point and the same underlying time base
+ * conversion once muxed (this phase's own acceptance criterion).
  */
 function* chunkAudioBuffer(
   buffer: AudioBufferLike,
@@ -173,8 +182,6 @@ function* chunkAudioBuffer(
   for (let channel = 0; channel < numberOfChannels; channel += 1) {
     channelData.push(buffer.getChannelData(channel));
   }
-
-  const MICROSECONDS_PER_SECOND = 1_000_000;
 
   for (let frameOffset = 0; frameOffset < length; frameOffset += chunkFrames) {
     const framesInChunk = Math.min(chunkFrames, length - frameOffset);
@@ -193,7 +200,7 @@ function* chunkAudioBuffer(
       );
     }
 
-    const timestamp = Math.round((frameOffset / sampleRate) * MICROSECONDS_PER_SECOND);
+    const timestamp = secondsToMicrosecondTimestamp(frameOffset / sampleRate);
     yield new audioDataConstructor({
       format: "f32-planar",
       sampleRate,
