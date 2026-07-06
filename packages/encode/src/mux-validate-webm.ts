@@ -30,7 +30,25 @@ const ELEMENT_ID = {
   info: 0x1549a966,
   timestampScale: 0x2ad7b1,
   duration: 0x4489,
+  tracks: 0x1654ae6b,
+  trackEntry: 0xae,
+  trackNumber: 0xd7,
+  trackType: 0x83,
+  cluster: 0x1f43b675,
+  timestamp: 0xe7,
+  simpleBlock: 0xa3,
+  blockGroup: 0xa0,
+  block: 0xa1,
+  blockDuration: 0x9b,
 } as const;
+
+/**
+ * Matroska `TrackEntry.TrackType` values this parser distinguishes: `1` for
+ * video, `2` for audio, matching both the Matroska spec and webm-muxer's own
+ * fixed `VIDEO_TRACK_TYPE`/`AUDIO_TRACK_TYPE` constants.
+ */
+const TRACK_TYPE_VIDEO = 1;
+const TRACK_TYPE_AUDIO = 2;
 
 /** Segment-level timing metadata read back out of a WebM/Matroska file's `Segment.Info`. */
 export interface WebmSegmentInfo {
@@ -182,6 +200,37 @@ function findChildElement(
 }
 
 /**
+ * Same traversal as `findChildElement`, but collects every direct child
+ * matching `id` instead of stopping at the first: needed for `Cluster`
+ * (one per group of blocks written) and `TrackEntry`/`BlockGroup` (one per
+ * track). Mirrors `mux-validate-mp4.ts`'s `findAllChildBoxes`.
+ */
+function findAllChildElements(
+  view: DataView,
+  start: number,
+  end: number,
+  hardEnd: number,
+  id: number,
+): ElementHeader[] {
+  const scanEnd = end === UNKNOWN_SIZE ? hardEnd : end;
+  const matches: ElementHeader[] = [];
+  let offset = start;
+  while (offset < scanEnd) {
+    const header = readElementHeader(view, offset, scanEnd);
+    if (header.id === id) {
+      matches.push(header);
+    }
+    if (header.payloadEnd === UNKNOWN_SIZE) {
+      throw new WebmParseError(
+        `element 0x${header.id.toString(16)} at offset ${offset} has unknown size but is not the outermost element being scanned; cannot locate its end`,
+      );
+    }
+    offset = header.payloadEnd;
+  }
+  return matches;
+}
+
+/**
  * Reads an 8-byte IEEE754 big-endian double at `offset`, the encoding
  * `EBMLFloat64` (both muxers' shared internal representation for
  * `Duration`) always uses; per the EBML spec a float element's size
@@ -274,4 +323,269 @@ export function readWebmSegmentInfo(bytes: ArrayBuffer | Uint8Array): WebmSegmen
     durationElement === undefined ? undefined : readFloat64Element(view, durationElement);
 
   return { timestampScale, duration };
+}
+
+/**
+ * A Matroska `TrackEntry.TrackType` value this parser distinguishes: `1`
+ * for video, `2` for audio, per the Matroska spec and matching
+ * webm-muxer's own fixed track-type constants.
+ */
+export type WebmTrackType = "video" | "audio";
+
+function trackTypeToMatroskaValue(trackType: WebmTrackType): number {
+  return trackType === "video" ? TRACK_TYPE_VIDEO : TRACK_TYPE_AUDIO;
+}
+
+/**
+ * Finds `Segment.Tracks`, then the `TrackNumber` of the first `TrackEntry`
+ * whose `TrackType` matches `trackType` (`"video"` -> Matroska value `1`,
+ * `"audio"` -> `2`). Returns `undefined` when no such `TrackEntry` exists
+ * (e.g. `"audio"` on a video-only file, this phase's own "silent
+ * composition" case).
+ *
+ * Unlike MP4's `hdlr`-based `findTrakByHandlerType` (which returns a whole
+ * `BoxHeader` to descend into further), this returns just the numeric
+ * `TrackNumber`: Matroska blocks (`SimpleBlock`/`Block`) reference their
+ * track only by that number (see `readBlockPrelude`'s own doc), not by any
+ * structural link back to a `TrackEntry`, so the number itself is the only
+ * thing a block-scanning caller needs.
+ *
+ * @throws {WebmParseError} if `bytes` is not well-formed, or has no
+ *   `Segment.Tracks` element (mandatory in every valid Matroska file).
+ */
+function findWebmTrackNumberByType(
+  view: DataView,
+  segment: ElementHeader,
+  trackType: WebmTrackType,
+): number | undefined {
+  const tracks = findChildElement(
+    view,
+    segment.payloadStart,
+    segment.payloadEnd,
+    view.byteLength,
+    ELEMENT_ID.tracks,
+  );
+  if (tracks === undefined) {
+    throw new WebmParseError('no "Tracks" element found inside "Segment"');
+  }
+
+  const trackEntries = findAllChildElements(
+    view,
+    tracks.payloadStart,
+    tracks.payloadEnd,
+    view.byteLength,
+    ELEMENT_ID.trackEntry,
+  );
+
+  const matroskaTrackType = trackTypeToMatroskaValue(trackType);
+  for (const trackEntry of trackEntries) {
+    const trackTypeElement = findChildElement(
+      view,
+      trackEntry.payloadStart,
+      trackEntry.payloadEnd,
+      view.byteLength,
+      ELEMENT_ID.trackType,
+    );
+    if (trackTypeElement === undefined) {
+      continue;
+    }
+    if (readUintElement(view, trackTypeElement) !== matroskaTrackType) {
+      continue;
+    }
+    const trackNumberElement = findChildElement(
+      view,
+      trackEntry.payloadStart,
+      trackEntry.payloadEnd,
+      view.byteLength,
+      ELEMENT_ID.trackNumber,
+    );
+    if (trackNumberElement === undefined) {
+      continue;
+    }
+    return readUintElement(view, trackNumberElement);
+  }
+  return undefined;
+}
+
+/** One `SimpleBlock`/`Block` element's decoded prelude: which track it belongs to, and its timestamp relative to its parent `Cluster`'s own base `Timestamp`. */
+interface BlockPrelude {
+  trackNumber: number;
+  relativeTimestamp: number;
+}
+
+/**
+ * Decodes a `SimpleBlock`/`Block` element's binary prelude: a VINT-encoded
+ * track number, immediately followed by a signed 16-bit big-endian
+ * timestamp relative to the enclosing `Cluster`'s own `Timestamp`, then a
+ * single flags byte (unused here), per the Matroska spec's Block Structure
+ * section. Every track number webm-muxer itself ever writes (`1` for
+ * video, `2` for audio; see `VIDEO_TRACK_NUMBER`/`AUDIO_TRACK_NUMBER` in
+ * its own source) fits in a single-byte VINT, so this parser does not
+ * generalize to a multi-byte track number VINT.
+ */
+function readBlockPrelude(view: DataView, payloadStart: number): BlockPrelude {
+  const trackNumber = decodeVint(view, payloadStart, payloadStart + 8, true).value;
+  const relativeTimestamp = view.getInt16(payloadStart + 1, false);
+  return { trackNumber, relativeTimestamp };
+}
+
+/**
+ * Finds the largest end timestamp (`clusterTimestamp + relativeTimestamp +
+ * blockDuration`, in `Segment.Info.TimestampScale` ticks) across every
+ * `Cluster`'s `BlockGroup.Block` (and bare `SimpleBlock`, included for
+ * completeness even though this package's own muxing always produces a
+ * `BlockGroup` with an explicit `BlockDuration`; see `mux-webm.ts`'s own
+ * doc for why every chunk this package feeds a muxer always carries a
+ * duration) belonging to `trackNumber`.
+ *
+ * This is the Matroska-side counterpart to MP4's
+ * `sumFragmentedDurationTicksForTrack`: unlike MP4 (where `mdhd.duration`
+ * gives each track an authoritative, pre-summed value), Matroska has no
+ * per-track duration element at all (only `Segment.Info.Duration`, a
+ * single file-wide value derived from whichever track's last block ends
+ * latest; see `mux-webm.ts`'s own top-level doc for webm-muxer's exact
+ * "highest timestamp seen so far" semantics), so a per-track duration must
+ * be reconstructed directly from that track's own blocks.
+ *
+ * A `SimpleBlock` (no `BlockDuration` available) contributes only its own
+ * start timestamp, not a duration-extended end timestamp: this parser has
+ * no way to know a bare `SimpleBlock`'s own duration (Matroska does not
+ * store one for that element kind), so a caller comparing this end
+ * timestamp against another track's should expect this function to
+ * underreport for a file mixing `SimpleBlock` samples; not a concern for
+ * this package's own muxing output, which always uses `BlockGroup`.
+ *
+ * @throws {WebmParseError} if `bytes` is not well-formed, or the `Segment`
+ *   has no `Cluster` elements.
+ */
+function findLastBlockEndTimestampForTrack(
+  view: DataView,
+  segment: ElementHeader,
+  trackNumber: number,
+): number {
+  const clusters = findAllChildElements(
+    view,
+    segment.payloadStart,
+    segment.payloadEnd,
+    view.byteLength,
+    ELEMENT_ID.cluster,
+  );
+  if (clusters.length === 0) {
+    throw new WebmParseError('no "Cluster" element found inside "Segment"');
+  }
+
+  let lastEndTimestamp: number | undefined;
+
+  for (const cluster of clusters) {
+    const timestampElement = findChildElement(
+      view,
+      cluster.payloadStart,
+      cluster.payloadEnd,
+      view.byteLength,
+      ELEMENT_ID.timestamp,
+    );
+    if (timestampElement === undefined) {
+      throw new WebmParseError('no "Timestamp" element found inside "Cluster"');
+    }
+    const clusterTimestamp = readUintElement(view, timestampElement);
+
+    const blockGroups = findAllChildElements(
+      view,
+      cluster.payloadStart,
+      cluster.payloadEnd,
+      view.byteLength,
+      ELEMENT_ID.blockGroup,
+    );
+    for (const blockGroup of blockGroups) {
+      const block = findChildElement(
+        view,
+        blockGroup.payloadStart,
+        blockGroup.payloadEnd,
+        view.byteLength,
+        ELEMENT_ID.block,
+      );
+      if (block === undefined) {
+        throw new WebmParseError('no "Block" element found inside "BlockGroup"');
+      }
+      const prelude = readBlockPrelude(view, block.payloadStart);
+      if (prelude.trackNumber !== trackNumber) {
+        continue;
+      }
+      const blockDurationElement = findChildElement(
+        view,
+        blockGroup.payloadStart,
+        blockGroup.payloadEnd,
+        view.byteLength,
+        ELEMENT_ID.blockDuration,
+      );
+      const blockDuration =
+        blockDurationElement === undefined ? 0 : readUintElement(view, blockDurationElement);
+      const endTimestamp = clusterTimestamp + prelude.relativeTimestamp + blockDuration;
+      lastEndTimestamp =
+        lastEndTimestamp === undefined ? endTimestamp : Math.max(lastEndTimestamp, endTimestamp);
+    }
+
+    const simpleBlocks = findAllChildElements(
+      view,
+      cluster.payloadStart,
+      cluster.payloadEnd,
+      view.byteLength,
+      ELEMENT_ID.simpleBlock,
+    );
+    for (const simpleBlock of simpleBlocks) {
+      const prelude = readBlockPrelude(view, simpleBlock.payloadStart);
+      if (prelude.trackNumber !== trackNumber) {
+        continue;
+      }
+      // No BlockDuration available for a bare SimpleBlock; see this
+      // function's own doc for why this only contributes a start
+      // timestamp, not a duration-extended end timestamp.
+      const endTimestamp = clusterTimestamp + prelude.relativeTimestamp;
+      lastEndTimestamp =
+        lastEndTimestamp === undefined ? endTimestamp : Math.max(lastEndTimestamp, endTimestamp);
+    }
+  }
+
+  return lastEndTimestamp ?? 0;
+}
+
+/**
+ * Reads the largest end timestamp (in `Segment.Info.TimestampScale` ticks;
+ * same unit `readWebmSegmentInfo`'s `duration` uses) across every block
+ * belonging to the track whose `TrackType` matches `trackType` (`"video"`
+ * or `"audio"`).
+ *
+ * `undefined` when no track of that type exists in the file (e.g.
+ * `"audio"` on a video-only file, this phase's own "silent composition"
+ * case), distinguishing that legitimate, expected state from a genuinely
+ * malformed file. This is the Matroska-side way to answer "does this
+ * track's own content span the same duration as the other track's":
+ * unlike MP4 (`readMp4TrackTimescale`/`readMp4AudioTrackTimescale`, each
+ * backed by that track's own authoritative `mdhd.duration`), Matroska has
+ * no per-track duration field at all (see
+ * `findLastBlockEndTimestampForTrack`'s own doc), so this reconstructs the
+ * equivalent value directly from that track's own blocks.
+ *
+ * @throws {WebmParseError} if `bytes` is not well-formed.
+ */
+export function readWebmTrackLastBlockEndTimestamp(
+  bytes: ArrayBuffer | Uint8Array,
+  trackType: WebmTrackType,
+): number | undefined {
+  const view =
+    bytes instanceof Uint8Array
+      ? new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+      : new DataView(bytes);
+
+  const segment = findChildElement(view, 0, view.byteLength, view.byteLength, ELEMENT_ID.segment);
+  if (segment === undefined) {
+    throw new WebmParseError('no top-level "Segment" element found');
+  }
+
+  const trackNumber = findWebmTrackNumberByType(view, segment, trackType);
+  if (trackNumber === undefined) {
+    return undefined;
+  }
+
+  return findLastBlockEndTimestampForTrack(view, segment, trackNumber);
 }
