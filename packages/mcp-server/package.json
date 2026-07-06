@@ -23,6 +23,7 @@
     "lint": "eslint src"
   },
   "dependencies": {
+    "@cadra/core": "workspace:*",
     "@cadra/schema": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^4.4.3"
