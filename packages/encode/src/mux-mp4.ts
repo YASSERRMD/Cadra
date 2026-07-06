@@ -178,6 +178,14 @@ export async function muxToMp4Blob(
  *
  * `audio` is optional; see `muxToMp4Buffer`'s doc for its optionality
  * rationale.
+ *
+ * Once every chunk is fed and the muxer's own `finalize()` has returned,
+ * this also calls `toSequentialOnData`'s returned `close()`: for a
+ * `WebWritableStreamLike` destination, this closes the held writer (see
+ * `SequentialOnDataTarget.close`'s own doc for why this matters and was
+ * missing before this fix), signaling completion to whatever is consuming
+ * the other end of that stream; for a `NodeWritableLike` destination it is
+ * a no-op, leaving that destination's lifecycle to the caller unchanged.
  */
 export async function muxToMp4Stream(
   chunks: AsyncGenerator<EncodedChunkResult>,
@@ -186,8 +194,9 @@ export async function muxToMp4Stream(
   destination: NodeWritableLike | WebWritableStreamLike,
   audio?: MuxMp4AudioTrackOptions,
 ): Promise<void> {
+  const sequentialTarget = toSequentialOnData(destination);
   const target = new Mp4StreamTarget({
-    onData: toSequentialOnData(destination),
+    onData: sequentialTarget.onData,
   });
   const muxer = new Mp4Muxer({
     target,
@@ -208,4 +217,5 @@ export async function muxToMp4Stream(
   });
 
   await feedChunksIntoMuxer(muxer, chunks, audio);
+  await sequentialTarget.close();
 }

@@ -101,6 +101,27 @@ export type CapturedFrame = CapturedVideoFrame | CapturedPixelBuffer;
  * yielding the raw `PixelBuffer` (with the same computed `frame`/
  * `timestamp`) when WebCodecs is unavailable in this environment.
  *
+ * Every constructed `VideoFrame` also carries an explicit `duration`
+ * (`frameToMicrosecondTimestamp(frame + 1, fps) -
+ * frameToMicrosecondTimestamp(frame, fps)`, i.e. exactly one frame's worth
+ * of microseconds at this composition's fps), not left `undefined`: a real
+ * `VideoEncoder`, lacking an explicit source `VideoFrame.duration`,
+ * evidently derives each output `EncodedVideoChunk.duration` from the gap
+ * to the *next* frame's timestamp instead, which has no defined value for
+ * the very last frame in a stream (there is no next frame to measure a gap
+ * to). Verified directly against a real Chromium `VideoEncoder` while
+ * building Phase 23's headless server render path: without this explicit
+ * `duration`, the last frame's encoded chunk (and therefore the muxed
+ * file's own last sample, and the fragment/track duration
+ * `readMp4FragmentedDurationTicks`/`readMp4TrackTimescale`'s callers derive
+ * from summing every sample) silently came out exactly one frame short of
+ * `durationInFrames / fps`, a real bug that the pre-existing muxer test
+ * suite's own fake, pre-canned `EncodedVideoChunk`s (which always hardcoded
+ * an explicit non-zero duration on every chunk, including the last) never
+ * had the chance to surface. Setting `duration` explicitly here removes the
+ * ambiguity for the encoder entirely, for every frame, not just the last.
+ *
+
  * A streaming transform over `renderedFrames`, matching `renderComposition`'s
  * own one-item-at-a-time shape: nothing is collected into an array, so a
  * consumer (e.g. Phase 20's `VideoEncoder` pipeline) can encode and discard
@@ -139,6 +160,16 @@ export async function* captureFrames(
   try {
     for await (const rendered of renderedFrames) {
       const timestamp = frameToMicrosecondTimestamp(rendered.frame, options.fps);
+      // See this function's own doc for why this is computed as a
+      // difference of two timestamps (matching whatever gap-derivation a
+      // real encoder itself uses for every frame but the last) rather than
+      // a simpler `MICROSECONDS_PER_SECOND / options.fps`: both are
+      // mathematically the same value, but computing it this way keeps a
+      // single shared rounding rule (`frameToMicrosecondTimestamp`'s own)
+      // as the sole source of truth for every timestamp/duration this
+      // module produces.
+      const duration =
+        frameToMicrosecondTimestamp(rendered.frame + 1, options.fps) - timestamp;
 
       if (webCodecsAvailable && videoFrameConstructor !== undefined) {
         const videoFrame = new videoFrameConstructor(rendered.pixels.data, {
@@ -146,6 +177,7 @@ export async function* captureFrames(
           codedWidth: rendered.pixels.width,
           codedHeight: rendered.pixels.height,
           timestamp,
+          duration,
           colorSpace,
         });
         yield { kind: "video-frame", frame: rendered.frame, timestamp, videoFrame };

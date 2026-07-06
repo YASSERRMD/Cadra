@@ -57,6 +57,20 @@
  * tracks, where the container format exposes a per-track value), for
  * validating muxer output against what was fed into it without needing a
  * real media player available.
+ *
+ * `runBrowserHeadlessRender` (`browser-headless-render-entry.ts`) is Phase
+ * 23's browser-side entry point: a video-only pipeline (real `createRenderer()`
+ * + a real canvas-snapshot `readPixels`, through `renderComposition` ->
+ * `captureFrames` -> `encodeFrames` -> `muxToMp4Stream`/`muxToWebmStream`)
+ * meant to run inside a headless-Chromium page, never imported by other
+ * TypeScript source in this workspace. `@cadra/headless`'s server
+ * orchestrator bundles it (via esbuild, pointed at
+ * `BROWSER_HEADLESS_RENDER_ENTRY_PATH`, this compiled file's own resolved
+ * path) and injects the bundle into a real page; see that package's own
+ * `bundle-browser-entry.ts`/`render-composition-headless-server.ts` docs for
+ * why the bundling logic itself lives there instead of here (avoiding a
+ * circular `@cadra/headless` <-> `@cadra/encode` workspace dependency, since
+ * this package already depends on `@cadra/headless` for `renderComposition`).
  */
 
 export const VERSION = "0.0.0";
@@ -77,6 +91,9 @@ export {
   getGlobalAudioEncoderConstructor,
   getGlobalIsAudioConfigSupported,
 } from "./audio-encoder-factory.js";
+export type { BrowserHeadlessRenderConfig } from "./browser-headless-render-entry.js";
+export { runBrowserHeadlessRender } from "./browser-headless-render-entry.js";
+export { BROWSER_HEADLESS_RENDER_ENTRY_PATH } from "./browser-headless-render-entry-path.js";
 export type {
   CapturedFrame,
   CapturedPixelBuffer,
@@ -135,7 +152,11 @@ export {
 } from "./mux-codec-mapping.js";
 export type { MuxMp4AudioTrackOptions, MuxMp4Options } from "./mux-mp4.js";
 export { muxToMp4Blob, muxToMp4Buffer, muxToMp4Stream } from "./mux-mp4.js";
-export type { NodeWritableLike, WebWritableStreamLike } from "./mux-stream-target.js";
+export type {
+  NodeWritableLike,
+  SequentialOnDataTarget,
+  WebWritableStreamLike,
+} from "./mux-stream-target.js";
 export { NonSequentialMuxWriteError, toSequentialOnData } from "./mux-stream-target.js";
 export {
   expectedDurationSeconds,

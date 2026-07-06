@@ -200,6 +200,14 @@ export async function muxToWebmBlob(
  *
  * `audio` is optional; see `muxToWebmBuffer`'s doc for its optionality
  * rationale.
+ *
+ * Once every chunk is fed and the muxer's own `finalize()` has returned,
+ * this also calls `toSequentialOnData`'s returned `close()`: for a
+ * `WebWritableStreamLike` destination, this closes the held writer (see
+ * `SequentialOnDataTarget.close`'s own doc for why this matters and was
+ * missing before this fix), signaling completion to whatever is consuming
+ * the other end of that stream; for a `NodeWritableLike` destination it is
+ * a no-op, leaving that destination's lifecycle to the caller unchanged.
  */
 export async function muxToWebmStream(
   chunks: AsyncGenerator<EncodedChunkResult>,
@@ -208,8 +216,9 @@ export async function muxToWebmStream(
   destination: NodeWritableLike | WebWritableStreamLike,
   audio?: MuxWebmAudioTrackOptions,
 ): Promise<void> {
+  const sequentialTarget = toSequentialOnData(destination);
   const target = new WebmStreamTarget({
-    onData: toSequentialOnData(destination),
+    onData: sequentialTarget.onData,
   });
   const muxer = new WebmMuxer({
     target,
@@ -230,4 +239,5 @@ export async function muxToWebmStream(
   });
 
   await feedChunksIntoMuxer(muxer, chunks, audio);
+  await sequentialTarget.close();
 }
