@@ -56,6 +56,66 @@ export interface Track {
 }
 
 /**
+ * A linear ramp applied at the start (`fadeIn`) or end (`fadeOut`) of an
+ * `AudioClip`'s own window. Just a duration: the ramp's shape (gain 0 to
+ * `clip.gain` for `fadeIn`, `clip.gain` to 0 for `fadeOut`) is fixed, computed
+ * by `computeGainAtLocalFrame` (see `../audio/gain-envelope.js`) rather than
+ * being itself a configurable curve. A richer per-fade easing curve is a
+ * reasonable future extension, not needed yet.
+ */
+export interface AudioFadeEnvelope {
+  durationInFrames: number;
+}
+
+/**
+ * A single piece of audio content placed on an `AudioTrack`.
+ *
+ * Mirrors `Clip`'s integer-frame, half-open-window convention:
+ * `startFrame`/`durationInFrames` place this clip on the composition's
+ * timeline exactly like `Clip` does, and `resolveSequenceFrame` (the same
+ * helper `Clip` visibility uses) applies unchanged here too.
+ *
+ * `assetRef` names the source audio asset (an `AssetDescriptor.url`, or
+ * whatever id scheme the asset pipeline uses); this module stays
+ * environment-agnostic and never loads or decodes the referenced bytes
+ * itself, matching how `ImageNode`/`MeshNode` reference assets by id/url
+ * rather than embedding them.
+ *
+ * `trimStartFrames` (default `0`) is how many frames into the *source* audio
+ * playback begins: distinct from `startFrame`, which is where the clip sits
+ * on the *composition* timeline. `gain` (default `1`) is a linear multiplier
+ * applied to the source audio's amplitude. `fadeIn`/`fadeOut` are optional
+ * ramps at the clip's own start/end; see `computeGainAtLocalFrame` for the
+ * exact ramp math and how a clip too short for its authored fade durations is
+ * handled.
+ */
+export interface AudioClip {
+  id: string;
+  /** The frame, relative to the start of its composition, this clip begins on. */
+  startFrame: number;
+  /** How many frames this clip plays for. */
+  durationInFrames: number;
+  /** Identifies the source audio asset this clip plays. */
+  assetRef: string;
+  /** How many frames into the source audio playback begins. Defaults to `0`. */
+  trimStartFrames?: number;
+  /** Linear gain multiplier applied to the source audio. Defaults to `1`. */
+  gain?: number;
+  /** Optional ramp from silence up to `gain` at the start of this clip's window. */
+  fadeIn?: AudioFadeEnvelope;
+  /** Optional ramp from `gain` down to silence at the end of this clip's window. */
+  fadeOut?: AudioFadeEnvelope;
+}
+
+/** An ordered lane of non-overlapping-by-convention audio clips. */
+export interface AudioTrack {
+  id: string;
+  /** Optional human-readable label, purely for authoring and debugging. */
+  name?: string;
+  clips: AudioClip[];
+}
+
+/**
  * Names which `CameraNode` is the active camera for a window of frames on a
  * `Composition`'s `activeCameraTrack`.
  *
@@ -98,6 +158,13 @@ export interface Composition {
    * camera-driven rendering yet).
    */
   activeCameraTrack?: ActiveCameraEntry[];
+  /**
+   * Optional, separate lanes of audio content, independent of `tracks` (which
+   * only ever carries visual scene-node content). Omitted means this
+   * composition has no audio at all, matching every composition authored
+   * before Phase 16. See `AudioTrack`/`AudioClip`.
+   */
+  audioTracks?: AudioTrack[];
 }
 
 /** The top-level authoring unit: a named collection of compositions. */

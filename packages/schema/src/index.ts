@@ -53,6 +53,9 @@ export {
 } from "./scene-node.js";
 export {
   activeCameraEntrySchema,
+  audioClipSchema,
+  audioFadeEnvelopeSchema,
+  audioTrackSchema,
   clipSchema,
   compositionSchema,
   projectSchema,
