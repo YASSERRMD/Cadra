@@ -16,6 +16,14 @@
  * (`Keyframe<T>`, `KeyframeTrack<T>`, `Property<T>`) the same way, guarded by
  * the same `_Check*` pattern applied to one concrete instantiation of each
  * generic schema.
+ *
+ * `./capabilities.ts`, `./examples.ts`, and `./describe.ts` (Phase 27) round
+ * this package out into a genuinely self-describing contract: `parseScene`'s
+ * diagnostics now include an `expected` and a `suggestedFix` for the common
+ * error classes, and `describeCadraContract()` returns the full
+ * `{ schemaVersion, jsonSchema, capabilities, examples }` contract in one
+ * call, so any agent can learn the format (and self-correct a bad document)
+ * at runtime with nothing more than this package.
  */
 
 export const VERSION = "0.0.0";
@@ -25,8 +33,19 @@ export const VERSION = "0.0.0";
  */
 export const PACKAGE_NAME = "@cadra/schema";
 
+export type {
+  CapabilityManifest,
+  CodecCapability,
+  EasingCapability,
+  PrimitiveCapability,
+} from "./capabilities.js";
+export { generateCapabilityManifest } from "./capabilities.js";
+export type { CadraContract } from "./describe.js";
+export { describeCadraContract } from "./describe.js";
 export type { SceneDocument } from "./envelope.js";
 export { CURRENT_SCHEMA_VERSION, sceneDocumentSchema, schemaVersionSchema } from "./envelope.js";
+export type { NamedSceneDocumentExample } from "./examples.js";
+export { EXAMPLE_SCENE_DOCUMENTS } from "./examples.js";
 export { generateSceneJsonSchema } from "./json-schema.js";
 export { easingSchema, keyframeSchema, keyframeTrackSchema, propertySchema } from "./keyframes.js";
 export type { SceneMigration } from "./migrate.js";
