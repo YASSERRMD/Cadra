@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   activeCameraEntrySchema,
+  audioClipSchema,
+  audioFadeEnvelopeSchema,
+  audioTrackSchema,
   clipSchema,
   compositionSchema,
   projectSchema,
@@ -220,6 +223,195 @@ describe("trackSchema", () => {
   });
 });
 
+describe("audioFadeEnvelopeSchema", () => {
+  it("accepts a valid envelope", () => {
+    expect(audioFadeEnvelopeSchema.safeParse({ durationInFrames: 15 }).success).toBe(true);
+  });
+
+  it("accepts durationInFrames of 0", () => {
+    expect(audioFadeEnvelopeSchema.safeParse({ durationInFrames: 0 }).success).toBe(true);
+  });
+
+  it("rejects a negative durationInFrames", () => {
+    expect(audioFadeEnvelopeSchema.safeParse({ durationInFrames: -1 }).success).toBe(false);
+  });
+
+  it("rejects a non-integer durationInFrames", () => {
+    expect(audioFadeEnvelopeSchema.safeParse({ durationInFrames: 1.5 }).success).toBe(false);
+  });
+});
+
+describe("audioClipSchema", () => {
+  function validAudioClip() {
+    return {
+      id: "audio-clip-1",
+      startFrame: 0,
+      durationInFrames: 30,
+      assetRef: "music.mp3",
+    };
+  }
+
+  it("accepts a minimal valid clip (only required fields)", () => {
+    expect(audioClipSchema.safeParse(validAudioClip()).success).toBe(true);
+  });
+
+  it("accepts a clip with every optional field populated", () => {
+    const result = audioClipSchema.safeParse({
+      ...validAudioClip(),
+      trimStartFrames: 10,
+      gain: 0.8,
+      fadeIn: { durationInFrames: 5 },
+      fadeOut: { durationInFrames: 5 },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a negative startFrame", () => {
+    const result = audioClipSchema.safeParse({ ...validAudioClip(), startFrame: -1 });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a non-integer startFrame", () => {
+    const result = audioClipSchema.safeParse({ ...validAudioClip(), startFrame: 1.5 });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a durationInFrames of 0 (must be strictly positive)", () => {
+    const result = audioClipSchema.safeParse({ ...validAudioClip(), durationInFrames: 0 });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a non-integer durationInFrames", () => {
+    const result = audioClipSchema.safeParse({ ...validAudioClip(), durationInFrames: 30.5 });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a negative trimStartFrames", () => {
+    const result = audioClipSchema.safeParse({ ...validAudioClip(), trimStartFrames: -5 });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a non-integer trimStartFrames", () => {
+    const result = audioClipSchema.safeParse({ ...validAudioClip(), trimStartFrames: 2.5 });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a negative gain, with a diagnostic naming the gain field", () => {
+    const result = audioClipSchema.safeParse({ ...validAudioClip(), gain: -0.5 });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((candidate) => candidate.path.join(".") === "gain");
+      expect(issue).toBeDefined();
+      expect(issue?.message).toMatch(/non-negative/);
+    }
+  });
+
+  it("accepts a gain of exactly 0 (silent, but not negative)", () => {
+    const result = audioClipSchema.safeParse({ ...validAudioClip(), gain: 0 });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a fadeIn longer than the clip's own durationInFrames, with a precise diagnostic", () => {
+    const result = audioClipSchema.safeParse({
+      ...validAudioClip(),
+      durationInFrames: 10,
+      fadeIn: { durationInFrames: 20 },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((candidate) =>
+        candidate.path.join(".").includes("fadeIn"),
+      );
+      expect(issue).toBeDefined();
+      expect(issue?.message).toMatch(/must not exceed this clip's own durationInFrames/);
+    }
+  });
+
+  it("rejects a fadeOut longer than the clip's own durationInFrames, with a precise diagnostic", () => {
+    const result = audioClipSchema.safeParse({
+      ...validAudioClip(),
+      durationInFrames: 10,
+      fadeOut: { durationInFrames: 20 },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((candidate) =>
+        candidate.path.join(".").includes("fadeOut"),
+      );
+      expect(issue).toBeDefined();
+      expect(issue?.message).toMatch(/must not exceed this clip's own durationInFrames/);
+    }
+  });
+
+  it("accepts a fadeIn exactly equal to the clip's durationInFrames (the individual boundary)", () => {
+    const result = audioClipSchema.safeParse({
+      ...validAudioClip(),
+      durationInFrames: 10,
+      fadeIn: { durationInFrames: 10 },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts fadeIn and fadeOut whose combined duration exceeds durationInFrames (only the individual bound is enforced)", () => {
+    const result = audioClipSchema.safeParse({
+      ...validAudioClip(),
+      durationInFrames: 10,
+      fadeIn: { durationInFrames: 8 },
+      fadeOut: { durationInFrames: 8 },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("reports both an over-long fadeIn and fadeOut as two separate issues", () => {
+    const result = audioClipSchema.safeParse({
+      ...validAudioClip(),
+      durationInFrames: 5,
+      fadeIn: { durationInFrames: 100 },
+      fadeOut: { durationInFrames: 100 },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const fadeInIssue = result.error.issues.find((candidate) =>
+        candidate.path.join(".").includes("fadeIn"),
+      );
+      const fadeOutIssue = result.error.issues.find((candidate) =>
+        candidate.path.join(".").includes("fadeOut"),
+      );
+      expect(fadeInIssue).toBeDefined();
+      expect(fadeOutIssue).toBeDefined();
+    }
+  });
+
+  it("rejects an unknown extra field (strictObject)", () => {
+    const result = audioClipSchema.safeParse({ ...validAudioClip(), unexpectedField: true });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("audioTrackSchema", () => {
+  it("accepts a track with an empty clips array", () => {
+    const result = audioTrackSchema.safeParse({ id: "audio-track-1", clips: [] });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a track name as optional", () => {
+    const result = audioTrackSchema.safeParse({
+      id: "audio-track-1",
+      name: "Music",
+      clips: [],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a track whose clips array contains an invalid clip", () => {
+    const result = audioTrackSchema.safeParse({
+      id: "audio-track-1",
+      clips: [{ id: "clip-1", startFrame: -1, durationInFrames: 30, assetRef: "a.mp3" }],
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
 describe("compositionSchema", () => {
   function validComposition() {
     return {
@@ -284,6 +476,38 @@ describe("compositionSchema", () => {
     const result = compositionSchema.safeParse({
       ...validComposition(),
       activeCameraTrack: [{ startFrame: 0, durationInFrames: -1, cameraNodeId: "camera-a" }],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts a composition with no audioTracks at all (every composition authored before Phase 16)", () => {
+    expect(compositionSchema.safeParse(validComposition()).success).toBe(true);
+  });
+
+  it("accepts a composition with audioTracks", () => {
+    const result = compositionSchema.safeParse({
+      ...validComposition(),
+      audioTracks: [
+        {
+          id: "audio-track-1",
+          clips: [
+            { id: "clip-1", startFrame: 0, durationInFrames: 90, assetRef: "music.mp3", gain: 0.8 },
+          ],
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a composition whose audioTracks contains an invalid clip", () => {
+    const result = compositionSchema.safeParse({
+      ...validComposition(),
+      audioTracks: [
+        {
+          id: "audio-track-1",
+          clips: [{ id: "clip-1", startFrame: 0, durationInFrames: 90, assetRef: "m.mp3", gain: -1 }],
+        },
+      ],
     });
     expect(result.success).toBe(false);
   });

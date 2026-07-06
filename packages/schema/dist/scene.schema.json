@@ -179,6 +179,106 @@
                   ],
                   "additionalProperties": false
                 }
+              },
+              "audioTracks": {
+                "description": "Optional lanes of audio content, independent of tracks.",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Unique identifier for this track within the project."
+                    },
+                    "name": {
+                      "description": "Optional human-readable label, purely for authoring and debugging.",
+                      "type": "string"
+                    },
+                    "clips": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "description": "Unique identifier for this clip within the project."
+                          },
+                          "startFrame": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991,
+                            "description": "The frame, relative to the start of its composition, this clip begins on."
+                          },
+                          "durationInFrames": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991,
+                            "description": "How many frames this clip plays for."
+                          },
+                          "assetRef": {
+                            "type": "string",
+                            "description": "Identifies the source audio asset this clip plays."
+                          },
+                          "trimStartFrames": {
+                            "description": "How many frames into the source audio playback begins. Defaults to 0.",
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "gain": {
+                            "description": "Linear gain multiplier applied to the source audio. Defaults to 1.",
+                            "type": "number"
+                          },
+                          "fadeIn": {
+                            "description": "Optional ramp from silence up to gain at the start of this clip's window.",
+                            "type": "object",
+                            "properties": {
+                              "durationInFrames": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991,
+                                "description": "How many frames this fade ramp takes to complete."
+                              }
+                            },
+                            "required": [
+                              "durationInFrames"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "fadeOut": {
+                            "description": "Optional ramp from gain down to silence at the end of this clip's window.",
+                            "type": "object",
+                            "properties": {
+                              "durationInFrames": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991,
+                                "description": "How many frames this fade ramp takes to complete."
+                              }
+                            },
+                            "required": [
+                              "durationInFrames"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "startFrame",
+                          "durationInFrames",
+                          "assetRef"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered audio clips placed on this track."
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "clips"
+                  ],
+                  "additionalProperties": false
+                }
               }
             },
             "required": [
