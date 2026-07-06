@@ -2,6 +2,7 @@
 import { createFrameContext, createIdentityTransform, type SceneState } from "@cadra/core";
 import { describe, expect, it, vi } from "vitest";
 
+import type { PixelReadableRenderer } from "../pixel-readable-renderer.js";
 import type { Renderer, RendererCapabilities } from "../renderer.js";
 import { RendererNotInitializedError } from "../three-renderer.js";
 import { createWorkerLayerCache, reconstructSceneState } from "./scene-state-diff.js";
@@ -421,6 +422,60 @@ describe("createWorkerRenderer", () => {
       });
 
       expect(reconstructed).toEqual(directCalls);
+    });
+  });
+
+  describe("readPixels()", () => {
+    async function setUpInitializedRenderer(): Promise<{
+      worker: ReturnType<typeof createFakeWorker>;
+      renderer: PixelReadableRenderer;
+    }> {
+      const worker = createFakeWorker();
+      const { canvas } = createCanvasWithFakeOffscreenTransfer();
+      const renderer = createWorkerRenderer({ createWorker: () => worker });
+      const initPromise = renderer.init(canvas, size);
+      ackInit(worker);
+      await initPromise;
+      return { worker, renderer };
+    }
+
+    it("posts a readPixels request and resolves with the pixels payload of its readPixelsAck", async () => {
+      const { worker, renderer } = await setUpInitializedRenderer();
+      const pixels = { width: 640, height: 480, data: new Uint8ClampedArray(640 * 480 * 4) };
+
+      const readPixelsPromise = renderer.readPixels();
+      const request = worker.posted.find((entry) => entry.message.type === "readPixels");
+      expect(request).toBeDefined();
+      worker.deliver({ type: "readPixelsAck", requestId: request!.message.requestId, pixels });
+
+      await expect(readPixelsPromise).resolves.toBe(pixels);
+    });
+
+    it("rejects with WorkerRendererError when the worker responds with an error", async () => {
+      const { worker, renderer } = await setUpInitializedRenderer();
+
+      const readPixelsPromise = renderer.readPixels();
+      const request = worker.posted.find((entry) => entry.message.type === "readPixels");
+      worker.deliver({
+        type: "error",
+        requestId: request!.message.requestId,
+        message: "readPixels failed: renderer is not pixel-readable",
+      });
+
+      await expect(readPixelsPromise).rejects.toThrow(WorkerRendererError);
+      await expect(readPixelsPromise).rejects.toThrow(/readPixels failed/);
+    });
+
+    it("rejects with WorkerRendererNotInitializedError before init() resolves, matching init()'s own Promise-returning contract", async () => {
+      const worker = createFakeWorker();
+      const renderer = createWorkerRenderer({ createWorker: () => worker });
+
+      // readPixels() is itself Promise-returning (unlike renderFrame/resize/
+      // dispose, which are synchronous-void on the Renderer interface), so
+      // it rejects rather than throwing synchronously, matching init()'s
+      // own not-yet-a-canvas-element precondition failure.
+      await expect(renderer.readPixels()).rejects.toThrow(WorkerRendererNotInitializedError);
+      expect(worker.posted).toHaveLength(0);
     });
   });
 });

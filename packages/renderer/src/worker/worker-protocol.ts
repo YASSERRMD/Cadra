@@ -1,5 +1,6 @@
 import type { FrameContext, ResolvedLayer, SceneState } from "@cadra/core";
 
+import type { PixelBuffer } from "../pixel-readable-renderer.js";
 import type { RendererCapabilities, RenderSize } from "../renderer.js";
 
 /**
@@ -69,6 +70,10 @@ export type WorkerRequest =
   | {
       type: "dispose";
       requestId: number;
+    }
+  | {
+      type: "readPixels";
+      requestId: number;
     };
 
 /**
@@ -94,4 +99,5 @@ export type WorkerResponse =
   | { type: "resizeAck"; requestId: number }
   | { type: "renderFrameAck"; requestId: number }
   | { type: "disposeAck"; requestId: number }
+  | { type: "readPixelsAck"; requestId: number; pixels: PixelBuffer }
   | { type: "error"; requestId: number; message: string };

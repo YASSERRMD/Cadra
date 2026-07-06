@@ -97,6 +97,13 @@ importers:
         version: 2.1.9(jsdom@25.0.1)
 
   packages/headless:
+    dependencies:
+      '@cadra/core':
+        specifier: workspace:*
+        version: link:../core
+      '@cadra/renderer':
+        specifier: workspace:*
+        version: link:../renderer
     devDependencies:
       typescript:
         specifier: ^5.7.3

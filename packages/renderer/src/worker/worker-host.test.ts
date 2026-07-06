@@ -6,8 +6,13 @@ import {
 } from "@cadra/core";
 import { describe, expect, it, vi } from "vitest";
 
+import type { PixelReadableRenderer } from "../pixel-readable-renderer.js";
 import type { Renderer, RendererCapabilities } from "../renderer.js";
-import { createWorkerHost, WorkerHostNotInitializedError } from "./worker-host.js";
+import {
+  createWorkerHost,
+  WorkerHostNotInitializedError,
+  WorkerRendererNotPixelReadableError,
+} from "./worker-host.js";
 import type { DiffedSceneState, WorkerRequest, WorkerResponse } from "./worker-protocol.js";
 
 const capabilities: RendererCapabilities = {
@@ -25,6 +30,19 @@ function createFakeRenderer(overrides: Partial<Renderer> = {}): Renderer {
     dispose: vi.fn(),
     backend: "webgpu",
     capabilities,
+    ...overrides,
+  };
+}
+
+/** A minimal fake `PixelReadableRenderer`: a `createFakeRenderer` plus a stubbed `readPixels`. */
+function createFakePixelReadableRenderer(
+  overrides: Partial<PixelReadableRenderer> = {},
+): PixelReadableRenderer {
+  return {
+    ...createFakeRenderer(),
+    readPixels: vi
+      .fn()
+      .mockResolvedValue({ width: 2, height: 1, data: new Uint8ClampedArray(8) }),
     ...overrides,
   };
 }
@@ -257,8 +275,54 @@ describe("createWorkerHost", () => {
     });
   });
 
+  it("on readPixels (after init, pixel-readable renderer): calls renderer.readPixels() and posts readPixelsAck with the pixels", async () => {
+    const pixels = { width: 4, height: 2, data: new Uint8ClampedArray(32) };
+    const fakeRenderer = createFakePixelReadableRenderer({
+      readPixels: vi.fn().mockResolvedValue(pixels),
+    });
+    const postResponse = vi.fn();
+    const host = createWorkerHost({ createRenderer: () => fakeRenderer, postResponse });
+    await host.handleRequest({ type: "init", requestId: 1, canvas, size });
+
+    await host.handleRequest({ type: "readPixels", requestId: 5 });
+
+    expect(fakeRenderer.readPixels).toHaveBeenCalledTimes(1);
+    expect(postResponse).toHaveBeenCalledWith({ type: "readPixelsAck", requestId: 5, pixels });
+  });
+
+  it("on readPixels (before init): posts an error response instead of throwing/hanging", async () => {
+    const postResponse = vi.fn();
+    const host = createWorkerHost({
+      createRenderer: () => createFakePixelReadableRenderer(),
+      postResponse,
+    });
+
+    await host.handleRequest({ type: "readPixels", requestId: 5 });
+
+    expect(postResponse).toHaveBeenCalledWith({
+      type: "error",
+      requestId: 5,
+      message: new WorkerHostNotInitializedError().message,
+    });
+  });
+
+  it("on readPixels (renderer does not implement PixelReadableRenderer): posts an error response instead of throwing", async () => {
+    const plainRenderer = createFakeRenderer();
+    const postResponse = vi.fn();
+    const host = createWorkerHost({ createRenderer: () => plainRenderer, postResponse });
+    await host.handleRequest({ type: "init", requestId: 1, canvas, size });
+
+    await host.handleRequest({ type: "readPixels", requestId: 5 });
+
+    expect(postResponse).toHaveBeenCalledWith({
+      type: "error",
+      requestId: 5,
+      message: new WorkerRendererNotPixelReadableError().message,
+    });
+  });
+
   it("posts a response formatted as a WorkerResponse for every request type it handles", async () => {
-    const fakeRenderer = createFakeRenderer();
+    const fakeRenderer = createFakePixelReadableRenderer();
     const responses: WorkerResponse[] = [];
     const host = createWorkerHost({
       createRenderer: () => fakeRenderer,
@@ -273,12 +337,14 @@ describe("createWorkerHost", () => {
       sceneState: emptyDiffedSceneState,
       frameContext,
     });
+    await host.handleRequest({ type: "readPixels", requestId: 5 });
     await host.handleRequest({ type: "dispose", requestId: 4 });
 
     expect(responses.map((response) => response.type)).toEqual([
       "initAck",
       "resizeAck",
       "renderFrameAck",
+      "readPixelsAck",
       "disposeAck",
     ]);
   });
