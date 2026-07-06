@@ -1,6 +1,7 @@
 import { ArrayBufferTarget, Muxer as Mp4Muxer, StreamTarget as Mp4StreamTarget } from "mp4-muxer";
 
 import type { EncodedChunkResult } from "./encode-frames.js";
+import { extractRawChunkBytes } from "./mux-chunk-bytes.js";
 import { toMp4VideoCodec } from "./mux-codec-mapping.js";
 import type { NodeWritableLike, WebWritableStreamLike } from "./mux-stream-target.js";
 import { toSequentialOnData } from "./mux-stream-target.js";
@@ -23,23 +24,20 @@ export interface MuxMp4Options {
 /**
  * Consumes `chunks` (Phase 20's `encodeFrames` output) into `muxer` in
  * arrival order, then finalizes. Shared by every `muxToMp4*` entry point
- * below so the actual chunk-feeding loop (and its "derive the mp4-muxer
- * codec enum from the first chunk's own metadata" step) has exactly one
- * implementation.
+ * below so the actual chunk-feeding loop has exactly one implementation.
  *
- * Codec is read from the first yielded chunk's `metadata.decoderConfig.codec`
- * when present (the authoritative source: this is the codec
- * `encodeFrames`'s `probeSupportedCodec` actually selected), falling back to
- * `fallbackCodec` (the codec `encodeFrames` was configured to request) only
- * when a particular `VideoEncoder` implementation omits it from the first
- * chunk's metadata, which the WebCodecs spec permits but does not require.
+ * Uses `addVideoChunkRaw` rather than `addVideoChunk`: see
+ * `mux-chunk-bytes.ts`'s own doc for why (in short, `addVideoChunk`
+ * requires a real `instanceof EncodedVideoChunk`, which only a genuine
+ * WebCodecs-capable environment provides).
  */
 async function feedChunksIntoMuxer(
   muxer: Mp4Muxer<ArrayBufferTarget | Mp4StreamTarget>,
   chunks: AsyncGenerator<EncodedChunkResult>,
 ): Promise<void> {
-  for await (const { chunk, metadata } of chunks) {
-    muxer.addVideoChunk(chunk, metadata);
+  for await (const { frame, chunk, metadata } of chunks) {
+    const raw = extractRawChunkBytes(chunk, frame);
+    muxer.addVideoChunkRaw(raw.data, raw.type, raw.timestamp, raw.duration, metadata);
   }
   muxer.finalize();
 }

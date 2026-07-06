@@ -64,6 +64,8 @@ export {
   encodeFrames,
   WebCodecsUnavailableForEncodingError,
 } from "./encode-frames.js";
+export type { RawChunkBytes } from "./mux-chunk-bytes.js";
+export { extractRawChunkBytes, MissingChunkDurationError } from "./mux-chunk-bytes.js";
 export type { Mp4VideoCodec, WebmVideoCodec } from "./mux-codec-mapping.js";
 export {
   toMp4VideoCodec,
@@ -82,7 +84,12 @@ export {
   WEBM_TIMESTAMP_SCALE_NANOSECONDS,
 } from "./mux-timescale.js";
 export type { Mp4MovieHeader } from "./mux-validate-mp4.js";
-export { Mp4ParseError, readMp4MovieHeader } from "./mux-validate-mp4.js";
+export {
+  Mp4ParseError,
+  readMp4FragmentedDurationTicks,
+  readMp4MovieHeader,
+  readMp4TrackTimescale,
+} from "./mux-validate-mp4.js";
 export type { WebmSegmentInfo } from "./mux-validate-webm.js";
 export { readWebmSegmentInfo, WebmParseError } from "./mux-validate-webm.js";
 export type { MuxWebmOptions } from "./mux-webm.js";

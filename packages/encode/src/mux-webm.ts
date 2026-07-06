@@ -1,10 +1,7 @@
-import {
-  ArrayBufferTarget,
-  Muxer as WebmMuxer,
-  StreamTarget as WebmStreamTarget,
-} from "webm-muxer";
+import { ArrayBufferTarget, Muxer as WebmMuxer, StreamTarget as WebmStreamTarget } from "webm-muxer";
 
 import type { EncodedChunkResult } from "./encode-frames.js";
+import { extractRawChunkBytes } from "./mux-chunk-bytes.js";
 import { toWebmVideoCodec } from "./mux-codec-mapping.js";
 import type { NodeWritableLike, WebWritableStreamLike } from "./mux-stream-target.js";
 import { toSequentialOnData } from "./mux-stream-target.js";
@@ -26,12 +23,28 @@ export interface MuxWebmOptions {
   fps: number;
 }
 
+/**
+ * Consumes `chunks` (Phase 20's `encodeFrames` output) into `muxer` in
+ * arrival order, then finalizes. Shared by every `muxToWebm*` entry point
+ * below so the actual chunk-feeding loop has exactly one implementation.
+ *
+ * Uses `addVideoChunkRaw` rather than `addVideoChunk`: see
+ * `mux-chunk-bytes.ts`'s own doc for why (in short, `addVideoChunk`
+ * requires a real `instanceof EncodedVideoChunk`, which only a genuine
+ * WebCodecs-capable environment provides). Unlike mp4-muxer's
+ * `addVideoChunkRaw`, webm-muxer's version takes no explicit `duration`
+ * argument (Matroska has no per-sample duration field the way an MP4 sample
+ * table does; a track's overall duration comes from its blocks'
+ * timestamps), so `extractRawChunkBytes`'s `duration` field is read (and
+ * validated non-null) but not threaded through here.
+ */
 async function feedChunksIntoMuxer(
   muxer: WebmMuxer<ArrayBufferTarget | WebmStreamTarget>,
   chunks: AsyncGenerator<EncodedChunkResult>,
 ): Promise<void> {
-  for await (const { chunk, metadata } of chunks) {
-    muxer.addVideoChunk(chunk, metadata);
+  for await (const { frame, chunk, metadata } of chunks) {
+    const raw = extractRawChunkBytes(chunk, frame);
+    muxer.addVideoChunkRaw(raw.data, raw.type, raw.timestamp, metadata);
   }
   muxer.finalize();
 }
