@@ -154,6 +154,9 @@ importers:
       '@types/three':
         specifier: ^0.185.0
         version: 0.185.0
+      jsdom:
+        specifier: ^25.0.1
+        version: 25.0.1
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
