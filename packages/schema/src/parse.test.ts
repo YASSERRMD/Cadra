@@ -182,3 +182,130 @@ describe("parseScene: invalid documents", () => {
     ]);
   });
 });
+
+/**
+ * Table-driven coverage for the common error classes `enrichIssue` (in
+ * `./parse.ts`) recognizes: each case corrupts a fresh
+ * `minimalValidDocument()` in one specific, structurally-recognizable way,
+ * and asserts the resulting diagnostic at the expected path carries a
+ * non-empty `expected` and `suggestedFix`, not just a `message`.
+ *
+ * This is deliberately a separate `describe` block from
+ * "parseScene: invalid documents" above: that block asserts `path` and
+ * `message` are correct (the pre-Phase-27 contract), while this one asserts
+ * the new `expected`/`suggestedFix` enrichment specifically, so a future
+ * change that regresses only the enrichment (while leaving `path`/`message`
+ * intact) fails a test named for exactly that.
+ */
+interface DiagnosticEnrichmentCase {
+  /** Short label for the error class, used as the test name. */
+  name: string;
+  /** Mutates a fresh minimal valid document in place to introduce the error. */
+  corrupt: (document: ReturnType<typeof minimalValidDocument>) => void;
+  /** The exact offending path the enriched diagnostic is expected at. */
+  path: string;
+}
+
+const DIAGNOSTIC_ENRICHMENT_CASES: DiagnosticEnrichmentCase[] = [
+  {
+    name: "unknown node kind",
+    corrupt: (document) => {
+      const node = document.project.compositions[0]?.tracks[0]?.clips[0]?.node as { kind: unknown };
+      node.kind = "sprite";
+    },
+    path: "project.compositions[0].tracks[0].clips[0].node.kind",
+  },
+  {
+    name: "missing required field",
+    corrupt: (document) => {
+      const node = document.project.compositions[0]?.tracks[0]?.clips[0]?.node as {
+        transform?: unknown;
+      };
+      delete node.transform;
+    },
+    path: "project.compositions[0].tracks[0].clips[0].node.transform",
+  },
+  {
+    name: "value out of allowed range",
+    corrupt: (document) => {
+      const composition = document.project.compositions[0] as { fps: unknown };
+      composition.fps = -30;
+    },
+    path: "project.compositions[0].fps",
+  },
+  {
+    name: "unsupported schemaVersion",
+    corrupt: (document) => {
+      (document as { schemaVersion: unknown }).schemaVersion = 999;
+    },
+    path: "schemaVersion",
+  },
+];
+
+describe("parseScene: diagnostics include expected and suggestedFix", () => {
+  it.each(DIAGNOSTIC_ENRICHMENT_CASES)(
+    "reports a non-empty expected and suggestedFix for: $name",
+    ({ corrupt, path }) => {
+      const document = minimalValidDocument();
+      corrupt(document);
+
+      const result = parseScene(document);
+
+      expect(result.success).toBe(false);
+      if (result.success) {
+        return;
+      }
+      const diagnostic = result.diagnostics.find((entry) => entry.path === path);
+      expect(diagnostic, JSON.stringify(result.diagnostics, null, 2)).toBeDefined();
+      expect(diagnostic?.expected).toEqual(expect.stringMatching(/.+/));
+      expect(diagnostic?.suggestedFix).toEqual(expect.stringMatching(/.+/));
+    },
+  );
+
+  it("reports expected/suggestedFix for an invalid enum value (bad lightType)", () => {
+    const document = minimalValidDocument();
+    const clip = document.project.compositions[0]?.tracks[0]?.clips[0] as { node: unknown };
+    clip.node = {
+      id: "light-1",
+      kind: "light",
+      transform: createIdentityTransform(),
+      visible: true,
+      lightType: "neon",
+      color: [1, 1, 1, 1],
+      intensity: 1,
+      children: [],
+    };
+
+    const result = parseScene(document);
+
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const diagnostic = result.diagnostics.find(
+      (entry) => entry.path === "project.compositions[0].tracks[0].clips[0].node.lightType",
+    );
+    expect(diagnostic, JSON.stringify(result.diagnostics, null, 2)).toBeDefined();
+    expect(diagnostic?.expected).toEqual(expect.stringMatching(/.+/));
+    expect(diagnostic?.suggestedFix).toEqual(expect.stringMatching(/.+/));
+  });
+
+  it("reports expected/suggestedFix for an unrecognized field name (strict object typo)", () => {
+    const document = minimalValidDocument();
+    const composition = document.project.compositions[0] as Record<string, unknown>;
+    composition.framesPerSecond = 30;
+
+    const result = parseScene(document);
+
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const diagnostic = result.diagnostics.find(
+      (entry) => entry.path === "project.compositions[0]",
+    );
+    expect(diagnostic, JSON.stringify(result.diagnostics, null, 2)).toBeDefined();
+    expect(diagnostic?.expected).toEqual(expect.stringMatching(/.+/));
+    expect(diagnostic?.suggestedFix).toEqual(expect.stringMatching(/.+/));
+  });
+});
