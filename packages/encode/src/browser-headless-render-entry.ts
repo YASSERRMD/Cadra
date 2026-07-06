@@ -7,10 +7,12 @@ import {
 import { createPixelReadableRenderer, createRenderer, type PixelBuffer } from "@cadra/renderer";
 
 import { type CapturedVideoFrame, captureFrames } from "./capture-frames.js";
-import { encodeFrames } from "./encode-frames.js";
+import { type EncodedChunkResult, encodeFrames } from "./encode-frames.js";
 import { muxToMp4Stream } from "./mux-mp4.js";
 import type { WebWritableStreamLike } from "./mux-stream-target.js";
 import { muxToWebmStream } from "./mux-webm.js";
+import type { SerializedEncodedChunk } from "./serialized-encoded-chunk.js";
+import { serializeEncodedChunk } from "./serialized-encoded-chunk.js";
 
 /**
  * This module is never imported by other TypeScript source in this
@@ -72,6 +74,26 @@ export interface BrowserHeadlessRenderConfig {
   format: "mp4" | "webm";
   /** Target bitrate in bits per second for `encodeFrames`. */
   bitrate: number;
+}
+
+/**
+ * Config `runBrowserHeadlessRenderRange` accepts: `BrowserHeadlessRenderConfig`
+ * minus `format` (a range render never muxes; see that function's own doc),
+ * plus the frame bounds to render.
+ */
+export interface BrowserHeadlessRenderRangeConfig {
+  /** The project to render, i.e. `renderComposition`'s own `options.project`. */
+  project: Project;
+  /** Which of `project`'s compositions to render. */
+  compositionId: string;
+  /** Base seed for every frame's `FrameContext`; see `renderComposition`'s own doc for why this is required. */
+  seed: string | number;
+  /** Target bitrate in bits per second for `encodeFrames`. Must match every other range of the same job exactly (see `runBrowserHeadlessRenderRange`'s own doc for why). */
+  bitrate: number;
+  /** First frame (inclusive) of this range, i.e. `renderComposition`'s own `startFrame`. */
+  startFrame: number;
+  /** Frame index one past the last frame (exclusive) of this range, i.e. `renderComposition`'s own `endFrame`. */
+  endFrame: number;
 }
 
 
@@ -180,6 +202,93 @@ function createBridgedOnProgress(): OnProgressFn {
 }
 
 /**
+ * Shared by `runBrowserHeadlessRender`/`runBrowserHeadlessRenderRange`:
+ * looks up `compositionId` in `project`, constructs a real
+ * `createRenderer()`/`readPixels` pipeline sized to that composition, and
+ * returns the composition itself plus the `encodeFrames` output for
+ * `[startFrame, endFrame)` (defaulting to the composition's own full `[0,
+ * durationInFrames)` when omitted, matching `renderComposition`'s own
+ * defaults exactly).
+ *
+ * @throws {CompositionNotFoundForRenderError} if `compositionId` does not
+ *   exist in `project`.
+ */
+function buildEncodedChunksForRange(
+  project: Project,
+  compositionId: string,
+  seed: string | number,
+  bitrate: number,
+  range: { startFrame?: number; endFrame?: number } = {},
+): {
+  composition: { width: number; height: number; fps: number };
+  encodedChunks: AsyncGenerator<EncodedChunkResult>;
+} {
+  const foundComposition = project.compositions.find((candidate) => candidate.id === compositionId);
+  if (foundComposition === undefined) {
+    throw new CompositionNotFoundForRenderError(compositionId);
+  }
+  // Re-bound to a fresh `const`: TypeScript's control-flow narrowing of
+  // `foundComposition !== undefined` above does not flow into the nested
+  // `encodedChunksGenerator` function declaration below (a function
+  // declaration is conservatively treated as possibly running after
+  // `foundComposition` could have been reassigned, even though it is itself
+  // a `const` that provably never is). `composition` here is that same
+  // already-narrowed value, just visible to the closure without re-raising
+  // the "possibly undefined" error.
+  const composition = foundComposition;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = composition.width;
+  canvas.height = composition.height;
+
+  const innerRenderer = createRenderer();
+  const renderer = createPixelReadableRenderer({
+    renderer: innerRenderer,
+    readPixels: createRealReadPixels(),
+  });
+
+  // `init` cannot be awaited here (this function is intentionally
+  // synchronous up to its returned generator: the generator itself performs
+  // every asynchronous step, including `init`, lazily on first pull) without
+  // either making this function `async` (which would then require every
+  // caller to unwrap a further outer promise around the returned generator
+  // itself, an awkward "a promise of a generator" shape) or eagerly starting
+  // the render before a caller has had a chance to attach `onProgress`/error
+  // handling. Instead, `init` is awaited as the generator's own first
+  // action, which every consumer already awaits naturally via `for await`/
+  // `.next()`.
+  async function* encodedChunksGenerator(): AsyncGenerator<EncodedChunkResult> {
+    await renderer.init(canvas, { width: composition.width, height: composition.height });
+
+    const renderedFrames = renderComposition({
+      project,
+      compositionId,
+      renderer,
+      seed,
+      startFrame: range.startFrame,
+      endFrame: range.endFrame,
+      onProgress: createBridgedOnProgress(),
+    });
+
+    const capturedFrames = captureFrames(renderedFrames, { fps: composition.fps });
+
+    // encodeFrames only accepts the CapturedVideoFrame case (see its own
+    // doc): this page always has WebCodecs available (real Chromium, not a
+    // WebCodecs-less test double), so captureFrames always yields that case
+    // here, never the CapturedPixelBuffer fallback.
+    const videoFrames = capturedFrames as AsyncGenerator<CapturedVideoFrame>;
+    yield* encodeFrames(videoFrames, {
+      width: composition.width,
+      height: composition.height,
+      bitrate,
+      framerate: composition.fps,
+    });
+  }
+
+  return { composition, encodedChunks: encodedChunksGenerator() };
+}
+
+/**
  * Entry function this module's default export is: called via
  * `page.evaluate(runBrowserHeadlessRender, config)` (structured-cloning
  * `config` in), it runs the full render/encode/mux pipeline and resolves
@@ -202,45 +311,12 @@ function createBridgedOnProgress(): OnProgressFn {
  */
 export async function runBrowserHeadlessRender(config: BrowserHeadlessRenderConfig): Promise<void> {
   try {
-    const composition = config.project.compositions.find(
-      (candidate) => candidate.id === config.compositionId,
+    const { composition, encodedChunks } = buildEncodedChunksForRange(
+      config.project,
+      config.compositionId,
+      config.seed,
+      config.bitrate,
     );
-    if (composition === undefined) {
-      throw new CompositionNotFoundForRenderError(config.compositionId);
-    }
-
-    const canvas = document.createElement("canvas");
-    canvas.width = composition.width;
-    canvas.height = composition.height;
-
-    const innerRenderer = createRenderer();
-    const renderer = createPixelReadableRenderer({
-      renderer: innerRenderer,
-      readPixels: createRealReadPixels(),
-    });
-    await renderer.init(canvas, { width: composition.width, height: composition.height });
-
-    const renderedFrames = renderComposition({
-      project: config.project,
-      compositionId: config.compositionId,
-      renderer,
-      seed: config.seed,
-      onProgress: createBridgedOnProgress(),
-    });
-
-    const capturedFrames = captureFrames(renderedFrames, { fps: composition.fps });
-
-    // encodeFrames only accepts the CapturedVideoFrame case (see its own
-    // doc): this page always has WebCodecs available (real Chromium, not a
-    // WebCodecs-less test double), so captureFrames always yields that case
-    // here, never the CapturedPixelBuffer fallback.
-    const videoFrames = capturedFrames as AsyncGenerator<CapturedVideoFrame>;
-    const encodedChunks = encodeFrames(videoFrames, {
-      width: composition.width,
-      height: composition.height,
-      bitrate: config.bitrate,
-      framerate: composition.fps,
-    });
 
     const destination = createBridgedWriteTarget();
     const muxOptions = {
@@ -259,6 +335,70 @@ export async function runBrowserHeadlessRender(config: BrowserHeadlessRenderConf
     // is one): see this function's own doc for why only a genuine Error
     // instance's message text survives Playwright's page.evaluate rejection
     // wrapping intact.
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(message);
+  }
+}
+
+/**
+ * Phase 25's per-range entry function: renders and encodes exactly one
+ * frame range (`[config.startFrame, config.endFrame)`) of `config.project`'s
+ * composition, entirely inside this page, and returns the resulting
+ * `EncodedChunkResult`s as an ordered array of structured-clone-safe
+ * `SerializedEncodedChunk`s (see that module's own doc for why a live
+ * `EncodedVideoChunk` cannot itself cross the `page.evaluate` return-value
+ * boundary), rather than muxing/streaming anything: concatenation across
+ * every range of a job and the single final mux pass both happen back on
+ * the Node side, once every range's own segment has been collected (see
+ * `@cadra/headless`'s `render-job-orchestrator.ts`'s own doc for the full
+ * job-level design, and this package's own `render-job.ts` for the Node-side
+ * wiring that calls this function once per range/attempt).
+ *
+ * Uses the exact same `createRenderer()`/`captureFrames`/`encodeFrames`
+ * pipeline as `runBrowserHeadlessRender` (via the shared
+ * `buildEncodedChunksForRange` helper), just bounded to `[startFrame,
+ * endFrame)` via `renderComposition`'s own new sub-range support: this is
+ * what makes a range's rendered pixels identical to what a full sequential
+ * render would have produced at those same frame indices (see
+ * `renderComposition`'s own doc), and, since `encodeFrames`'s own
+ * `isKeyframeDue` check uses each frame's absolute index, a range whose
+ * `startFrame` is a multiple of `keyframeIntervalFrames` always opens with a
+ * forced keyframe, exactly as it would have within a single continuous
+ * encode of the whole composition.
+ *
+ * `config.bitrate` (and, implicitly, the resolution/framerate carried by
+ * `config.project`'s own composition) must be identical across every range
+ * of the same job: `encodeFrames`' own codec probing
+ * (`probeSupportedCodec`) always resolves the same codec choice given the
+ * same `width`/`height`/`bitrate`/`framerate`/`codecPreferences` target in
+ * the same browser/environment, so every range's own fresh `VideoEncoder`
+ * lands on the same codec family, keeping every range's keyframes mutually
+ * compatible once concatenated into a single stream and muxed once (see
+ * this package's own `render-job.ts` module doc for the full equivalence
+ * argument, including what is and is not guaranteed to be byte-identical
+ * across independently-constructed encoders).
+ *
+ * Rejects with a real `Error`, mirroring `runBrowserHeadlessRender`'s own
+ * rationale for why (see its doc).
+ */
+export async function runBrowserHeadlessRenderRange(
+  config: BrowserHeadlessRenderRangeConfig,
+): Promise<SerializedEncodedChunk[]> {
+  try {
+    const { encodedChunks } = buildEncodedChunksForRange(
+      config.project,
+      config.compositionId,
+      config.seed,
+      config.bitrate,
+      { startFrame: config.startFrame, endFrame: config.endFrame },
+    );
+
+    const serialized: SerializedEncodedChunk[] = [];
+    for await (const chunkResult of encodedChunks) {
+      serialized.push(serializeEncodedChunk(chunkResult));
+    }
+    return serialized;
+  } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(message);
   }
