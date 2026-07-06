@@ -63,6 +63,31 @@ export interface RenderCompositionOptions {
   /** Invoked once per rendered frame, after that frame's `readPixels()` resolves. */
   onProgress?: OnProgressFn;
   /**
+   * First frame (inclusive) of the sub-range to render. Defaults to `0`, the
+   * start of the composition, matching every existing caller's prior
+   * behavior exactly. Required alongside `endFrame`, and only useful,
+   * together (see `endFrame`'s doc): a caller rendering a sub-range (e.g.
+   * Phase 25's range-parallel render orchestrator) supplies both to render
+   * only frames `[startFrame, endFrame)`, while every frame's own
+   * `resolveSceneAtFrame`/`createFrameContext` call still receives its true,
+   * absolute, composition-wide `frame` index and the composition's real,
+   * unmodified `durationInFrames`. This is what makes a sub-range's pixels
+   * identical to what a full sequential render would have produced at those
+   * same frame indices: nothing about "which frames are being walked this
+   * call" leaks into the per-frame scene resolution or time/seed derivation
+   * at all, only into this loop's own start/end bounds.
+   */
+  startFrame?: number;
+  /**
+   * Frame index one past the last frame (exclusive) of the sub-range to
+   * render. Defaults to the composition's own `durationInFrames`, i.e. "walk
+   * to the true end of the composition," matching every existing caller's
+   * prior behavior exactly. See `startFrame`'s doc for the full rationale;
+   * together, `[startFrame, endFrame)` must be a subset of `[0,
+   * durationInFrames)` (both defaults already satisfy this trivially).
+   */
+  endFrame?: number;
+  /**
    * Aborting stops the walk promptly between frames: the frame currently in
    * flight when `signal` aborts is allowed to finish (never torn down
    * mid-`renderFrame`/`readPixels`), but no further frame's
@@ -71,6 +96,16 @@ export interface RenderCompositionOptions {
    * finishes, whether iteration ran to completion or was aborted.
    */
   signal?: AbortSignal;
+}
+
+/** Thrown when `startFrame`/`endFrame` do not describe a valid, in-bounds sub-range of `[0, durationInFrames)`. */
+export class InvalidFrameRangeError extends Error {
+  constructor(startFrame: number, endFrame: number, durationInFrames: number) {
+    super(
+      `renderComposition: invalid frame range [${startFrame}, ${endFrame}) for a composition with durationInFrames ${durationInFrames}. Requires 0 <= startFrame <= endFrame <= durationInFrames.`,
+    );
+    this.name = "InvalidFrameRangeError";
+  }
 }
 
 /** Thrown when `compositionId` does not name a composition in `project`. */
@@ -83,8 +118,10 @@ export class CompositionNotFoundForRenderError extends Error {
 
 /**
  * Renders every frame of `options.project`'s composition
- * `options.compositionId`, in order, from frame `0` to `durationInFrames -
- * 1`, yielding each one's pixels as soon as it is ready.
+ * `options.compositionId`, in order, from frame `options.startFrame` (default
+ * `0`) up to but not including `options.endFrame` (default the composition's
+ * own `durationInFrames`), yielding each one's pixels as soon as it is
+ * ready.
  *
  * This is Cadra's deterministic headless capture mode: a fixed timestep
  * walk with no `requestAnimationFrame` and no wall clock anywhere in the
@@ -107,8 +144,28 @@ export class CompositionNotFoundForRenderError extends Error {
  * and discard each frame's buffer as it arrives instead of holding every
  * frame in memory at once.
  *
+ * Rendering a sub-range (`options.startFrame`/`options.endFrame` narrower
+ * than the composition's full `[0, durationInFrames)`) produces pixel-for-
+ * pixel identical output, frame by frame, to what a full sequential render
+ * of the same composition would have produced at those same frame indices:
+ * every frame's `resolveSceneAtFrame`/`createFrameContext` call is always
+ * given that frame's true, absolute, composition-wide index and the
+ * composition's real, unmodified `durationInFrames`, never a range-relative
+ * index or a narrowed duration (`resolveSceneAtFrame` is a pure function of
+ * `(project, compositionId, frame)`, and `createFrameContext`'s `time`/
+ * `random()` derive purely from `frame`/`fps`/`seed`, so neither has any way
+ * to observe that this call started partway through the composition rather
+ * than at frame 0). This is the property that makes range-parallel
+ * rendering (splitting a composition across multiple concurrent
+ * `renderComposition` calls, e.g. Phase 25's render job orchestrator) sound:
+ * each range is byte-for-byte what a single continuous render would have
+ * produced at those same frames, so concatenating the ranges' outputs in
+ * frame order reproduces the full sequential render exactly.
+ *
  * @throws {CompositionNotFoundForRenderError} if `compositionId` does not
  *   exist in `project`.
+ * @throws {InvalidFrameRangeError} if `options.startFrame`/`options.endFrame`
+ *   do not describe a valid, in-bounds sub-range of `[0, durationInFrames)`.
  */
 export async function* renderComposition(
   options: RenderCompositionOptions,
@@ -122,9 +179,21 @@ export async function* renderComposition(
 
   const { fps, durationInFrames } = composition;
   const getPendingAssets = options.getPendingAssets ?? (() => []);
+  const startFrame = options.startFrame ?? 0;
+  const endFrame = options.endFrame ?? durationInFrames;
+
+  if (
+    startFrame < 0 ||
+    endFrame > durationInFrames ||
+    startFrame > endFrame ||
+    !Number.isInteger(startFrame) ||
+    !Number.isInteger(endFrame)
+  ) {
+    throw new InvalidFrameRangeError(startFrame, endFrame, durationInFrames);
+  }
 
   try {
-    for (let frame = 0; frame < durationInFrames; frame += 1) {
+    for (let frame = startFrame; frame < endFrame; frame += 1) {
       if (options.signal?.aborted) {
         return;
       }

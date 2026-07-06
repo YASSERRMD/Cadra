@@ -74,7 +74,11 @@ export type {
   RenderCompositionOptions,
   RenderedFrame,
 } from "./render-composition.js";
-export { CompositionNotFoundForRenderError, renderComposition } from "./render-composition.js";
+export {
+  CompositionNotFoundForRenderError,
+  InvalidFrameRangeError,
+  renderComposition,
+} from "./render-composition.js";
 export type {
   HeadlessServerFileWriteStreamLike,
   HeadlessServerLogLine,
