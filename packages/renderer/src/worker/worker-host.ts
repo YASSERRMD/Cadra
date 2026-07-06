@@ -1,5 +1,6 @@
 import type { CreateRendererOptions } from "../create-renderer.js";
 import { createRenderer } from "../create-renderer.js";
+import type { PixelReadableRenderer } from "../pixel-readable-renderer.js";
 import type { Renderer } from "../renderer.js";
 import { createWorkerLayerCache, reconstructSceneState } from "./scene-state-diff.js";
 import type { WorkerRequest, WorkerResponse } from "./worker-protocol.js";
@@ -34,6 +35,17 @@ function getWorkerGlobalScope(): WorkerGlobalScopeLike {
   return self as unknown as WorkerGlobalScopeLike;
 }
 
+/**
+ * True when `renderer` also satisfies `PixelReadableRenderer`, i.e. it has
+ * its own `readPixels` method. A plain duck-type check rather than an
+ * `instanceof`: the renderer this host drives is constructed via the
+ * injected `RendererFactory`, so its concrete class is never known here,
+ * only whatever shape it happens to expose.
+ */
+function isPixelReadable(renderer: Renderer): renderer is PixelReadableRenderer {
+  return "readPixels" in renderer && typeof renderer.readPixels === "function";
+}
+
 /** Options accepted by `createWorkerHost`. */
 export interface WorkerHostOptions {
   /** Constructs the real `Renderer` this host drives. Defaults to `createRenderer`. */
@@ -49,6 +61,13 @@ export interface WorkerHostOptions {
  * corresponding `Renderer` method. Every request is acknowledged with a
  * matching response (or an `error` response on failure), since
  * `postMessage` alone gives the caller no way to know a request completed.
+ *
+ * `readPixels` additionally requires the constructed renderer to implement
+ * `PixelReadableRenderer` (see `isPixelReadable`): a plain `Renderer` (the
+ * `RendererFactory` default used for live preview) has no such method, so
+ * this host only ever accepts `readPixels` when its `createRenderer` was
+ * configured to build a pixel-readable one, e.g. `@cadra/headless`'s
+ * worker-backed render path.
  *
  * Exposed as `handleRequest` (a plain function) rather than only as a
  * `self.onmessage` side effect, so tests can drive it directly with
@@ -100,6 +119,15 @@ export function createWorkerHost(options: WorkerHostOptions = {}): WorkerHost {
           postResponse({ type: "disposeAck", requestId: request.requestId });
           return;
         }
+        case "readPixels": {
+          const activeRenderer = requireRenderer();
+          if (!isPixelReadable(activeRenderer)) {
+            throw new WorkerRendererNotPixelReadableError();
+          }
+          const pixels = await activeRenderer.readPixels();
+          postResponse({ type: "readPixelsAck", requestId: request.requestId, pixels });
+          return;
+        }
       }
     } catch (caught) {
       postResponse({
@@ -125,6 +153,16 @@ export class WorkerHostNotInitializedError extends Error {
   constructor() {
     super("WorkerHost received a request before init() completed.");
     this.name = "WorkerHostNotInitializedError";
+  }
+}
+
+/** Thrown when a `WorkerHost` receives `readPixels` but the renderer its `RendererFactory` constructed does not implement `PixelReadableRenderer`. */
+export class WorkerRendererNotPixelReadableError extends Error {
+  constructor() {
+    super(
+      "WorkerHost received readPixels, but the renderer constructed by its RendererFactory does not implement PixelReadableRenderer.",
+    );
+    this.name = "WorkerRendererNotPixelReadableError";
   }
 }
 

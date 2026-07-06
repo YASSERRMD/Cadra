@@ -1,6 +1,7 @@
 import type { FrameContext, SceneState } from "@cadra/core";
 
 import { createRenderer } from "../create-renderer.js";
+import type { PixelBuffer, PixelReadableRenderer } from "../pixel-readable-renderer.js";
 import type {
   Renderer,
   RendererBackend,
@@ -80,10 +81,11 @@ export class WorkerRendererError extends Error {
 let nextRequestId = 0;
 
 /**
- * Creates a `Renderer` backed by a Web Worker driving an `OffscreenCanvas`,
- * satisfying the exact same `Renderer` interface as the direct in-process
- * renderer from `createRenderer`, so `@cadra/player`'s `Transport`/
- * `mountPreview` can use either interchangeably with zero code changes.
+ * Creates a `Renderer` (also satisfying `PixelReadableRenderer`) backed by a
+ * Web Worker driving an `OffscreenCanvas`, satisfying the exact same
+ * `Renderer` interface as the direct in-process renderer from
+ * `createRenderer`, so `@cadra/player`'s `Transport`/`mountPreview` can use
+ * either interchangeably with zero code changes.
  *
  * `init(target, size)` requires `target` to be an `HTMLCanvasElement` (not
  * an `OffscreenCanvas` already): it calls `target.transferControlToOffscreen()`
@@ -102,14 +104,25 @@ let nextRequestId = 0;
  * reconstructs the full, equivalent `SceneState` before ever handing it to
  * the real `Renderer` it drives, so the renderer this produces observes
  * identical draw calls either way.
+ *
+ * `readPixels()` posts a `readPixels` request and resolves with the
+ * `pixels` payload of its `readPixelsAck`; the worker-host only actually
+ * satisfies this if the `Renderer` it constructed there also implements
+ * `PixelReadableRenderer` (see `worker-host.ts`'s `isPixelReadable`),
+ * otherwise it responds with an `error` this rejects with instead.
  */
-export function createWorkerRenderer(options: CreateWorkerRendererOptions = {}): Renderer {
+export function createWorkerRenderer(
+  options: CreateWorkerRendererOptions = {},
+): PixelReadableRenderer {
   const createWorker = options.createWorker ?? createRealWorker;
 
   let worker: WorkerLike | undefined;
   let capabilities: RendererCapabilities | undefined;
   const diffTracker = createSceneStateDiffTracker();
-  const pending = new Map<number, { resolve: () => void; reject: (error: Error) => void }>();
+  const pending = new Map<
+    number,
+    { resolve: (response: WorkerResponse) => void; reject: (error: Error) => void }
+  >();
 
   function handleWorkerMessage(event: MessageEvent<WorkerResponse>): void {
     const response = event.data;
@@ -130,11 +143,11 @@ export function createWorkerRenderer(options: CreateWorkerRendererOptions = {}):
     if (response.type === "initAck") {
       capabilities = response.capabilities;
     }
-    waiter.resolve();
+    waiter.resolve(response);
   }
 
-  /** Posts `request` to the worker and returns a promise settled by the matching response. */
-  function sendRequest(request: WorkerRequest): Promise<void> {
+  /** Posts `request` to the worker and returns a promise settled with the matching response. */
+  function sendRequest(request: WorkerRequest): Promise<WorkerResponse> {
     return sendRequestWithTransfer(request, undefined);
   }
 
@@ -142,9 +155,9 @@ export function createWorkerRenderer(options: CreateWorkerRendererOptions = {}):
   function sendRequestWithTransfer(
     request: WorkerRequest,
     transfer: Transferable[] | undefined,
-  ): Promise<void> {
+  ): Promise<WorkerResponse> {
     const activeWorker = requireWorker();
-    return new Promise<void>((resolve, reject) => {
+    return new Promise<WorkerResponse>((resolve, reject) => {
       pending.set(request.requestId, { resolve, reject });
       if (transfer !== undefined) {
         activeWorker.postMessage(request, transfer);
@@ -214,11 +227,25 @@ export function createWorkerRenderer(options: CreateWorkerRendererOptions = {}):
       });
   }
 
+  async function readPixels(): Promise<PixelBuffer> {
+    const response = await sendRequest({ type: "readPixels", requestId: nextRequestId++ });
+    if (response.type !== "readPixelsAck") {
+      // handleWorkerMessage already rejects an "error" response before this
+      // resolves, and every other response type is impossible here: this
+      // request's requestId can only ever be acked by a readPixelsAck. Kept
+      // as an explicit check (rather than a cast) so a protocol mismatch
+      // surfaces as a clear error instead of silently returning garbage.
+      throw new WorkerRendererError(`expected readPixelsAck, got ${response.type}`);
+    }
+    return response.pixels;
+  }
+
   return {
     init,
     renderFrame,
     resize,
     dispose,
+    readPixels,
     get backend(): RendererBackend {
       return requireCapabilities().backend;
     },

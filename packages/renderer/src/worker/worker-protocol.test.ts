@@ -84,6 +84,11 @@ describe("WorkerRequest", () => {
     const request: WorkerRequest = { type: "dispose", requestId: 4 };
     expect(request.type).toBe("dispose");
   });
+
+  it("constructs and narrows a readPixels request", () => {
+    const request: WorkerRequest = { type: "readPixels", requestId: 5 };
+    expect(request.type).toBe("readPixels");
+  });
 });
 
 describe("WorkerResponse", () => {
@@ -112,6 +117,15 @@ describe("WorkerResponse", () => {
   it("constructs and narrows a disposeAck response", () => {
     const response: WorkerResponse = { type: "disposeAck", requestId: 4 };
     expect(response.type).toBe("disposeAck");
+  });
+
+  it("constructs and narrows a readPixelsAck response, carrying the pixel buffer", () => {
+    const pixels = { width: 2, height: 1, data: new Uint8ClampedArray([1, 2, 3, 4, 5, 6, 7, 8]) };
+    const response: WorkerResponse = { type: "readPixelsAck", requestId: 5, pixels };
+    expect(response.type).toBe("readPixelsAck");
+    if (response.type === "readPixelsAck") {
+      expect(response.pixels).toBe(pixels);
+    }
   });
 
   it("constructs and narrows an error response, carrying a plain message string", () => {

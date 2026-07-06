@@ -33,11 +33,13 @@
  * `PixelReadableRenderer` additively extends `Renderer` with `readPixels()`,
  * for callers (e.g. `@cadra/headless`'s deterministic capture mode) that
  * need to read back a rendered frame's pixels: `Renderer` itself is
- * unchanged, so every existing live-preview consumer is unaffected.
- * `createPixelReadableRenderer` wraps the direct, in-process renderer with
- * an injected pixel-read primitive to satisfy it (real GPU pixel readback
- * is not exercisable in this headless Node/Vitest environment, so it is
- * always injected, matching every other GPU-touching seam in this package).
+ * unchanged, so every existing live-preview consumer is unaffected. Both
+ * rendering paths satisfy it: `createPixelReadableRenderer` wraps the
+ * direct, in-process renderer with an injected pixel-read primitive (real
+ * GPU pixel readback is not exercisable in this headless Node/Vitest
+ * environment, so it is always injected, matching every other GPU-touching
+ * seam in this package), and `createWorkerRenderer` implements it directly
+ * via the worker protocol's `readPixels`/`readPixelsAck` message pair.
  */
 
 export const VERSION = "0.0.0";
@@ -134,5 +136,6 @@ export {
   WorkerHostNotInitializedError,
   WorkerRendererError,
   WorkerRendererNotInitializedError,
+  WorkerRendererNotPixelReadableError,
   WorkerRendererRequiresCanvasElementError,
 } from "./worker/index.js";
