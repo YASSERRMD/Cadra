@@ -15,10 +15,17 @@
  * pure functions of plain numbers useful to a host building its own controls
  * on top of the same `Transport`.
  *
- * OffscreenCanvas worker rendering and audio synchronization (this package's
- * eventual full scope) land in later phases; `mountPreview` still renders on
- * the main thread and will need to relocate where the canvas/renderer
- * actually live once Phase 15 moves rendering into a worker.
+ * `attachAudioToTransport` (Phase 16) synchronizes Web Audio playback of a
+ * composition's `audioTracks` with a `Transport`'s frame clock: scheduling
+ * `AudioBufferSourceNode`/`GainNode` pairs for whatever `AudioClip`s are
+ * currently active, keeping them correctly trimmed/gain-shaped across
+ * ordinary playback, and cleanly stopping/rescheduling them on seek, pause,
+ * and re-play.
+ *
+ * OffscreenCanvas worker rendering (this package's remaining scope) lands in
+ * a later phase; `mountPreview` still renders on the main thread and will
+ * need to relocate where the canvas/renderer actually live once Phase 15's
+ * worker rendering is wired all the way through.
  */
 
 export const VERSION = "0.0.0";
@@ -28,6 +35,20 @@ export const VERSION = "0.0.0";
  */
 export const PACKAGE_NAME = "@cadra/player";
 
+export type {
+  AttachAudioOptions,
+  AudioTransportSync,
+  ResolveAudioBufferFn,
+} from "./audio/attach-audio.js";
+export { attachAudioToTransport } from "./audio/attach-audio.js";
+export type {
+  AudioBufferSourceNodeLike,
+  AudioContextLike,
+  AudioNodeLike,
+  AudioParamLike,
+  GainNodeLike,
+} from "./audio/audio-context-like.js";
+export { createDefaultAudioContextLike } from "./audio/audio-context-like.js";
 export type { FitSize } from "./preview/aspect-fit.js";
 export { computeAspectFitSize } from "./preview/aspect-fit.js";
 export type { MountPreviewOptions, PreviewHandle } from "./preview/mount-preview.js";
