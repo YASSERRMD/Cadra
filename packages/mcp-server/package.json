@@ -24,12 +24,15 @@
   },
   "dependencies": {
     "@cadra/core": "workspace:*",
+    "@cadra/encode": "workspace:*",
+    "@cadra/headless": "workspace:*",
     "@cadra/schema": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^26.1.0",
+    "playwright": "^1.61.1",
     "typescript": "^5.7.3",
     "vitest": "^2.1.8"
   }

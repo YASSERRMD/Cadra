@@ -2,22 +2,30 @@
  * Builds the Cadra `McpServer` instance: an MCP server with the Phase 27
  * contract advertised as a resource, structured (stderr-only) logging, the
  * Phase 29 scene-authoring tools (`create_scene`, `get_scene`,
- * `update_scene`, `validate_scene`, `list_scenes`), and one minimal
- * diagnostic tool.
+ * `update_scene`, `validate_scene`, `list_scenes`), the Phase 30 render tools
+ * (`render_scene`, `get_render_status`, `get_render_output`), the Phase 30
+ * asset tools (`upload_asset`, `list_assets`), and one minimal diagnostic
+ * tool.
  *
- * Scope boundary (Phase 29): `render_scene` and similar render/asset tools
- * belong to Phase 30, along with the deeper workspace/output sandboxing
- * those tools need; this phase's scene tools sandbox only their own
- * scene-id-to-filesystem-path mapping (see `./scene-store.ts`).
+ * This closes the loop from prompt to finished video: an agent can create a
+ * scene, upload assets and reference them by ref in a scene patch, render the
+ * scene (`render_scene` submits the job to `@cadra/encode`'s Phase 25
+ * orchestrator and returns immediately with a job id), poll progress
+ * (`get_render_status`), and fetch the finished file's reference once done
+ * (`get_render_output`). See `./render-store.ts`/`./asset-store.ts` for the
+ * workspace/output sandboxing these tools apply, mirroring `scene-store.ts`'s
+ * own allow-list-plus-resolved-path-check discipline.
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+import { registerCadraAssetTools } from "./asset-tools.js";
 import type { CadraMcpServerConfig, CadraMcpServerConfigInput } from "./config.js";
 import { resolveCadraMcpServerConfig } from "./config.js";
 import { registerCadraContractResource } from "./contract-resource.js";
 import type { Logger } from "./logger.js";
 import { createLogger } from "./logger.js";
+import { registerCadraRenderTools } from "./render-tools.js";
 import { registerCadraSceneTools } from "./scene-tools.js";
 
 /** `Implementation.name` this server advertises during the MCP handshake. */
@@ -51,9 +59,10 @@ export interface CadraMcpServer {
  * Constructs a Cadra `McpServer`: advertises the `resources`, `tools`, and
  * `logging` capabilities, registers the `cadra://contract` resource (Phase
  * 27's `describeCadraContract()`), registers the Phase 29 scene-authoring
- * tools, and registers the `ping` placeholder tool. Does not attach any
- * transport; call `.connect(transport)` on the returned `server` (or use
- * `./stdio.ts` / `./http.ts`, which do this for you).
+ * tools, the Phase 30 render and asset tools, and registers the `ping`
+ * placeholder tool. Does not attach any transport; call `.connect(transport)`
+ * on the returned `server` (or use `./stdio.ts` / `./http.ts`, which do this
+ * for you).
  */
 export function createCadraMcpServer(options: CreateCadraMcpServerOptions = {}): CadraMcpServer {
   const config = resolveCadraMcpServerConfig(options.config);
@@ -68,19 +77,21 @@ export function createCadraMcpServer(options: CreateCadraMcpServerOptions = {}):
         logging: {},
       },
       instructions:
-        "Cadra exposes a code-first, agent-first 3D video animation scene format. Read the cadra://contract resource for the full JSON Schema, capability manifest, and example scene documents. Use create_scene, get_scene, update_scene, validate_scene, and list_scenes to author and query scene documents persisted in this server's workspace. This server does not yet expose render/asset tools; those land in a later phase.",
+        "Cadra exposes a code-first, agent-first 3D video animation scene format. Read the cadra://contract resource for the full JSON Schema, capability manifest, and example scene documents. Use create_scene, get_scene, update_scene, validate_scene, and list_scenes to author and query scene documents persisted in this server's workspace. Use upload_asset to store an image/video/audio/font/glTF asset (by URL or by raw base64 bytes) and get back a cadra-asset:// ref usable in a scene node's assetRef field, and list_assets to see everything already stored. Use render_scene to render a scene's composition to a video file (returns a job id immediately), get_render_status to poll that job's progress, and get_render_output to fetch a reference to the finished file once the job is done.",
     },
   );
 
   registerCadraContractResource(server);
   registerCadraSceneTools(server, config, logger);
+  registerCadraAssetTools(server, config, logger);
+  registerCadraRenderTools(server, config, logger);
 
   server.registerTool(
     PING_TOOL_NAME,
     {
       title: "Ping",
       description:
-        "Placeholder diagnostic tool: echoes back a request id and this server's health/config status. Not deliverable scope; a connectivity check only, kept deliberately minimal alongside this server's real scene-authoring tools and ahead of Phase 30's render/asset tools.",
+        "Placeholder diagnostic tool: echoes back a request id and this server's health/config status. Not deliverable scope; a connectivity check only, kept deliberately minimal alongside this server's real scene-authoring, render, and asset tools.",
       inputSchema: {
         requestId: z
           .string()

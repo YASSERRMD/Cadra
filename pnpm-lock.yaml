@@ -158,6 +158,12 @@ importers:
       '@cadra/core':
         specifier: workspace:*
         version: link:../core
+      '@cadra/encode':
+        specifier: workspace:*
+        version: link:../encode
+      '@cadra/headless':
+        specifier: workspace:*
+        version: link:../headless
       '@cadra/schema':
         specifier: workspace:*
         version: link:../schema
@@ -171,6 +177,9 @@ importers:
       '@types/node':
         specifier: ^26.1.0
         version: 26.1.0
+      playwright:
+        specifier: ^1.61.1
+        version: 1.61.1
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
