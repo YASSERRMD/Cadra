@@ -606,6 +606,45 @@ describe("createReconciler: frame-resolved camera Property<T> fields", () => {
   });
 });
 
+describe("createReconciler: object3D.name is tagged with the originating SceneNode.id", () => {
+  it("tags every reconciled object3D's .name with its SceneNode.id, at every depth", () => {
+    const reconciler = createReconciler();
+    const rootObject = reconciler.reconcile(
+      group("root", [mesh("m1"), camera("cam-1")]),
+      0,
+    ) as THREE.Group;
+
+    expect(rootObject.name).toBe("root");
+    expect(rootObject.children[0]?.name).toBe("m1");
+    expect(rootObject.children[1]?.name).toBe("cam-1");
+  });
+
+  it("keeps the .name tag stable across reconcile calls that update the same node in place", () => {
+    const reconciler = createReconciler();
+    reconciler.reconcile(camera("cam-1", { fov: 50 }), 0);
+    const updated = reconciler.reconcile(camera("cam-1", { fov: 75 }), 0);
+
+    expect(updated?.name).toBe("cam-1");
+  });
+
+  it("lets a camera be found by id via .traverse(), matching on .name", () => {
+    const reconciler = createReconciler();
+    const rootObject = reconciler.reconcile(
+      group("root", [mesh("m1"), camera("the-camera")]),
+      0,
+    ) as THREE.Group;
+
+    let found: THREE.Object3D | undefined;
+    rootObject.traverse((object3D) => {
+      if (object3D.name === "the-camera") {
+        found = object3D;
+      }
+    });
+
+    expect(found).toBeInstanceOf(THREE.PerspectiveCamera);
+  });
+});
+
 describe("createReconciler: incremental build matches a single fresh build structurally", () => {
   it("produces a structurally identical tree via incremental steps vs. a single reconcile from null", () => {
     const incremental = createReconciler();

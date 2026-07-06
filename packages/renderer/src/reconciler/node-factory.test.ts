@@ -50,3 +50,28 @@ describe("node-factory: unresolved mesh refs fall back to shared singletons, not
     expect(built.owned).toBeUndefined();
   });
 });
+
+describe("node-factory: createThreeObject tags object3D.name with the originating SceneNode.id", () => {
+  it("sets .name to the node's id for a mesh node", () => {
+    const ctx = makeCtx();
+    const built = createThreeObject(meshNode("box", "default"), ctx);
+    expect(built.object3D.name).toBe("m");
+  });
+
+  it("sets .name to the node's id for every other node kind too", () => {
+    const ctx = makeCtx();
+    const cameraNode: SceneNode = {
+      id: "cam-1",
+      kind: "camera",
+      transform: createIdentityTransform(),
+      visible: true,
+      children: [],
+      fov: 50,
+      near: 0.1,
+      far: 1000,
+      target: [0, 0, 0],
+    };
+    const built = createThreeObject(cameraNode, ctx);
+    expect(built.object3D.name).toBe("cam-1");
+  });
+});

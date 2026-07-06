@@ -77,9 +77,21 @@ interface BuiltObject {
  * composition's content is the timeline resolver's job in a later phase, not
  * this reconciler's, since it only ever sees one SceneNode tree at a time).
  *
+ * Every returned `object3D.name` is set to `node.id`: Three.js's own public
+ * bookkeeping field for exactly this purpose, so later code (e.g. the
+ * renderer's active-camera lookup) can find a specific reconciled object by
+ * the `SceneNode.id` that produced it via `Object3D.getObjectByName`/`.traverse`.
+ *
  * Does not apply transform/visibility; call `applyNodeProperties` right after.
  */
 export function createThreeObject(node: SceneNode, ctx: NodeFactoryContext): BuiltObject {
+  const built = buildThreeObject(node, ctx);
+  built.object3D.name = node.id;
+  return built;
+}
+
+/** The kind-mapping switch itself, factored out so `createThreeObject` can tag the result in one place. */
+function buildThreeObject(node: SceneNode, ctx: NodeFactoryContext): BuiltObject {
   switch (node.kind) {
     case "group":
     case "compositionRef":
