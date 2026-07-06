@@ -13,7 +13,7 @@ import type {
 import { z } from "zod";
 
 import { propertySchema } from "./keyframes.js";
-import { colorRgbaSchema, transformSchema, vector3Schema } from "./primitives.js";
+import { animatableTransformSchema, colorRgbaSchema, vector3Schema } from "./primitives.js";
 
 /**
  * Zod mirror of the discriminated `SceneNode` union in
@@ -24,6 +24,12 @@ import { colorRgbaSchema, transformSchema, vector3Schema } from "./primitives.js
  * `z.discriminatedUnion`, matching the core union exactly: an unrecognized
  * `kind` value, or a variant's own fields on the wrong `kind`, is rejected at
  * parse time rather than silently coerced.
+ *
+ * `transform` on every variant is `animatableTransformSchema` (mirroring
+ * `AnimatableTransform`): `position`/`rotation`/`scale` are each independently
+ * a plain `Vector3` or a keyframe track. `visible` on every variant accepts
+ * either a plain boolean or a keyframe track, via `propertySchema(z.boolean())`
+ * (mirroring `Property<boolean>`).
  *
  * `children` on every variant is typed as an array of the *whole* union
  * (defined via a lazy getter so the self-reference is legal at module
@@ -70,8 +76,12 @@ export const groupNodeSchema = z.strictObject({
     .string()
     .optional()
     .describe("Optional human-readable label, purely for authoring and debugging."),
-  transform: transformSchema.describe("The position, rotation, and scale of this node."),
-  visible: z.boolean().describe("Whether this node (and its subtree) should be rendered."),
+  transform: animatableTransformSchema.describe(
+    "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track.",
+  ),
+  visible: propertySchema(z.boolean()).describe(
+    "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track.",
+  ),
   get children(): z.ZodArray<typeof sceneNodeSchema> {
     return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
   },
@@ -91,8 +101,12 @@ export const meshNodeSchema = z.strictObject({
     .string()
     .optional()
     .describe("Optional human-readable label, purely for authoring and debugging."),
-  transform: transformSchema.describe("The position, rotation, and scale of this node."),
-  visible: z.boolean().describe("Whether this node (and its subtree) should be rendered."),
+  transform: animatableTransformSchema.describe(
+    "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track.",
+  ),
+  visible: propertySchema(z.boolean()).describe(
+    "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track.",
+  ),
   geometryRef: z
     .string()
     .describe("Id of a geometry asset, resolved against a geometry registry by the renderer."),
@@ -111,9 +125,8 @@ type _CheckMeshNode = AssertTrue<AssertEqual<z.infer<typeof meshNodeSchema>, Mes
  *
  * `fov`, `near`, `far`, and `target` each accept either a plain value or a
  * keyframe track, via `propertySchema` (mirroring `Property<T>` on
- * `CameraNode` in `@cadra/core`): these are the only fields on any node kind
- * animatable this way so far, since `Transform` itself stays plain for every
- * kind including `camera`.
+ * `CameraNode` in `@cadra/core`), same as the shared `transform`
+ * (`animatableTransformSchema`) and `visible` every node kind now has.
  */
 export const cameraNodeSchema = z.strictObject({
   id: z.string().describe("Unique identifier for this scene node within the project."),
@@ -122,8 +135,12 @@ export const cameraNodeSchema = z.strictObject({
     .string()
     .optional()
     .describe("Optional human-readable label, purely for authoring and debugging."),
-  transform: transformSchema.describe("The position, rotation, and scale of this node."),
-  visible: z.boolean().describe("Whether this node (and its subtree) should be rendered."),
+  transform: animatableTransformSchema.describe(
+    "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track.",
+  ),
+  visible: propertySchema(z.boolean()).describe(
+    "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track.",
+  ),
   fov: propertySchema(z.number()).describe(
     "Vertical field of view, in degrees. A plain number or a keyframe track.",
   ),
@@ -143,7 +160,13 @@ export const cameraNodeSchema = z.strictObject({
 
 type _CheckCameraNode = AssertTrue<AssertEqual<z.infer<typeof cameraNodeSchema>, CameraNode>>;
 
-/** A light source. */
+/**
+ * A light source.
+ *
+ * `color` and `intensity` each accept either a plain value or a keyframe
+ * track, via `propertySchema` (mirroring `Property<T>` on `LightNode` in
+ * `@cadra/core`).
+ */
 export const lightNodeSchema = z.strictObject({
   id: z.string().describe("Unique identifier for this scene node within the project."),
   kind: z.literal("light").describe("Discriminant identifying this node as a light."),
@@ -151,11 +174,19 @@ export const lightNodeSchema = z.strictObject({
     .string()
     .optional()
     .describe("Optional human-readable label, purely for authoring and debugging."),
-  transform: transformSchema.describe("The position, rotation, and scale of this node."),
-  visible: z.boolean().describe("Whether this node (and its subtree) should be rendered."),
+  transform: animatableTransformSchema.describe(
+    "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track.",
+  ),
+  visible: propertySchema(z.boolean()).describe(
+    "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track.",
+  ),
   lightType: lightTypeSchema,
-  color: colorRgbaSchema.describe("The color this light emits."),
-  intensity: z.number().describe("The brightness of this light source."),
+  color: propertySchema(colorRgbaSchema).describe(
+    "The color this light emits. A plain ColorRGBA or a keyframe track.",
+  ),
+  intensity: propertySchema(z.number()).describe(
+    "The brightness of this light source. A plain number or a keyframe track.",
+  ),
   get children(): z.ZodArray<typeof sceneNodeSchema> {
     return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
   },
@@ -163,7 +194,13 @@ export const lightNodeSchema = z.strictObject({
 
 type _CheckLightNode = AssertTrue<AssertEqual<z.infer<typeof lightNodeSchema>, LightNode>>;
 
-/** A block of rendered text. */
+/**
+ * A block of rendered text.
+ *
+ * `fontSize` and `color` each accept either a plain value or a keyframe
+ * track, via `propertySchema` (mirroring `Property<T>` on `TextNode` in
+ * `@cadra/core`).
+ */
 export const textNodeSchema = z.strictObject({
   id: z.string().describe("Unique identifier for this scene node within the project."),
   kind: z.literal("text").describe("Discriminant identifying this node as text."),
@@ -171,15 +208,23 @@ export const textNodeSchema = z.strictObject({
     .string()
     .optional()
     .describe("Optional human-readable label, purely for authoring and debugging."),
-  transform: transformSchema.describe("The position, rotation, and scale of this node."),
-  visible: z.boolean().describe("Whether this node (and its subtree) should be rendered."),
+  transform: animatableTransformSchema.describe(
+    "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track.",
+  ),
+  visible: propertySchema(z.boolean()).describe(
+    "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track.",
+  ),
   content: z.string().describe("The text string to render."),
   fontRef: z
     .string()
     .optional()
     .describe("Id of a registered font asset. Omitted means the renderer's default."),
-  fontSize: z.number().describe("The size to render the text at."),
-  color: colorRgbaSchema.describe("The color to render the text in."),
+  fontSize: propertySchema(z.number()).describe(
+    "The size to render the text at. A plain number or a keyframe track.",
+  ),
+  color: propertySchema(colorRgbaSchema).describe(
+    "The color to render the text in. A plain ColorRGBA or a keyframe track.",
+  ),
   get children(): z.ZodArray<typeof sceneNodeSchema> {
     return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
   },
@@ -195,8 +240,12 @@ export const imageNodeSchema = z.strictObject({
     .string()
     .optional()
     .describe("Optional human-readable label, purely for authoring and debugging."),
-  transform: transformSchema.describe("The position, rotation, and scale of this node."),
-  visible: z.boolean().describe("Whether this node (and its subtree) should be rendered."),
+  transform: animatableTransformSchema.describe(
+    "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track.",
+  ),
+  visible: propertySchema(z.boolean()).describe(
+    "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track.",
+  ),
   assetRef: z
     .string()
     .describe("Id of an image asset, resolved against an asset registry by the renderer."),
@@ -221,8 +270,12 @@ export const compositionRefNodeSchema = z.strictObject({
     .string()
     .optional()
     .describe("Optional human-readable label, purely for authoring and debugging."),
-  transform: transformSchema.describe("The position, rotation, and scale of this node."),
-  visible: z.boolean().describe("Whether this node (and its subtree) should be rendered."),
+  transform: animatableTransformSchema.describe(
+    "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track.",
+  ),
+  visible: propertySchema(z.boolean()).describe(
+    "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track.",
+  ),
   compositionId: z
     .string()
     .describe("Id of the composition this node embeds, resolved by the timeline resolver."),

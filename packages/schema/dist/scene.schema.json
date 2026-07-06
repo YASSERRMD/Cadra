@@ -330,58 +330,286 @@
           "type": "object",
           "properties": {
             "position": {
-              "type": "array",
-              "prefixItems": [
+              "anyOf": [
                 {
-                  "type": "number",
-                  "description": "The x component of the vector."
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "A 3-component numeric tuple, typically a world-space position or axis."
                 },
                 {
-                  "type": "number",
-                  "description": "The y component of the vector."
-                },
-                {
-                  "type": "number",
-                  "description": "The z component of the vector."
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "number",
+                                "description": "The x component of the vector."
+                              },
+                              {
+                                "type": "number",
+                                "description": "The y component of the vector."
+                              },
+                              {
+                                "type": "number",
+                                "description": "The z component of the vector."
+                              }
+                            ],
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
                 }
               ],
-              "description": "World-space translation of the node."
+              "description": "World-space translation of the node. A plain Vector3 or a keyframe track."
             },
             "rotation": {
-              "type": "array",
-              "prefixItems": [
+              "anyOf": [
                 {
-                  "type": "number",
-                  "description": "The x component of the vector."
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "A 3-component numeric tuple, typically a world-space position or axis."
                 },
                 {
-                  "type": "number",
-                  "description": "The y component of the vector."
-                },
-                {
-                  "type": "number",
-                  "description": "The z component of the vector."
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "number",
+                                "description": "The x component of the vector."
+                              },
+                              {
+                                "type": "number",
+                                "description": "The y component of the vector."
+                              },
+                              {
+                                "type": "number",
+                                "description": "The z component of the vector."
+                              }
+                            ],
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
                 }
               ],
-              "description": "Euler rotation in radians, applied in intrinsic XYZ order."
+              "description": "Euler rotation in radians, applied in intrinsic XYZ order. A plain Vector3 or a keyframe track."
             },
             "scale": {
-              "type": "array",
-              "prefixItems": [
+              "anyOf": [
                 {
-                  "type": "number",
-                  "description": "The x component of the vector."
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "A 3-component numeric tuple, typically a world-space position or axis."
                 },
                 {
-                  "type": "number",
-                  "description": "The y component of the vector."
-                },
-                {
-                  "type": "number",
-                  "description": "The z component of the vector."
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "number",
+                                "description": "The x component of the vector."
+                              },
+                              {
+                                "type": "number",
+                                "description": "The y component of the vector."
+                              },
+                              {
+                                "type": "number",
+                                "description": "The z component of the vector."
+                              }
+                            ],
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
                 }
               ],
-              "description": "Per-axis scale factor of the node."
+              "description": "Per-axis scale factor of the node. A plain Vector3 or a keyframe track."
             }
           },
           "required": [
@@ -390,11 +618,72 @@
             "scale"
           ],
           "additionalProperties": false,
-          "description": "The position, rotation, and scale of this node."
+          "description": "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track."
         },
         "visible": {
-          "type": "boolean",
-          "description": "Whether this node (and its subtree) should be rendered."
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "keyframeTrack",
+                  "description": "Discriminant identifying this value as a keyframe track."
+                },
+                "keyframes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "frame": {
+                        "type": "number",
+                        "description": "The integer frame this keyframe's value applies at."
+                      },
+                      "value": {
+                        "type": "boolean",
+                        "description": "The value at `frame`."
+                      },
+                      "easing": {
+                        "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                        "type": "string",
+                        "enum": [
+                          "linear",
+                          "easeInCubic",
+                          "easeOutCubic",
+                          "easeInOutCubic",
+                          "easeInExpo",
+                          "easeOutExpo",
+                          "easeInOutExpo",
+                          "easeInBack",
+                          "easeOutBack",
+                          "easeInOutBack",
+                          "easeInElastic",
+                          "easeOutElastic",
+                          "easeInOutElastic",
+                          "hold"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "frame",
+                      "value"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "The ordered keyframes describing how this property varies over time."
+                }
+              },
+              "required": [
+                "type",
+                "keyframes"
+              ],
+              "additionalProperties": false
+            }
+          ],
+          "description": "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track."
         },
         "children": {
           "type": "array",
@@ -438,58 +727,286 @@
               "type": "object",
               "properties": {
                 "position": {
-                  "type": "array",
-                  "prefixItems": [
+                  "anyOf": [
                     {
-                      "type": "number",
-                      "description": "The x component of the vector."
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
                     },
                     {
-                      "type": "number",
-                      "description": "The y component of the vector."
-                    },
-                    {
-                      "type": "number",
-                      "description": "The z component of the vector."
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
                     }
                   ],
-                  "description": "World-space translation of the node."
+                  "description": "World-space translation of the node. A plain Vector3 or a keyframe track."
                 },
                 "rotation": {
-                  "type": "array",
-                  "prefixItems": [
+                  "anyOf": [
                     {
-                      "type": "number",
-                      "description": "The x component of the vector."
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
                     },
                     {
-                      "type": "number",
-                      "description": "The y component of the vector."
-                    },
-                    {
-                      "type": "number",
-                      "description": "The z component of the vector."
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
                     }
                   ],
-                  "description": "Euler rotation in radians, applied in intrinsic XYZ order."
+                  "description": "Euler rotation in radians, applied in intrinsic XYZ order. A plain Vector3 or a keyframe track."
                 },
                 "scale": {
-                  "type": "array",
-                  "prefixItems": [
+                  "anyOf": [
                     {
-                      "type": "number",
-                      "description": "The x component of the vector."
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
                     },
                     {
-                      "type": "number",
-                      "description": "The y component of the vector."
-                    },
-                    {
-                      "type": "number",
-                      "description": "The z component of the vector."
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
                     }
                   ],
-                  "description": "Per-axis scale factor of the node."
+                  "description": "Per-axis scale factor of the node. A plain Vector3 or a keyframe track."
                 }
               },
               "required": [
@@ -498,11 +1015,72 @@
                 "scale"
               ],
               "additionalProperties": false,
-              "description": "The position, rotation, and scale of this node."
+              "description": "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track."
             },
             "visible": {
-              "type": "boolean",
-              "description": "Whether this node (and its subtree) should be rendered."
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "boolean",
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track."
             },
             "geometryRef": {
               "type": "string",
@@ -551,58 +1129,286 @@
               "type": "object",
               "properties": {
                 "position": {
-                  "type": "array",
-                  "prefixItems": [
+                  "anyOf": [
                     {
-                      "type": "number",
-                      "description": "The x component of the vector."
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
                     },
                     {
-                      "type": "number",
-                      "description": "The y component of the vector."
-                    },
-                    {
-                      "type": "number",
-                      "description": "The z component of the vector."
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
                     }
                   ],
-                  "description": "World-space translation of the node."
+                  "description": "World-space translation of the node. A plain Vector3 or a keyframe track."
                 },
                 "rotation": {
-                  "type": "array",
-                  "prefixItems": [
+                  "anyOf": [
                     {
-                      "type": "number",
-                      "description": "The x component of the vector."
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
                     },
                     {
-                      "type": "number",
-                      "description": "The y component of the vector."
-                    },
-                    {
-                      "type": "number",
-                      "description": "The z component of the vector."
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
                     }
                   ],
-                  "description": "Euler rotation in radians, applied in intrinsic XYZ order."
+                  "description": "Euler rotation in radians, applied in intrinsic XYZ order. A plain Vector3 or a keyframe track."
                 },
                 "scale": {
-                  "type": "array",
-                  "prefixItems": [
+                  "anyOf": [
                     {
-                      "type": "number",
-                      "description": "The x component of the vector."
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
                     },
                     {
-                      "type": "number",
-                      "description": "The y component of the vector."
-                    },
-                    {
-                      "type": "number",
-                      "description": "The z component of the vector."
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
                     }
                   ],
-                  "description": "Per-axis scale factor of the node."
+                  "description": "Per-axis scale factor of the node. A plain Vector3 or a keyframe track."
                 }
               },
               "required": [
@@ -611,11 +1417,72 @@
                 "scale"
               ],
               "additionalProperties": false,
-              "description": "The position, rotation, and scale of this node."
+              "description": "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track."
             },
             "visible": {
-              "type": "boolean",
-              "description": "Whether this node (and its subtree) should be rendered."
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "boolean",
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track."
             },
             "fov": {
               "anyOf": [
@@ -947,58 +1814,286 @@
               "type": "object",
               "properties": {
                 "position": {
-                  "type": "array",
-                  "prefixItems": [
+                  "anyOf": [
                     {
-                      "type": "number",
-                      "description": "The x component of the vector."
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
                     },
                     {
-                      "type": "number",
-                      "description": "The y component of the vector."
-                    },
-                    {
-                      "type": "number",
-                      "description": "The z component of the vector."
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
                     }
                   ],
-                  "description": "World-space translation of the node."
+                  "description": "World-space translation of the node. A plain Vector3 or a keyframe track."
                 },
                 "rotation": {
-                  "type": "array",
-                  "prefixItems": [
+                  "anyOf": [
                     {
-                      "type": "number",
-                      "description": "The x component of the vector."
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
                     },
                     {
-                      "type": "number",
-                      "description": "The y component of the vector."
-                    },
-                    {
-                      "type": "number",
-                      "description": "The z component of the vector."
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
                     }
                   ],
-                  "description": "Euler rotation in radians, applied in intrinsic XYZ order."
+                  "description": "Euler rotation in radians, applied in intrinsic XYZ order. A plain Vector3 or a keyframe track."
                 },
                 "scale": {
-                  "type": "array",
-                  "prefixItems": [
+                  "anyOf": [
                     {
-                      "type": "number",
-                      "description": "The x component of the vector."
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
                     },
                     {
-                      "type": "number",
-                      "description": "The y component of the vector."
-                    },
-                    {
-                      "type": "number",
-                      "description": "The z component of the vector."
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
                     }
                   ],
-                  "description": "Per-axis scale factor of the node."
+                  "description": "Per-axis scale factor of the node. A plain Vector3 or a keyframe track."
                 }
               },
               "required": [
@@ -1007,11 +2102,72 @@
                 "scale"
               ],
               "additionalProperties": false,
-              "description": "The position, rotation, and scale of this node."
+              "description": "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track."
             },
             "visible": {
-              "type": "boolean",
-              "description": "Whether this node (and its subtree) should be rendered."
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "boolean",
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track."
             },
             "lightType": {
               "type": "string",
@@ -1024,38 +2180,187 @@
               "description": "The kind of light source this light node represents."
             },
             "color": {
-              "type": "array",
-              "prefixItems": [
+              "anyOf": [
                 {
-                  "type": "number",
-                  "minimum": 0,
-                  "maximum": 1,
-                  "description": "The red channel, in the inclusive range 0 to 1."
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1,
+                      "description": "The red channel, in the inclusive range 0 to 1."
+                    },
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1,
+                      "description": "The green channel, in the inclusive range 0 to 1."
+                    },
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1,
+                      "description": "The blue channel, in the inclusive range 0 to 1."
+                    },
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1,
+                      "description": "The alpha channel, in the inclusive range 0 to 1."
+                    }
+                  ],
+                  "description": "A straight (non-premultiplied) RGBA color. Each channel is a number in the inclusive range 0 to 1, not 0 to 255."
                 },
                 {
-                  "type": "number",
-                  "minimum": 0,
-                  "maximum": 1,
-                  "description": "The green channel, in the inclusive range 0 to 1."
-                },
-                {
-                  "type": "number",
-                  "minimum": 0,
-                  "maximum": 1,
-                  "description": "The blue channel, in the inclusive range 0 to 1."
-                },
-                {
-                  "type": "number",
-                  "minimum": 0,
-                  "maximum": 1,
-                  "description": "The alpha channel, in the inclusive range 0 to 1."
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "The red channel, in the inclusive range 0 to 1."
+                              },
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "The green channel, in the inclusive range 0 to 1."
+                              },
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "The blue channel, in the inclusive range 0 to 1."
+                              },
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "The alpha channel, in the inclusive range 0 to 1."
+                              }
+                            ],
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
                 }
               ],
-              "description": "The color this light emits."
+              "description": "The color this light emits. A plain ColorRGBA or a keyframe track."
             },
             "intensity": {
-              "type": "number",
-              "description": "The brightness of this light source."
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "number",
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "The brightness of this light source. A plain number or a keyframe track."
             },
             "children": {
               "type": "array",
@@ -1097,58 +2402,286 @@
               "type": "object",
               "properties": {
                 "position": {
-                  "type": "array",
-                  "prefixItems": [
+                  "anyOf": [
                     {
-                      "type": "number",
-                      "description": "The x component of the vector."
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
                     },
                     {
-                      "type": "number",
-                      "description": "The y component of the vector."
-                    },
-                    {
-                      "type": "number",
-                      "description": "The z component of the vector."
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
                     }
                   ],
-                  "description": "World-space translation of the node."
+                  "description": "World-space translation of the node. A plain Vector3 or a keyframe track."
                 },
                 "rotation": {
-                  "type": "array",
-                  "prefixItems": [
+                  "anyOf": [
                     {
-                      "type": "number",
-                      "description": "The x component of the vector."
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
                     },
                     {
-                      "type": "number",
-                      "description": "The y component of the vector."
-                    },
-                    {
-                      "type": "number",
-                      "description": "The z component of the vector."
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
                     }
                   ],
-                  "description": "Euler rotation in radians, applied in intrinsic XYZ order."
+                  "description": "Euler rotation in radians, applied in intrinsic XYZ order. A plain Vector3 or a keyframe track."
                 },
                 "scale": {
-                  "type": "array",
-                  "prefixItems": [
+                  "anyOf": [
                     {
-                      "type": "number",
-                      "description": "The x component of the vector."
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
                     },
                     {
-                      "type": "number",
-                      "description": "The y component of the vector."
-                    },
-                    {
-                      "type": "number",
-                      "description": "The z component of the vector."
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
                     }
                   ],
-                  "description": "Per-axis scale factor of the node."
+                  "description": "Per-axis scale factor of the node. A plain Vector3 or a keyframe track."
                 }
               },
               "required": [
@@ -1157,11 +2690,72 @@
                 "scale"
               ],
               "additionalProperties": false,
-              "description": "The position, rotation, and scale of this node."
+              "description": "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track."
             },
             "visible": {
-              "type": "boolean",
-              "description": "Whether this node (and its subtree) should be rendered."
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "boolean",
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track."
             },
             "content": {
               "type": "string",
@@ -1172,38 +2766,187 @@
               "type": "string"
             },
             "fontSize": {
-              "type": "number",
-              "description": "The size to render the text at."
-            },
-            "color": {
-              "type": "array",
-              "prefixItems": [
+              "anyOf": [
                 {
-                  "type": "number",
-                  "minimum": 0,
-                  "maximum": 1,
-                  "description": "The red channel, in the inclusive range 0 to 1."
+                  "type": "number"
                 },
                 {
-                  "type": "number",
-                  "minimum": 0,
-                  "maximum": 1,
-                  "description": "The green channel, in the inclusive range 0 to 1."
-                },
-                {
-                  "type": "number",
-                  "minimum": 0,
-                  "maximum": 1,
-                  "description": "The blue channel, in the inclusive range 0 to 1."
-                },
-                {
-                  "type": "number",
-                  "minimum": 0,
-                  "maximum": 1,
-                  "description": "The alpha channel, in the inclusive range 0 to 1."
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "number",
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
                 }
               ],
-              "description": "The color to render the text in."
+              "description": "The size to render the text at. A plain number or a keyframe track."
+            },
+            "color": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1,
+                      "description": "The red channel, in the inclusive range 0 to 1."
+                    },
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1,
+                      "description": "The green channel, in the inclusive range 0 to 1."
+                    },
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1,
+                      "description": "The blue channel, in the inclusive range 0 to 1."
+                    },
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1,
+                      "description": "The alpha channel, in the inclusive range 0 to 1."
+                    }
+                  ],
+                  "description": "A straight (non-premultiplied) RGBA color. Each channel is a number in the inclusive range 0 to 1, not 0 to 255."
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "The red channel, in the inclusive range 0 to 1."
+                              },
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "The green channel, in the inclusive range 0 to 1."
+                              },
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "The blue channel, in the inclusive range 0 to 1."
+                              },
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "The alpha channel, in the inclusive range 0 to 1."
+                              }
+                            ],
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "The color to render the text in. A plain ColorRGBA or a keyframe track."
             },
             "children": {
               "type": "array",
@@ -1245,58 +2988,286 @@
               "type": "object",
               "properties": {
                 "position": {
-                  "type": "array",
-                  "prefixItems": [
+                  "anyOf": [
                     {
-                      "type": "number",
-                      "description": "The x component of the vector."
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
                     },
                     {
-                      "type": "number",
-                      "description": "The y component of the vector."
-                    },
-                    {
-                      "type": "number",
-                      "description": "The z component of the vector."
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
                     }
                   ],
-                  "description": "World-space translation of the node."
+                  "description": "World-space translation of the node. A plain Vector3 or a keyframe track."
                 },
                 "rotation": {
-                  "type": "array",
-                  "prefixItems": [
+                  "anyOf": [
                     {
-                      "type": "number",
-                      "description": "The x component of the vector."
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
                     },
                     {
-                      "type": "number",
-                      "description": "The y component of the vector."
-                    },
-                    {
-                      "type": "number",
-                      "description": "The z component of the vector."
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
                     }
                   ],
-                  "description": "Euler rotation in radians, applied in intrinsic XYZ order."
+                  "description": "Euler rotation in radians, applied in intrinsic XYZ order. A plain Vector3 or a keyframe track."
                 },
                 "scale": {
-                  "type": "array",
-                  "prefixItems": [
+                  "anyOf": [
                     {
-                      "type": "number",
-                      "description": "The x component of the vector."
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
                     },
                     {
-                      "type": "number",
-                      "description": "The y component of the vector."
-                    },
-                    {
-                      "type": "number",
-                      "description": "The z component of the vector."
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
                     }
                   ],
-                  "description": "Per-axis scale factor of the node."
+                  "description": "Per-axis scale factor of the node. A plain Vector3 or a keyframe track."
                 }
               },
               "required": [
@@ -1305,11 +3276,72 @@
                 "scale"
               ],
               "additionalProperties": false,
-              "description": "The position, rotation, and scale of this node."
+              "description": "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track."
             },
             "visible": {
-              "type": "boolean",
-              "description": "Whether this node (and its subtree) should be rendered."
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "boolean",
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track."
             },
             "assetRef": {
               "type": "string",
@@ -1353,58 +3385,286 @@
               "type": "object",
               "properties": {
                 "position": {
-                  "type": "array",
-                  "prefixItems": [
+                  "anyOf": [
                     {
-                      "type": "number",
-                      "description": "The x component of the vector."
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
                     },
                     {
-                      "type": "number",
-                      "description": "The y component of the vector."
-                    },
-                    {
-                      "type": "number",
-                      "description": "The z component of the vector."
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
                     }
                   ],
-                  "description": "World-space translation of the node."
+                  "description": "World-space translation of the node. A plain Vector3 or a keyframe track."
                 },
                 "rotation": {
-                  "type": "array",
-                  "prefixItems": [
+                  "anyOf": [
                     {
-                      "type": "number",
-                      "description": "The x component of the vector."
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
                     },
                     {
-                      "type": "number",
-                      "description": "The y component of the vector."
-                    },
-                    {
-                      "type": "number",
-                      "description": "The z component of the vector."
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
                     }
                   ],
-                  "description": "Euler rotation in radians, applied in intrinsic XYZ order."
+                  "description": "Euler rotation in radians, applied in intrinsic XYZ order. A plain Vector3 or a keyframe track."
                 },
                 "scale": {
-                  "type": "array",
-                  "prefixItems": [
+                  "anyOf": [
                     {
-                      "type": "number",
-                      "description": "The x component of the vector."
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
                     },
                     {
-                      "type": "number",
-                      "description": "The y component of the vector."
-                    },
-                    {
-                      "type": "number",
-                      "description": "The z component of the vector."
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
                     }
                   ],
-                  "description": "Per-axis scale factor of the node."
+                  "description": "Per-axis scale factor of the node. A plain Vector3 or a keyframe track."
                 }
               },
               "required": [
@@ -1413,11 +3673,72 @@
                 "scale"
               ],
               "additionalProperties": false,
-              "description": "The position, rotation, and scale of this node."
+              "description": "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track."
             },
             "visible": {
-              "type": "boolean",
-              "description": "Whether this node (and its subtree) should be rendered."
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "boolean",
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track."
             },
             "compositionId": {
               "type": "string",
