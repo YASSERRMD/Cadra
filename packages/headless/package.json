@@ -26,9 +26,12 @@
     "@cadra/core": "workspace:*",
     "@cadra/renderer": "workspace:*",
     "esbuild": "^0.28.1",
-    "playwright": "^1.61.1"
+    "playwright": "^1.61.1",
+    "three": "^0.185.1",
+    "webgpu": "^0.4.0"
   },
   "devDependencies": {
+    "@types/three": "^0.185.0",
     "typescript": "^5.7.3",
     "vitest": "^2.1.8"
   }

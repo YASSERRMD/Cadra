@@ -36,6 +36,19 @@
  * why) are what let most of this package's own tests exercise this whole
  * flow against a fake browser, with only a small number of real
  * end-to-end tests launching an actual browser.
+ *
+ * Phase 24 additively exports an **experimental, opt-in** Chromium-free
+ * native GPU render path: `createNativeGpuHeadlessRenderer` builds a
+ * `PixelReadableRenderer` driven by a real native WebGPU device (the
+ * `webgpu` npm package, Dawn-backed, no browser process anywhere) instead
+ * of Playwright/Chromium. This is a research spike plus a documented
+ * design, not a replacement for the Playwright path above: nothing in
+ * `renderComposition`/`renderCompositionHeadlessServer` changes or depends
+ * on this at all, and every name in this paragraph must be imported
+ * explicitly to opt in. See `render-frame-native-gpu.ts`'s own module doc
+ * for the platform gaps this had to work around, and
+ * `docs/adr/0001-native-gpu-headless-render-path.md` for the full research,
+ * benchmarks, and recommendation this spike is grounded in.
  */
 
 export const VERSION = "0.0.0";
@@ -76,3 +89,18 @@ export {
   HeadlessServerRenderTimeoutError,
   renderCompositionHeadlessServer,
 } from "./render-composition-headless-server.js";
+export type {
+  CreateNativeGpuDeviceOptions,
+  CreateNativeGpuHeadlessRendererOptions,
+  NativeGpuAdapterLike,
+  NativeGpuRootFactory,
+  NativeGpuRootLike,
+} from "./render-frame-native-gpu.js";
+export {
+  createDefaultNativeGpuRoot,
+  createNativeGpuDevice,
+  createNativeGpuHeadlessRenderer,
+  installNativeGpuGlobals,
+  NativeGpuAdapterUnavailableError,
+  NativeGpuRendererNotInitializedError,
+} from "./render-frame-native-gpu.js";
