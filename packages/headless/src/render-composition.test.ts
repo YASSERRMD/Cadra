@@ -14,6 +14,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   CompositionNotFoundForRenderError,
+  InvalidFrameRangeError,
   renderComposition,
   type RenderedFrame,
 } from "./render-composition.js";
@@ -65,7 +66,11 @@ function createFakePixelReadableRenderer(): Omit<
 > & {
   renderFrame: ReturnType<typeof vi.fn>;
   readPixels: ReturnType<typeof vi.fn>;
-  calls: Array<{ type: "renderFrame" | "readPixels"; sceneState?: SceneState; frameContext?: FrameContext }>;
+  calls: Array<{
+    type: "renderFrame" | "readPixels";
+    sceneState?: SceneState;
+    frameContext?: FrameContext;
+  }>;
 } {
   const calls: Array<{
     type: "renderFrame" | "readPixels";
@@ -213,10 +218,20 @@ describe("renderComposition: determinism", () => {
     const rendererB = createFakePixelReadableRenderer();
 
     await drain(
-      renderComposition({ project, compositionId: "comp-1", renderer: rendererA, seed: "shared-seed" }),
+      renderComposition({
+        project,
+        compositionId: "comp-1",
+        renderer: rendererA,
+        seed: "shared-seed",
+      }),
     );
     await drain(
-      renderComposition({ project, compositionId: "comp-1", renderer: rendererB, seed: "shared-seed" }),
+      renderComposition({
+        project,
+        compositionId: "comp-1",
+        renderer: rendererB,
+        seed: "shared-seed",
+      }),
     );
 
     const argsA = rendererA.renderFrame.mock.calls;
@@ -243,10 +258,20 @@ describe("renderComposition: determinism", () => {
     const rendererB = createFakePixelReadableRenderer();
 
     await drain(
-      renderComposition({ project, compositionId: "comp-1", renderer: rendererA, seed: "seed-one" }),
+      renderComposition({
+        project,
+        compositionId: "comp-1",
+        renderer: rendererA,
+        seed: "seed-one",
+      }),
     );
     await drain(
-      renderComposition({ project, compositionId: "comp-1", renderer: rendererB, seed: "seed-two" }),
+      renderComposition({
+        project,
+        compositionId: "comp-1",
+        renderer: rendererB,
+        seed: "seed-two",
+      }),
     );
 
     const firstCallContextA = rendererA.renderFrame.mock.calls[0]?.[1] as FrameContext;
@@ -505,5 +530,187 @@ describe("renderComposition: PixelReadableRenderer usage", () => {
     // doc, `random` is a fresh closure every createFrameContext call.
     expect(actual && plainFrameContext(actual)).toEqual(plainFrameContext(expected));
     expect(actual?.random().next()).toBe(expected.random().next());
+  });
+});
+
+describe("renderComposition: startFrame/endFrame sub-range", () => {
+  it("defaults to [0, durationInFrames) when startFrame/endFrame are omitted, matching prior behavior exactly", async () => {
+    const project = buildProject();
+    const renderer = createFakePixelReadableRenderer();
+
+    const frames = await drain(
+      renderComposition({ project, compositionId: "comp-1", renderer, seed: "s" }),
+    );
+
+    expect(frames.map((frame) => frame.frame)).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it("renders only [startFrame, endFrame), yielding exactly that sub-range's absolute frame indices", async () => {
+    const project = buildProject({ durationInFrames: 10 });
+    const renderer = createFakePixelReadableRenderer();
+
+    const frames = await drain(
+      renderComposition({
+        project,
+        compositionId: "comp-1",
+        renderer,
+        seed: "s",
+        startFrame: 3,
+        endFrame: 7,
+      }),
+    );
+
+    expect(frames.map((frame) => frame.frame)).toEqual([3, 4, 5, 6]);
+    expect(renderer.renderFrame).toHaveBeenCalledTimes(4);
+  });
+
+  it("yields nothing for an empty range (startFrame === endFrame), still disposing the renderer", async () => {
+    const project = buildProject({ durationInFrames: 10 });
+    const renderer = createFakePixelReadableRenderer();
+
+    const frames = await drain(
+      renderComposition({
+        project,
+        compositionId: "comp-1",
+        renderer,
+        seed: "s",
+        startFrame: 5,
+        endFrame: 5,
+      }),
+    );
+
+    expect(frames).toEqual([]);
+    expect(renderer.renderFrame).not.toHaveBeenCalled();
+    expect(renderer.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws InvalidFrameRangeError for startFrame > endFrame, endFrame beyond durationInFrames, or a negative startFrame", async () => {
+    const project = buildProject({ durationInFrames: 10 });
+
+    await expect(
+      drain(
+        renderComposition({
+          project,
+          compositionId: "comp-1",
+          renderer: createFakePixelReadableRenderer(),
+          seed: "s",
+          startFrame: 7,
+          endFrame: 3,
+        }),
+      ),
+    ).rejects.toThrow(InvalidFrameRangeError);
+
+    await expect(
+      drain(
+        renderComposition({
+          project,
+          compositionId: "comp-1",
+          renderer: createFakePixelReadableRenderer(),
+          seed: "s",
+          startFrame: 0,
+          endFrame: 11,
+        }),
+      ),
+    ).rejects.toThrow(InvalidFrameRangeError);
+
+    await expect(
+      drain(
+        renderComposition({
+          project,
+          compositionId: "comp-1",
+          renderer: createFakePixelReadableRenderer(),
+          seed: "s",
+          startFrame: -1,
+          endFrame: 5,
+        }),
+      ),
+    ).rejects.toThrow(InvalidFrameRangeError);
+  });
+
+  it("passes each frame its true absolute frame index and the composition's real durationInFrames, never a range-relative index/duration", async () => {
+    const project = buildProject({ durationInFrames: 10 });
+    const renderer = createFakePixelReadableRenderer();
+
+    await drain(
+      renderComposition({
+        project,
+        compositionId: "comp-1",
+        renderer,
+        seed: "range-seed",
+        startFrame: 6,
+        endFrame: 9,
+      }),
+    );
+
+    const contexts = renderer.calls
+      .filter((call) => call.type === "renderFrame")
+      .map((call) => call.frameContext as FrameContext);
+    expect(contexts.map((context) => context.frame)).toEqual([6, 7, 8]);
+    // durationInFrames on every yielded FrameContext is the composition's
+    // real, full duration (10), never the 3-frame range's own length: this
+    // is exactly what makes time/seed derivation for a sub-range identical
+    // to what a full sequential render would have produced at these same
+    // frames (see this module's own doc for the full rationale).
+    expect(contexts.every((context) => context.durationInFrames === 10)).toBe(true);
+  });
+
+  it("produces byte-for-byte identical SceneState/FrameContext arguments (per overlapping frame) to a full sequential render of the same project/seed", async () => {
+    const project = buildProject({ durationInFrames: 12 });
+    const sequentialRenderer = createFakePixelReadableRenderer();
+    const rangeRenderer = createFakePixelReadableRenderer();
+
+    await drain(
+      renderComposition({
+        project,
+        compositionId: "comp-1",
+        renderer: sequentialRenderer,
+        seed: "shared-seed",
+      }),
+    );
+    await drain(
+      renderComposition({
+        project,
+        compositionId: "comp-1",
+        renderer: rangeRenderer,
+        seed: "shared-seed",
+        startFrame: 5,
+        endFrame: 9,
+      }),
+    );
+
+    const sequentialCalls = sequentialRenderer.calls.filter((call) => call.type === "renderFrame");
+    const rangeCalls = rangeRenderer.calls.filter((call) => call.type === "renderFrame");
+
+    // Frames 5, 6, 7, 8 of the sequential run are the overlapping window;
+    // every one of the range run's calls must match its sequential
+    // counterpart exactly, proving a range's rendered frames are identical
+    // to what the same frames would have been within a full sequential walk.
+    const overlapping = sequentialCalls.slice(5, 9);
+    expect(rangeCalls).toHaveLength(overlapping.length);
+    for (let i = 0; i < overlapping.length; i += 1) {
+      expect(rangeCalls[i]?.sceneState).toEqual(overlapping[i]?.sceneState);
+      const rangeContext = rangeCalls[i]?.frameContext as FrameContext;
+      const sequentialContext = overlapping[i]?.frameContext as FrameContext;
+      expect(plainFrameContext(rangeContext)).toEqual(plainFrameContext(sequentialContext));
+      expect(rangeContext.random().next()).toBe(sequentialContext.random().next());
+    }
+  });
+
+  it("disposes the renderer exactly once for a sub-range render, same as a full render", async () => {
+    const project = buildProject({ durationInFrames: 10 });
+    const renderer = createFakePixelReadableRenderer();
+
+    await drain(
+      renderComposition({
+        project,
+        compositionId: "comp-1",
+        renderer,
+        seed: "s",
+        startFrame: 2,
+        endFrame: 4,
+      }),
+    );
+
+    expect(renderer.dispose).toHaveBeenCalledTimes(1);
   });
 });

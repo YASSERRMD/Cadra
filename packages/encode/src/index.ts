@@ -71,6 +71,23 @@
  * why the bundling logic itself lives there instead of here (avoiding a
  * circular `@cadra/headless` <-> `@cadra/encode` workspace dependency, since
  * this package already depends on `@cadra/headless` for `renderComposition`).
+ *
+ * Phase 25 additively exports a render job orchestrator wiring
+ * (`render-job.ts`): `submitEncodedRenderJob`/`resumeEncodedRenderJob` wrap
+ * `@cadra/headless`'s generic `submitRenderJob`/`resumeRenderJob` (frame-range
+ * splitting, bounded-concurrency worker pool, per-range retry/resume, job
+ * status) with the concrete pipeline this package owns: each range renders
+ * and encodes independently, inside its own headless browser instance, via a
+ * new sibling browser-side entry point (`runBrowserHeadlessRenderRange`,
+ * using `renderComposition`'s new `startFrame`/`endFrame` sub-range support),
+ * returning its `EncodedChunkResult`s as structured-clone-safe
+ * `SerializedEncodedChunk`s. Once every range succeeds, every range's
+ * segment is concatenated in frame order and fed through exactly one final
+ * `muxToMp4Stream`/`muxToWebmStream` pass, i.e. lossless segment
+ * concatenation with no per-range container file ever produced. See
+ * `render-job.ts`'s own module doc for the full design, including exactly
+ * what level of range-parallel-vs-sequential equivalence is (and is not)
+ * guaranteed.
  */
 
 export const VERSION = "0.0.0";
@@ -91,8 +108,14 @@ export {
   getGlobalAudioEncoderConstructor,
   getGlobalIsAudioConfigSupported,
 } from "./audio-encoder-factory.js";
-export type { BrowserHeadlessRenderConfig } from "./browser-headless-render-entry.js";
-export { runBrowserHeadlessRender } from "./browser-headless-render-entry.js";
+export type {
+  BrowserHeadlessRenderConfig,
+  BrowserHeadlessRenderRangeConfig,
+} from "./browser-headless-render-entry.js";
+export {
+  runBrowserHeadlessRender,
+  runBrowserHeadlessRenderRange,
+} from "./browser-headless-render-entry.js";
 export { BROWSER_HEADLESS_RENDER_ENTRY_PATH } from "./browser-headless-render-entry-path.js";
 export type {
   CapturedFrame,
@@ -198,6 +221,18 @@ export {
   DEFAULT_RENDER_SAMPLE_RATE,
   renderAudioMixdown,
 } from "./render-audio-mixdown.js";
+export type { EncodedRenderJobHandle, SubmitEncodedRenderJobOptions } from "./render-job.js";
+export {
+  DEFAULT_RANGE_TIMEOUT_MS,
+  getEncodedRenderJobStatus,
+  resumeEncodedRenderJob,
+  submitEncodedRenderJob,
+} from "./render-job.js";
+export type { SerializedEncodedChunk } from "./serialized-encoded-chunk.js";
+export {
+  deserializeEncodedChunkResult,
+  serializeEncodedChunk,
+} from "./serialized-encoded-chunk.js";
 export type { IsConfigSupportedFn, VideoEncoderConstructor } from "./video-encoder-factory.js";
 export {
   getGlobalIsConfigSupported,

@@ -49,6 +49,27 @@
  * for the platform gaps this had to work around, and
  * `docs/adr/0001-native-gpu-headless-render-path.md` for the full research,
  * benchmarks, and recommendation this spike is grounded in.
+ *
+ * Phase 25 additively exports a render job orchestrator
+ * (`render-job-orchestrator.ts`): `submitRenderJob` splits a render's
+ * `durationInFrames` into keyframe-interval-aligned frame ranges
+ * (`splitIntoFrameRanges`) and dispatches each one to an injectable
+ * `RenderRangeFn` through a bounded-concurrency worker pool, retrying each
+ * range independently on failure and tracking per-range/overall status
+ * (`getRenderJobStatus`); `resumeRenderJob` continues a job from a
+ * previously-saved status snapshot, re-attempting only outstanding ranges.
+ * This module deliberately knows nothing about pixels, encoders, or muxing
+ * (parameterized entirely over `RenderRangeFn<TSegment>`'s opaque
+ * `TSegment`): `@cadra/encode`'s own wiring (`render-job.ts`) supplies the
+ * concrete default, rendering each range via `renderComposition`'s new
+ * `startFrame`/`endFrame` sub-range support and a fresh
+ * `captureFrames`/`encodeFrames` pipeline, then concatenating every range's
+ * ordered `EncodedChunkResult`s into a single final mux pass. See
+ * `render-job-orchestrator.ts`'s own module doc for the full design
+ * rationale, mirroring exactly how `renderCompositionHeadlessServer`
+ * (here)/`runBrowserHeadlessRender` (`@cadra/encode`) already split
+ * "orchestration" from "the actual render/encode pipeline" across this same
+ * package boundary.
  */
 
 export const VERSION = "0.0.0";
@@ -74,7 +95,11 @@ export type {
   RenderCompositionOptions,
   RenderedFrame,
 } from "./render-composition.js";
-export { CompositionNotFoundForRenderError, renderComposition } from "./render-composition.js";
+export {
+  CompositionNotFoundForRenderError,
+  InvalidFrameRangeError,
+  renderComposition,
+} from "./render-composition.js";
 export type {
   HeadlessServerFileWriteStreamLike,
   HeadlessServerLogLine,
@@ -104,3 +129,30 @@ export {
   NativeGpuAdapterUnavailableError,
   NativeGpuRendererNotInitializedError,
 } from "./render-frame-native-gpu.js";
+export type {
+  ConcurrencyLimiter,
+  FrameRange,
+  RangeState,
+  RangeStatus,
+  RenderJobHandle,
+  RenderJobOptions,
+  RenderJobStatus,
+  RenderJobStatusSnapshot,
+  RenderRangeFn,
+  ResumableRangeStates,
+} from "./render-job-orchestrator.js";
+export {
+  buildJobStatusSnapshot,
+  createDefaultConcurrencyLimiter,
+  DEFAULT_MAX_ATTEMPTS_PER_RANGE,
+  DEFAULT_MAX_CONCURRENCY,
+  DEFAULT_RANGE_ALIGNMENT_FRAMES,
+  DEFAULT_RANGE_SIZE_FRAMES,
+  deriveJobStatus,
+  getRenderJobStatus,
+  RenderJobFailedError,
+  RenderJobNotFoundError,
+  resumeRenderJob,
+  splitIntoFrameRanges,
+  submitRenderJob,
+} from "./render-job-orchestrator.js";
