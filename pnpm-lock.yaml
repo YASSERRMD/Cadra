@@ -88,6 +88,16 @@ importers:
         version: 2.1.9(jsdom@25.0.1)
 
   packages/encode:
+    dependencies:
+      '@cadra/core':
+        specifier: workspace:*
+        version: link:../core
+      '@cadra/headless':
+        specifier: workspace:*
+        version: link:../headless
+      '@cadra/renderer':
+        specifier: workspace:*
+        version: link:../renderer
     devDependencies:
       typescript:
         specifier: ^5.7.3
