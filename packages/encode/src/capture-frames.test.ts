@@ -188,6 +188,42 @@ describe("captureFrames: VideoFrame construction", () => {
     });
   });
 
+  it("passes an explicit duration of exactly one frame's worth of microseconds at fps, for every frame including the last", async () => {
+    // Regression test for a real bug found while building Phase 23's
+    // headless server render path: without an explicit VideoFrame.duration,
+    // a real WebCodecs VideoEncoder derives each output chunk's own
+    // duration from the gap to the *next* frame's timestamp, which is
+    // undefined for the very last frame in a stream (no next frame exists),
+    // making the muxed file's total duration silently one frame short. See
+    // this module's own doc for the full story; this test guards the fix
+    // (an explicit duration on every constructed VideoFrame, last one
+    // included) against regressing.
+    const fps = 25;
+    const durationInFrames = 4;
+    const { fake, ...options } = withFakeVideoFrame({ fps });
+
+    for await (const item of captureFrames(fakeRenderedFrames(durationInFrames), options)) {
+      if (item.kind === "video-frame") {
+        item.videoFrame.close();
+      }
+    }
+
+    expect(fake.constructions).toHaveLength(durationInFrames);
+    fake.constructions.forEach((construction, frame) => {
+      const expectedDuration =
+        frameToMicrosecondTimestamp(frame + 1, fps) - frameToMicrosecondTimestamp(frame, fps);
+      expect(construction.init.duration).toBe(expectedDuration);
+      // At a fixed fps, every frame (the last one included) spans the same
+      // number of microseconds; this pins that shared value directly too,
+      // not just the difference formula above, so a future change that
+      // makes the *last* frame's duration diverge from every other frame's
+      // (e.g. by special-casing it, or by clamping it to 0) fails this
+      // assertion even if the difference-based one above were somehow
+      // satisfied by coincidence.
+      expect(construction.init.duration).toBe(Math.round(1_000_000 / fps));
+    });
+  });
+
   it("passes the PixelBuffer's own raw data as the buffer source", async () => {
     const { fake, ...options } = withFakeVideoFrame();
     const source = fakeRenderedFrames(1);
