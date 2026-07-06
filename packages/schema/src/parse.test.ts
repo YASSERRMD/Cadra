@@ -7,7 +7,12 @@ import { describe, expect, it } from "vitest";
 import { CURRENT_SCHEMA_VERSION } from "./envelope.js";
 import { parseScene } from "./parse.js";
 
-const EXAMPLE_NAMES = ["title-card", "moving-shape", "camera-pan"] as const;
+const EXAMPLE_NAMES = [
+  "title-card",
+  "moving-shape",
+  "camera-pan",
+  "multi-track-transition",
+] as const;
 
 function loadExample(name: (typeof EXAMPLE_NAMES)[number]): unknown {
   const path = fileURLToPath(new URL(`../examples/${name}.scene.json`, import.meta.url));

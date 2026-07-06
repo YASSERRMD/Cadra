@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "id": "project-multi-track-transition",
+    "name": "Multi-Track Transition Example",
+    "compositions": [
+      {
+        "id": "comp-multi-track-transition",
+        "name": "Main",
+        "fps": 30,
+        "durationInFrames": 150,
+        "width": 1920,
+        "height": 1080,
+        "tracks": [
+          {
+            "id": "track-background",
+            "name": "Background Shapes",
+            "clips": [
+              {
+                "id": "clip-shape-a",
+                "startFrame": 0,
+                "durationInFrames": 90,
+                "node": {
+                  "id": "shape-a",
+                  "kind": "mesh",
+                  "name": "Shape A",
+                  "transform": {
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1]
+                  },
+                  "visible": true,
+                  "geometryRef": "geometry-box",
+                  "materialRef": "material-shape-gold",
+                  "children": []
+                }
+              },
+              {
+                "id": "clip-shape-b",
+                "startFrame": 90,
+                "durationInFrames": 60,
+                "node": {
+                  "id": "shape-b",
+                  "kind": "mesh",
+                  "name": "Shape B",
+                  "transform": {
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0.7853981633974483, 0],
+                    "scale": [1, 1, 1]
+                  },
+                  "visible": true,
+                  "geometryRef": "geometry-sphere",
+                  "materialRef": "material-shape-navy",
+                  "children": []
+                },
+                "transitionIn": {
+                  "type": "crossDissolve",
+                  "durationInFrames": 20
+                }
+              }
+            ]
+          },
+          {
+            "id": "track-lower-third",
+            "name": "Lower Third",
+            "clips": [
+              {
+                "id": "clip-lower-third",
+                "startFrame": 15,
+                "durationInFrames": 60,
+                "node": {
+                  "id": "lower-third-text",
+                  "kind": "text",
+                  "name": "Lower Third",
+                  "transform": {
+                    "position": [-5, -3, 1],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1]
+                  },
+                  "visible": true,
+                  "content": "Cadra Multi-Track Demo",
+                  "fontRef": "font-inter-bold",
+                  "fontSize": 48,
+                  "color": [1, 1, 1, 1],
+                  "children": []
+                },
+                "transitionIn": {
+                  "type": "fade",
+                  "durationInFrames": 15
+                }
+              }
+            ]
+          }
+        ],
+        "audioTracks": [
+          {
+            "id": "audio-track-music",
+            "name": "Background Music",
+            "clips": [
+              {
+                "id": "clip-music",
+                "startFrame": 0,
+                "durationInFrames": 150,
+                "assetRef": "asset-background-music",
+                "gain": 0.6,
+                "fadeIn": { "durationInFrames": 30 },
+                "fadeOut": { "durationInFrames": 30 }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
