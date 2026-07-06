@@ -94,6 +94,17 @@ export interface BrowserHeadlessRenderRangeConfig {
   startFrame: number;
   /** Frame index one past the last frame (exclusive) of this range, i.e. `renderComposition`'s own `endFrame`. */
   endFrame: number;
+  /**
+   * Force a keyframe every this many frames (and always at frame 0),
+   * passed through to `encodeFrames`. Defaults to
+   * `DEFAULT_KEYFRAME_INTERVAL_FRAMES` when omitted, matching
+   * `encodeFrames`'s own default exactly. Must match every other range of
+   * the same job (and the value the job's own range-splitting was aligned
+   * to): `encodeFrames`'s `isKeyframeDue` check uses each frame's absolute
+   * index, so every range must agree on the same interval for its own
+   * `startFrame` to reliably land on a forced keyframe.
+   */
+  keyframeIntervalFrames?: number;
 }
 
 
@@ -208,7 +219,8 @@ function createBridgedOnProgress(): OnProgressFn {
  * returns the composition itself plus the `encodeFrames` output for
  * `[startFrame, endFrame)` (defaulting to the composition's own full `[0,
  * durationInFrames)` when omitted, matching `renderComposition`'s own
- * defaults exactly).
+ * defaults exactly), using `keyframeIntervalFrames` if given (otherwise
+ * `encodeFrames`'s own default, `DEFAULT_KEYFRAME_INTERVAL_FRAMES`).
  *
  * @throws {CompositionNotFoundForRenderError} if `compositionId` does not
  *   exist in `project`.
@@ -218,7 +230,7 @@ function buildEncodedChunksForRange(
   compositionId: string,
   seed: string | number,
   bitrate: number,
-  range: { startFrame?: number; endFrame?: number } = {},
+  range: { startFrame?: number; endFrame?: number; keyframeIntervalFrames?: number } = {},
 ): {
   composition: { width: number; height: number; fps: number };
   encodedChunks: AsyncGenerator<EncodedChunkResult>;
@@ -282,6 +294,7 @@ function buildEncodedChunksForRange(
       height: composition.height,
       bitrate,
       framerate: composition.fps,
+      keyframeIntervalFrames: range.keyframeIntervalFrames,
     });
   }
 
@@ -390,7 +403,11 @@ export async function runBrowserHeadlessRenderRange(
       config.compositionId,
       config.seed,
       config.bitrate,
-      { startFrame: config.startFrame, endFrame: config.endFrame },
+      {
+        startFrame: config.startFrame,
+        endFrame: config.endFrame,
+        keyframeIntervalFrames: config.keyframeIntervalFrames,
+      },
     );
 
     const serialized: SerializedEncodedChunk[] = [];

@@ -182,6 +182,7 @@ interface BrowserRangeConfigArg {
   bitrate: number;
   startFrame: number;
   endFrame: number;
+  keyframeIntervalFrames: number;
 }
 
 /**
@@ -404,6 +405,7 @@ async function runEncodedRenderJob(
   const launcher = options.browserLauncher ?? launchPlaywrightHeadlessBrowser;
   const bundleEntry = options.bundleEntry ?? bundleBrowserEntry;
   const timeoutMs = options.timeoutMs ?? DEFAULT_RANGE_TIMEOUT_MS;
+  const keyframeIntervalFrames = options.keyframeIntervalFrames ?? DEFAULT_KEYFRAME_INTERVAL_FRAMES;
 
   const entrySource = await bundleEntry({ entryFilePath: options.entryFilePath });
 
@@ -420,6 +422,7 @@ async function runEncodedRenderJob(
         compositionId: options.compositionId,
         seed: options.seed,
         bitrate: options.bitrate,
+        keyframeIntervalFrames,
       },
       range,
       options.onProgress,
