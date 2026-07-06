@@ -22,6 +22,16 @@
  * ordinary playback, and cleanly stopping/rescheduling them on seek, pause,
  * and re-play.
  *
+ * Phase 17's video readiness/seeking module (`./video/*.js`) guarantees
+ * frame-accurate seeking even with video-textured layers: a
+ * `VideoReadinessCache` tracks which `(assetRef, frame)` pairs are already
+ * decoded; `createVideoFrameReadyCheck` exposes that as `Transport`'s
+ * `isFrameReady` construction option; `attachFrameAccurateSeeking` wraps
+ * `transport.seek` so seeking itself gates on the same cache (coalescing
+ * rapid re-seeks so only the latest ever renders); and
+ * `attachVideoFramePrefetch` warms a small window around the playhead so the
+ * common case never actually needs to wait.
+ *
  * OffscreenCanvas worker rendering (this package's remaining scope) lands in
  * a later phase; `mountPreview` still renders on the main thread and will
  * need to relocate where the canvas/renderer actually live once Phase 15's
@@ -71,3 +81,28 @@ export type {
   TransportOptions,
 } from "./transport.js";
 export { CompositionNotFoundForTransportError, createTransport } from "./transport.js";
+export type {
+  AttachFrameAccurateSeekingOptions,
+  FrameAccurateSeeking,
+  FrameAccurateSeekingEventMap,
+} from "./video/attach-frame-accurate-seeking.js";
+export { attachFrameAccurateSeeking } from "./video/attach-frame-accurate-seeking.js";
+export type { CreateVideoFrameReadyCheckOptions } from "./video/create-video-frame-ready-check.js";
+export { createVideoFrameReadyCheck } from "./video/create-video-frame-ready-check.js";
+export type { DecodeQueue, DecodeVideoFrameFn } from "./video/decode-video-frame.js";
+export { createDecodeQueue } from "./video/decode-video-frame.js";
+export type {
+  AttachVideoFramePrefetchOptions,
+  VideoFramePrefetch,
+} from "./video/prefetch-video-frames.js";
+export { attachVideoFramePrefetch } from "./video/prefetch-video-frames.js";
+export type {
+  AssetKindOfFn,
+  VideoBackedFrame,
+  VideoReadinessCache,
+} from "./video/video-readiness.js";
+export {
+  createVideoReadinessCache,
+  findVideoBackedFrames,
+  isSceneStateVideoReady,
+} from "./video/video-readiness.js";
