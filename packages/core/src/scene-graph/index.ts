@@ -17,6 +17,9 @@ export type {
 } from "./scene-node.js";
 export type {
   ActiveCameraEntry,
+  AudioClip,
+  AudioFadeEnvelope,
+  AudioTrack,
   Clip,
   Composition,
   Project,
