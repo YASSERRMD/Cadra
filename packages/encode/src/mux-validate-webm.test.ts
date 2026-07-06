@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { readWebmSegmentInfo, WebmParseError } from "./mux-validate-webm.js";
+import {
+  readWebmSegmentInfo,
+  readWebmTrackLastBlockEndTimestamp,
+  WebmParseError,
+} from "./mux-validate-webm.js";
 
 /**
  * Encodes `value` as a Matroska/EBML size VINT of exactly `widthBytes`
@@ -154,5 +158,188 @@ describe("readWebmSegmentInfo", () => {
     const info = buildElement(INFO_ID, infoPayload, 2);
     const segment = buildElement(SEGMENT_ID, info, 4);
     expect(() => readWebmSegmentInfo(segment)).toThrow(/expected an 8-byte float payload/);
+  });
+});
+
+const TRACKS_ID = encodeElementId(0x1654ae6b, 4);
+const TRACK_ENTRY_ID = encodeElementId(0xae, 1);
+const TRACK_NUMBER_ID = encodeElementId(0xd7, 1);
+const TRACK_TYPE_ID = encodeElementId(0x83, 1);
+const CLUSTER_ID = encodeElementId(0x1f43b675, 4);
+const CLUSTER_TIMESTAMP_ID = encodeElementId(0xe7, 1);
+const BLOCK_GROUP_ID = encodeElementId(0xa0, 1);
+const BLOCK_ID = encodeElementId(0xa1, 1);
+const BLOCK_DURATION_ID = encodeElementId(0x9b, 1);
+
+/** A 1-byte big-endian unsigned integer payload, Matroska's smallest uint encoding (e.g. for TrackNumber/TrackType). */
+function uint8Payload(value: number): Uint8Array {
+  return Uint8Array.of(value);
+}
+
+/**
+ * Builds one `TrackEntry`'s payload: `TrackNumber` + `TrackType` (Matroska
+ * value `1` for video, `2` for audio, matching webm-muxer's own fixed
+ * `VIDEO_TRACK_TYPE`/`AUDIO_TRACK_TYPE`), enough for
+ * `findWebmTrackNumberByType`'s own lookup.
+ */
+function buildTrackEntry(trackNumber: number, trackType: 1 | 2): Uint8Array {
+  return buildElement(
+    TRACK_ENTRY_ID,
+    concatBytes([
+      buildElement(TRACK_NUMBER_ID, uint8Payload(trackNumber)),
+      buildElement(TRACK_TYPE_ID, uint8Payload(trackType)),
+    ]),
+  );
+}
+
+/**
+ * Builds one `Block`/`SimpleBlock`-shaped binary prelude: a 1-byte VINT
+ * track number (`0x80 | trackNumber`, valid only for track numbers 1-127,
+ * every track number this test file or webm-muxer itself ever uses), a
+ * signed 16-bit big-endian timestamp relative to the enclosing `Cluster`'s
+ * own base `Timestamp`, and a single flags byte (left as 0, unused by
+ * `readWebmTrackLastBlockEndTimestamp`), followed by `payload` (arbitrary
+ * placeholder sample bytes).
+ */
+function buildBlockPrelude(
+  trackNumber: number,
+  relativeTimestamp: number,
+  payload: Uint8Array = Uint8Array.of(0xff),
+): Uint8Array {
+  const prelude = new Uint8Array(4 + payload.byteLength);
+  const view = new DataView(prelude.buffer);
+  view.setUint8(0, 0x80 | trackNumber);
+  view.setInt16(1, relativeTimestamp, false);
+  view.setUint8(3, 0); // flags
+  prelude.set(payload, 4);
+  return prelude;
+}
+
+/**
+ * Builds one `Cluster`'s payload: its own base `Timestamp`, plus one
+ * `BlockGroup` (`Block` + `BlockDuration`) per entry in `blocks`.
+ */
+function buildCluster(
+  clusterTimestamp: number,
+  blocks: ReadonlyArray<{ trackNumber: number; relativeTimestamp: number; durationTicks: number }>,
+): Uint8Array {
+  const children: Uint8Array[] = [
+    buildElement(CLUSTER_TIMESTAMP_ID, uintPayload(clusterTimestamp)),
+  ];
+  for (const block of blocks) {
+    const blockPayload = buildBlockPrelude(block.trackNumber, block.relativeTimestamp);
+    const blockGroupPayload = concatBytes([
+      buildElement(BLOCK_ID, blockPayload, 2),
+      buildElement(BLOCK_DURATION_ID, uintPayload(block.durationTicks), 1),
+    ]);
+    children.push(buildElement(BLOCK_GROUP_ID, blockGroupPayload, 2));
+  }
+  return concatBytes(children);
+}
+
+/**
+ * Builds a minimal `Segment > [Tracks, Info, Cluster...]` EBML file: one
+ * `TrackEntry` per entry in `tracks`, one `Cluster` per entry in
+ * `clusters`, and a fixed `Info` carrying only `TimestampScale` (this
+ * fixture builder's own tests do not exercise `Duration` itself; see
+ * `buildMinimalWebm` above for that).
+ */
+function buildWebmWithTracksAndClusters(options: {
+  tracks: ReadonlyArray<{ trackNumber: number; trackType: 1 | 2 }>;
+  clusters: ReadonlyArray<Uint8Array>;
+}): Uint8Array {
+  const tracksPayload = concatBytes(
+    options.tracks.map((track) => buildTrackEntry(track.trackNumber, track.trackType)),
+  );
+  const tracks = buildElement(TRACKS_ID, tracksPayload, 2);
+
+  const infoPayload = buildElement(TIMESTAMP_SCALE_ID, uintPayload(1_000_000));
+  const info = buildElement(INFO_ID, infoPayload, 2);
+
+  const clusterElements = options.clusters.map((clusterPayload) =>
+    buildElement(CLUSTER_ID, clusterPayload, 4),
+  );
+
+  const segmentPayload = concatBytes([tracks, info, ...clusterElements]);
+  return buildElement(SEGMENT_ID, segmentPayload, 4);
+}
+
+describe("readWebmTrackLastBlockEndTimestamp", () => {
+  it("finds the video track's last block end timestamp (clusterTimestamp + relativeTimestamp + blockDuration)", () => {
+    const cluster = buildCluster(0, [{ trackNumber: 1, relativeTimestamp: 100, durationTicks: 33 }]);
+    const bytes = buildWebmWithTracksAndClusters({
+      tracks: [{ trackNumber: 1, trackType: 1 }],
+      clusters: [cluster],
+    });
+
+    expect(readWebmTrackLastBlockEndTimestamp(bytes, "video")).toBe(100 + 33);
+  });
+
+  it("finds the audio track's own last block end timestamp, independent of the video track's", () => {
+    const cluster = buildCluster(0, [
+      { trackNumber: 1, relativeTimestamp: 0, durationTicks: 33 },
+      { trackNumber: 2, relativeTimestamp: 0, durationTicks: 20 },
+    ]);
+    const bytes = buildWebmWithTracksAndClusters({
+      tracks: [
+        { trackNumber: 1, trackType: 1 },
+        { trackNumber: 2, trackType: 2 },
+      ],
+      clusters: [cluster],
+    });
+
+    expect(readWebmTrackLastBlockEndTimestamp(bytes, "video")).toBe(33);
+    expect(readWebmTrackLastBlockEndTimestamp(bytes, "audio")).toBe(20);
+  });
+
+  it("takes the maximum end timestamp across multiple clusters/blocks for the same track", () => {
+    const clusterA = buildCluster(0, [{ trackNumber: 1, relativeTimestamp: 0, durationTicks: 33 }]);
+    const clusterB = buildCluster(1000, [
+      { trackNumber: 1, relativeTimestamp: 0, durationTicks: 33 },
+    ]);
+    const bytes = buildWebmWithTracksAndClusters({
+      tracks: [{ trackNumber: 1, trackType: 1 }],
+      clusters: [clusterA, clusterB],
+    });
+
+    // Cluster B's block ends at 1000 + 0 + 33 = 1033, later than cluster A's
+    // 0 + 0 + 33 = 33.
+    expect(readWebmTrackLastBlockEndTimestamp(bytes, "video")).toBe(1033);
+  });
+
+  it("adds the cluster's own base timestamp to each block's relative timestamp", () => {
+    const cluster = buildCluster(5000, [
+      { trackNumber: 1, relativeTimestamp: 250, durationTicks: 33 },
+    ]);
+    const bytes = buildWebmWithTracksAndClusters({
+      tracks: [{ trackNumber: 1, trackType: 1 }],
+      clusters: [cluster],
+    });
+
+    expect(readWebmTrackLastBlockEndTimestamp(bytes, "video")).toBe(5000 + 250 + 33);
+  });
+
+  it("returns undefined when no track of the requested type exists (a video-only file has no audio track)", () => {
+    const cluster = buildCluster(0, [{ trackNumber: 1, relativeTimestamp: 0, durationTicks: 33 }]);
+    const bytes = buildWebmWithTracksAndClusters({
+      tracks: [{ trackNumber: 1, trackType: 1 }],
+      clusters: [cluster],
+    });
+
+    expect(readWebmTrackLastBlockEndTimestamp(bytes, "audio")).toBeUndefined();
+  });
+
+  it("throws WebmParseError when Segment has no Tracks element", () => {
+    const info = buildElement(INFO_ID, buildElement(TIMESTAMP_SCALE_ID, uintPayload(1_000_000)), 2);
+    const segment = buildElement(SEGMENT_ID, info, 4);
+    expect(() => readWebmTrackLastBlockEndTimestamp(segment, "video")).toThrow(/no "Tracks" element/);
+  });
+
+  it("throws WebmParseError when Segment has no Cluster element", () => {
+    const tracksPayload = buildTrackEntry(1, 1);
+    const tracks = buildElement(TRACKS_ID, tracksPayload, 2);
+    const info = buildElement(INFO_ID, buildElement(TIMESTAMP_SCALE_ID, uintPayload(1_000_000)), 2);
+    const segment = buildElement(SEGMENT_ID, concatBytes([tracks, info]), 4);
+    expect(() => readWebmTrackLastBlockEndTimestamp(segment, "video")).toThrow(/no "Cluster" element/);
   });
 });

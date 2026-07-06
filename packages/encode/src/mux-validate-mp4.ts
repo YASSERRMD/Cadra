@@ -221,35 +221,73 @@ export function readMp4MovieHeader(bytes: ArrayBuffer | Uint8Array): Mp4MovieHea
 }
 
 /**
- * Reads the (single) video track's `moov.trak.mdia.mdhd.timescale`: the
- * track-level timescale `tfhd`/`trun` fragment durations are expressed in
- * (see `readMp4FragmentedDurationTicks`'s own doc), distinct from
- * `mvhd`'s movie-level timescale (`readMp4MovieHeader`'s `timescale`,
- * always mp4-muxer's fixed `GLOBAL_TIMESCALE` of 1000). `mdhd`'s payload
- * layout is identical to `mvhd`'s (`version(u8) + flags(u24)` then
- * creation/modification time at `timeFieldSize` each, then a plain u32
- * `timescale`), since both are "full boxes" following the same
- * ISO/IEC 14496-12 8.4.2/8.2.2 shape.
- *
- * Only supports a single `trak` (this package's own muxing output only
- * ever produces one; see `MuxMp4Options`, which carries no audio options),
- * so this reads the first (only) `trak`'s `mdhd` without disambiguating
- * between multiple tracks.
- *
- * @throws {Mp4ParseError} if `bytes` is not well-formed, or is missing
- *   `moov.trak.mdia.mdhd`.
+ * A `moov.trak`'s media handler type, read from `mdia.hdlr`'s
+ * `componentSubtype` field (`"vide"` for a video track, `"soun"` for an
+ * audio track; per ISO/IEC 14496-12 section 8.4.3, and matching
+ * mp4-muxer's own `hdlr` box construction, which writes exactly one of
+ * these two 4-character codes). This is the standards-correct way to tell
+ * a `trak`'s media type apart: a real player disambiguates tracks the same
+ * way, rather than assuming a fixed array position.
  */
-export function readMp4TrackTimescale(bytes: ArrayBuffer | Uint8Array): number {
-  const view = toDataView(bytes);
+export type Mp4TrackHandlerType = "vide" | "soun";
 
+/**
+ * Reads one `trak`'s `mdia.hdlr` box's `componentSubtype` (the 4 ASCII
+ * bytes at a fixed offset past `hdlr`'s full-box header and its first
+ * 4-byte component-type field; see mp4-muxer's own `hdlr` construction,
+ * which always writes a classic-QuickTime-style `hdlr` with a fixed
+ * `"mhlr"` component type ahead of the actual subtype this function reads).
+ *
+ * @throws {Mp4ParseError} if `trak` has no `mdia.hdlr` box.
+ */
+function readTrakHandlerType(view: DataView, trak: BoxHeader): string {
+  const mdia = findChildBox(view, trak.payloadStart, trak.boxEnd, "mdia");
+  if (mdia === undefined) {
+    throw new Mp4ParseError('no "mdia" box found inside "trak"');
+  }
+  const hdlr = findChildBox(view, mdia.payloadStart, mdia.boxEnd, "hdlr");
+  if (hdlr === undefined) {
+    throw new Mp4ParseError('no "hdlr" box found inside "mdia"');
+  }
+  // version(u8) + flags(u24) + componentType(4 ascii bytes, always "mhlr"
+  // in mp4-muxer's own hdlr construction) precede componentSubtype.
+  const componentSubtypeOffset = hdlr.payloadStart + 4 + 4;
+  return readAscii4(view, componentSubtypeOffset);
+}
+
+/**
+ * Finds the first `moov.trak` whose `mdia.hdlr` component subtype matches
+ * `handlerType` (`"vide"` or `"soun"`), returning its `BoxHeader`, or
+ * `undefined` if no `trak` has that handler type (e.g. `"soun"` on a
+ * video-only file).
+ *
+ * @throws {Mp4ParseError} if `bytes` is not well-formed, or has no
+ *   top-level `moov` box.
+ */
+function findTrakByHandlerType(
+  view: DataView,
+  handlerType: Mp4TrackHandlerType,
+): BoxHeader | undefined {
   const moov = findChildBox(view, 0, view.byteLength, "moov");
   if (moov === undefined) {
     throw new Mp4ParseError('no top-level "moov" box found');
   }
-  const trak = findChildBox(view, moov.payloadStart, moov.boxEnd, "trak");
-  if (trak === undefined) {
-    throw new Mp4ParseError('no "trak" box found inside "moov"');
-  }
+  const traks = findAllChildBoxes(view, moov.payloadStart, moov.boxEnd, "trak");
+  return traks.find((trak) => readTrakHandlerType(view, trak) === handlerType);
+}
+
+/**
+ * Reads one `trak`'s `mdia.mdhd.timescale`: the track-level timescale
+ * `tfhd`/`trun` fragment durations are expressed in (see
+ * `readMp4FragmentedDurationTicks`'s own doc), distinct from `mvhd`'s
+ * movie-level timescale (`readMp4MovieHeader`'s `timescale`, always
+ * mp4-muxer's fixed `GLOBAL_TIMESCALE` of 1000). `mdhd`'s payload layout
+ * is identical to `mvhd`'s (`version(u8) + flags(u24)` then
+ * creation/modification time at `timeFieldSize` each, then a plain u32
+ * `timescale`), since both are "full boxes" following the same
+ * ISO/IEC 14496-12 8.4.2/8.2.2 shape.
+ */
+function readTrakTimescale(view: DataView, trak: BoxHeader): number {
   const mdia = findChildBox(view, trak.payloadStart, trak.boxEnd, "mdia");
   if (mdia === undefined) {
     throw new Mp4ParseError('no "mdia" box found inside "trak"');
@@ -263,6 +301,70 @@ export function readMp4TrackTimescale(bytes: ArrayBuffer | Uint8Array): number {
   const timeFieldSize = version === 1 ? 8 : 4;
   const timescaleOffset = mdhd.payloadStart + 4 + timeFieldSize * 2;
   return view.getUint32(timescaleOffset, false);
+}
+
+/**
+ * Reads the first video track's `moov.trak.mdia.mdhd.timescale` (this
+ * package's own muxing output always has at most one video track and at
+ * most one audio track; see `readMp4AudioTrackTimescale` for the
+ * audio-side counterpart).
+ *
+ * On a file muxed before this phase (video-only, with no `hdlr` box
+ * disambiguation ever needed since there was only ever one `trak`), this
+ * reads that sole `trak`'s handler type and, since it is always `"vide"`,
+ * behaves exactly as before. On a file with both tracks, this specifically
+ * finds the `"vide"`-handled `trak`, not merely the first one positionally
+ * (mp4-muxer always writes video before audio when both are present, but
+ * this function does not rely on that ordering, matching how a real player
+ * would disambiguate tracks).
+ *
+ * @throws {Mp4ParseError} if `bytes` is not well-formed, or is missing a
+ *   video `moov.trak.mdia.mdhd`.
+ */
+export function readMp4TrackTimescale(bytes: ArrayBuffer | Uint8Array): number {
+  const view = toDataView(bytes);
+  const trak = findTrakByHandlerType(view, "vide");
+  if (trak === undefined) {
+    throw new Mp4ParseError('no video "trak" (mdia.hdlr componentSubtype "vide") found in "moov"');
+  }
+  return readTrakTimescale(view, trak);
+}
+
+/**
+ * Reads the audio track's `moov.trak.mdia.mdhd.timescale`, the audio-side
+ * counterpart to `readMp4TrackTimescale`. `undefined` when the file has no
+ * audio track at all (a video-only file, this phase's own "silent
+ * composition" case), distinguishing that legitimate, expected state from
+ * a genuinely malformed file.
+ *
+ * @throws {Mp4ParseError} if `bytes` is not well-formed.
+ */
+export function readMp4AudioTrackTimescale(bytes: ArrayBuffer | Uint8Array): number | undefined {
+  const view = toDataView(bytes);
+  const trak = findTrakByHandlerType(view, "soun");
+  return trak === undefined ? undefined : readTrakTimescale(view, trak);
+}
+
+/**
+ * Reads one `trak`'s `tkhd.trackId`: `version(u8) + flags(u24)` then
+ * creation/modification time at `timeFieldSize` each (same version-driven
+ * widening `mvhd`/`mdhd` use), then a plain u32 `trackId`, per
+ * ISO/IEC 14496-12 section 8.3.2. This is the same `trackId` mp4-muxer
+ * stamps into each `moof.traf.tfhd.trackId` for that track's fragments (see
+ * `readMp4FragmentedDurationTicks`'s own doc), letting a fragmented file's
+ * `traf`s be attributed back to the correct track.
+ *
+ * @throws {Mp4ParseError} if `trak` has no `tkhd` box.
+ */
+function readTrakId(view: DataView, trak: BoxHeader): number {
+  const tkhd = findChildBox(view, trak.payloadStart, trak.boxEnd, "tkhd");
+  if (tkhd === undefined) {
+    throw new Mp4ParseError('no "tkhd" box found inside "trak"');
+  }
+  const version = view.getUint8(tkhd.payloadStart);
+  const timeFieldSize = version === 1 ? 8 : 4;
+  const trackIdOffset = tkhd.payloadStart + 4 + timeFieldSize * 2;
+  return view.getUint32(trackIdOffset, false);
 }
 
 /**
@@ -387,41 +489,112 @@ function readTrafDurationTicks(view: DataView, traf: BoxHeader): number {
 }
 
 /**
+ * Reads one `traf`'s `tfhd.trackId`: the first field immediately following
+ * `tfhd`'s `version(u8)+flags(u24)` header, per ISO/IEC 14496-12 section
+ * 8.8.7. Used to attribute a `moof`'s `traf` boxes back to the specific
+ * `trak` (found via `tkhd.trackId`; see `readTrakId`) they belong to, once a
+ * fragmented file has more than one track's fragments interleaved within
+ * the same `moof`.
+ */
+function readTrafTrackId(view: DataView, traf: BoxHeader): number {
+  const tfhd = findChildBox(view, traf.payloadStart, traf.boxEnd, "tfhd");
+  if (tfhd === undefined) {
+    throw new Mp4ParseError('no "tfhd" box found inside "traf"');
+  }
+  const tfhdHeader = readFullBoxVersionAndFlags(view, tfhd.payloadStart);
+  return view.getUint32(tfhdHeader.fieldsStart, false);
+}
+
+/**
  * Sums the total sample duration (track timescale ticks; same unit
  * `readMp4MovieHeader`'s `durationTicks` would use in an unfragmented file)
- * across every top-level `moof.traf` in a fragmented MP4, i.e. the
- * fragmented-file counterpart to `readMp4MovieHeader`'s `durationTicks`
- * (see its own doc for why a fragmented file's `mvhd.duration` is `0` and
- * cannot be used directly). This is the same computation a real player
- * performs to report a fragmented file's duration: fragmented MP4 has no
- * single authoritative duration field, precisely because it is designed to
- * be playable/appendable before the whole file (and thus the whole
- * duration) exists.
+ * across every top-level `moof.traf` belonging to `trackId` in a
+ * fragmented MP4, i.e. the fragmented-file counterpart to
+ * `readMp4MovieHeader`'s `durationTicks` (see its own doc for why a
+ * fragmented file's `mvhd.duration` is `0` and cannot be used directly).
+ * This is the same computation a real player performs to report a
+ * fragmented file's duration: fragmented MP4 has no single authoritative
+ * duration field, precisely because it is designed to be
+ * playable/appendable before the whole file (and thus the whole duration)
+ * exists.
  *
- * Only supports a single video track (this package's own muxing output
- * only ever produces one; see `MuxMp4Options`, which carries no audio
- * options), so this sums every `moof`'s first `traf` only, not multiple
- * tracks' `traf`s within the same `moof`.
+ * `trackId` disambiguates which track's `traf` to sum when a `moof` carries
+ * fragments for more than one track (mp4-muxer always writes one `traf`
+ * per track per `moof`, video first when both are present; see
+ * `readMp4FragmentedDurationTicks`/`readMp4AudioFragmentedDurationTicks`,
+ * which resolve the correct `trackId` via `tkhd` before calling this).
  *
- * @throws {Mp4ParseError} if `bytes` is not well-formed, or the fragment
- *   boxes do not match the specific shape this parser supports (see
- *   `readTrafDurationTicks`'s own doc).
+ * @throws {Mp4ParseError} if `bytes` is not well-formed, no `moof` carries
+ *   a `traf` for `trackId`, or the fragment boxes do not match the
+ *   specific shape this parser supports (see `readTrafDurationTicks`'s own
+ *   doc).
  */
-export function readMp4FragmentedDurationTicks(bytes: ArrayBuffer | Uint8Array): number {
-  const view = toDataView(bytes);
-
+function sumFragmentedDurationTicksForTrack(view: DataView, trackId: number): number {
   const moofs = findAllChildBoxes(view, 0, view.byteLength, "moof");
   if (moofs.length === 0) {
     throw new Mp4ParseError('no top-level "moof" box found');
   }
 
   let totalDurationTicks = 0;
+  let matchedAnyTraf = false;
   for (const moof of moofs) {
-    const traf = findChildBox(view, moof.payloadStart, moof.boxEnd, "traf");
+    const trafs = findAllChildBoxes(view, moof.payloadStart, moof.boxEnd, "traf");
+    const traf = trafs.find((candidate) => readTrafTrackId(view, candidate) === trackId);
     if (traf === undefined) {
-      throw new Mp4ParseError('no "traf" box found inside "moof"');
+      continue;
     }
+    matchedAnyTraf = true;
     totalDurationTicks += readTrafDurationTicks(view, traf);
   }
+
+  if (!matchedAnyTraf) {
+    throw new Mp4ParseError(`no "traf" box found for track id ${trackId} in any "moof"`);
+  }
   return totalDurationTicks;
+}
+
+/**
+ * Sums the total sample duration across every top-level `moof.traf`
+ * belonging to the video track in a fragmented MP4. See
+ * `sumFragmentedDurationTicksForTrack`'s own doc for the underlying
+ * computation; this resolves the video track's `trackId` (via `moov.trak`'s
+ * `hdlr` componentSubtype `"vide"`, then that same `trak`'s own `tkhd`)
+ * before summing.
+ *
+ * @throws {Mp4ParseError} if `bytes` is not well-formed, has no video
+ *   `trak`, or the fragment boxes do not match the specific shape this
+ *   parser supports (see `readTrafDurationTicks`'s own doc).
+ */
+export function readMp4FragmentedDurationTicks(bytes: ArrayBuffer | Uint8Array): number {
+  const view = toDataView(bytes);
+  const trak = findTrakByHandlerType(view, "vide");
+  if (trak === undefined) {
+    throw new Mp4ParseError('no video "trak" (mdia.hdlr componentSubtype "vide") found in "moov"');
+  }
+  const trackId = readTrakId(view, trak);
+  return sumFragmentedDurationTicksForTrack(view, trackId);
+}
+
+/**
+ * Sums the total sample duration across every top-level `moof.traf`
+ * belonging to the audio track in a fragmented MP4, the audio-side
+ * counterpart to `readMp4FragmentedDurationTicks`. `undefined` when the
+ * file has no audio track at all (a video-only file, this phase's own
+ * "silent composition" case), distinguishing that legitimate, expected
+ * state from a genuinely malformed file.
+ *
+ * @throws {Mp4ParseError} if `bytes` is not well-formed, or the fragment
+ *   boxes do not match the specific shape this parser supports (see
+ *   `readTrafDurationTicks`'s own doc).
+ */
+export function readMp4AudioFragmentedDurationTicks(
+  bytes: ArrayBuffer | Uint8Array,
+): number | undefined {
+  const view = toDataView(bytes);
+  const trak = findTrakByHandlerType(view, "soun");
+  if (trak === undefined) {
+    return undefined;
+  }
+  const trackId = readTrakId(view, trak);
+  return sumFragmentedDurationTicksForTrack(view, trackId);
 }

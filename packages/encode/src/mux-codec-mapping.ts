@@ -98,3 +98,83 @@ export function toMp4VideoCodec(codec: string): Mp4VideoCodec {
 export function toWebmVideoCodec(codec: string): WebmVideoCodec {
   return findCodecFamily(codec).webm;
 }
+
+/** mp4-muxer's `AudioOptions.codec` enum. */
+export type Mp4AudioCodec = "aac" | "opus";
+
+/** webm-muxer's Matroska audio codec ID string. */
+export type WebmAudioCodec = "A_OPUS" | "A_AAC";
+
+/** Thrown when a WebCodecs audio codec string does not match any known family. */
+export class UnsupportedMuxAudioCodecError extends Error {
+  constructor(codec: string) {
+    super(
+      `Cannot mux audio codec "${codec}": no known WebCodecs audio codec string prefix (mp4a, opus) matched it.`,
+    );
+    this.name = "UnsupportedMuxAudioCodecError";
+  }
+}
+
+/**
+ * Recognized WebCodecs audio codec string prefixes, paired with both
+ * target muxers' equivalents. Mirrors `CODEC_FAMILY_TABLE`'s video-side
+ * shape, but audio codec choice is container-driven rather than a single
+ * shared preference order (see `audio-codec-probe.ts`'s own doc): AAC only
+ * ever targets MP4, Opus only ever targets WebM in this package's own
+ * `encodeAudio` (`DEFAULT_AUDIO_CODEC_PREFERENCES`), so unlike the video
+ * table, this one is not consulted to pick a container-appropriate codec,
+ * only to map an already-chosen one to each muxer's own enum/string.
+ */
+const AUDIO_CODEC_FAMILY_TABLE: ReadonlyArray<{
+  prefixes: readonly string[];
+  mp4: Mp4AudioCodec | undefined;
+  webm: WebmAudioCodec | undefined;
+}> = [
+  { prefixes: ["mp4a"], mp4: "aac", webm: "A_AAC" },
+  { prefixes: ["opus"], mp4: "opus", webm: "A_OPUS" },
+];
+
+function findAudioCodecFamily(codec: string): (typeof AUDIO_CODEC_FAMILY_TABLE)[number] {
+  const family = AUDIO_CODEC_FAMILY_TABLE.find((entry) =>
+    entry.prefixes.some((prefix) => codec.startsWith(prefix)),
+  );
+  if (family === undefined) {
+    throw new UnsupportedMuxAudioCodecError(codec);
+  }
+  return family;
+}
+
+/**
+ * Maps a WebCodecs audio codec string to mp4-muxer's `AudioOptions.codec`
+ * enum.
+ *
+ * @throws {UnsupportedMuxAudioCodecError} if `codec` matches no known family.
+ * @throws {UnsupportedMuxAudioCodecError} if the matched family has no MP4
+ *   mapping (Opus-in-MP4, while technically registered by some tooling, is
+ *   not what this package's own `encodeAudio` ever produces for an MP4
+ *   target: `DEFAULT_AUDIO_CODEC_PREFERENCES` only ever probes AAC for
+ *   `"mp4"`, so reaching this branch means a caller passed a
+ *   caller-supplied codec string this package does not expect).
+ */
+export function toMp4AudioCodec(codec: string): Mp4AudioCodec {
+  const family = findAudioCodecFamily(codec);
+  if (family.mp4 === undefined) {
+    throw new UnsupportedMuxAudioCodecError(codec);
+  }
+  return family.mp4;
+}
+
+/**
+ * Maps a WebCodecs audio codec string to webm-muxer's Matroska audio codec
+ * ID string.
+ *
+ * @throws {UnsupportedMuxAudioCodecError} if `codec` matches no known
+ *   family, or the matched family has no WebM mapping.
+ */
+export function toWebmAudioCodec(codec: string): WebmAudioCodec {
+  const family = findAudioCodecFamily(codec);
+  if (family.webm === undefined) {
+    throw new UnsupportedMuxAudioCodecError(codec);
+  }
+  return family.webm;
+}

@@ -4,9 +4,11 @@ import {
   StreamTarget as WebmStreamTarget,
 } from "webm-muxer";
 
+import type { EncodedAudioChunkResult } from "./encode-audio.js";
 import type { EncodedChunkResult } from "./encode-frames.js";
-import { extractRawChunkBytes } from "./mux-chunk-bytes.js";
-import { toWebmVideoCodec } from "./mux-codec-mapping.js";
+import { mergeVideoAndAudioChunks } from "./mux-audio-video-merge.js";
+import { extractRawAudioChunkBytes, extractRawChunkBytes } from "./mux-chunk-bytes.js";
+import { toWebmAudioCodec, toWebmVideoCodec } from "./mux-codec-mapping.js";
 import type { NodeWritableLike, WebWritableStreamLike } from "./mux-stream-target.js";
 import { toSequentialOnData } from "./mux-stream-target.js";
 
@@ -45,27 +47,68 @@ export interface MuxWebmOptions {
 }
 
 /**
- * Consumes `chunks` (Phase 20's `encodeFrames` output) into `muxer` in
- * arrival order, then finalizes. Shared by every `muxToWebm*` entry point
- * below so the actual chunk-feeding loop has exactly one implementation.
+ * Describes an optional audio track to mux alongside the video track, i.e.
+ * Phase 22's `encodeAudio` output. Mirrors `mux-mp4.ts`'s
+ * `MuxMp4AudioTrackOptions`; see its own doc for why a silent composition
+ * should omit this entirely rather than pass a track with zero chunks.
+ */
+export interface MuxWebmAudioTrackOptions {
+  /** The encoded audio chunk stream, i.e. `encodeAudio`'s output. */
+  chunks: AsyncGenerator<EncodedAudioChunkResult>;
+  /** WebCodecs codec string from the first chunk's `metadata.decoderConfig.codec` (mirrors `firstChunkCodec`'s video-side role). */
+  codec: string;
+  /** Number of audio channels; must match what `encodeAudio`/`renderAudioMixdown` were configured with. */
+  numberOfChannels: number;
+  /** Sample rate in Hz; must match what `encodeAudio`/`renderAudioMixdown` were configured with. */
+  sampleRate: number;
+}
+
+/**
+ * Consumes `chunks` (Phase 20's `encodeFrames` output) and, when `audio` is
+ * given, Phase 22's `encodeAudio` output too, into `muxer`, then finalizes.
+ * Shared by every `muxToWebm*` entry point below so the actual
+ * chunk-feeding loop has exactly one implementation.
  *
- * Uses `addVideoChunkRaw` rather than `addVideoChunk`: see
- * `mux-chunk-bytes.ts`'s own doc for why (in short, `addVideoChunk`
- * requires a real `instanceof EncodedVideoChunk`, which only a genuine
+ * Uses `addVideoChunkRaw`/`addAudioChunkRaw` rather than `addVideoChunk`/
+ * `addAudioChunk`: see `mux-chunk-bytes.ts`'s own doc for why (in short,
+ * `addVideoChunk`/`addAudioChunk` require a real `instanceof
+ * EncodedVideoChunk`/`EncodedAudioChunk`, which only a genuine
  * WebCodecs-capable environment provides). Unlike mp4-muxer's
- * `addVideoChunkRaw`, webm-muxer's version takes no explicit `duration`
- * argument (Matroska has no per-sample duration field the way an MP4 sample
- * table does; a track's overall duration comes from its blocks'
- * timestamps), so `extractRawChunkBytes`'s `duration` field is read (and
- * validated non-null) but not threaded through here.
+ * `addVideoChunkRaw`/`addAudioChunkRaw`, webm-muxer's versions take no
+ * explicit `duration` argument (Matroska has no per-sample duration field
+ * the way an MP4 sample table does; a track's overall duration comes from
+ * its blocks' timestamps), so `extractRawChunkBytes`'s/
+ * `extractRawAudioChunkBytes`'s `duration` field is read (and validated
+ * non-null) but not threaded through here.
+ *
+ * When `audio` is provided, both streams are consumed concurrently via
+ * `mergeVideoAndAudioChunks`; see that function's own doc for why
+ * interleaving call order does not matter to either muxer.
  */
 async function feedChunksIntoMuxer(
   muxer: WebmMuxer<ArrayBufferTarget | WebmStreamTarget>,
   chunks: AsyncGenerator<EncodedChunkResult>,
+  audio?: MuxWebmAudioTrackOptions,
 ): Promise<void> {
-  for await (const { frame, chunk, metadata } of chunks) {
-    const raw = extractRawChunkBytes(chunk, frame);
-    muxer.addVideoChunkRaw(raw.data, raw.type, raw.timestamp, metadata);
+  if (audio === undefined) {
+    for await (const { frame, chunk, metadata } of chunks) {
+      const raw = extractRawChunkBytes(chunk, frame);
+      muxer.addVideoChunkRaw(raw.data, raw.type, raw.timestamp, metadata);
+    }
+    muxer.finalize();
+    return;
+  }
+
+  for await (const merged of mergeVideoAndAudioChunks(chunks, audio.chunks)) {
+    if (merged.kind === "video") {
+      const { frame, chunk, metadata } = merged.result;
+      const raw = extractRawChunkBytes(chunk, frame);
+      muxer.addVideoChunkRaw(raw.data, raw.type, raw.timestamp, metadata);
+    } else {
+      const { chunkIndex, chunk, metadata } = merged.result;
+      const raw = extractRawAudioChunkBytes(chunk, chunkIndex);
+      muxer.addAudioChunkRaw(raw.data, raw.type, raw.timestamp, metadata);
+    }
   }
   muxer.finalize();
 }
@@ -85,11 +128,16 @@ async function feedChunksIntoMuxer(
  * place afterward costs nothing extra, mirroring why `muxToMp4Buffer` uses
  * `fastStart: 'in-memory'` unconditionally); see `muxToWebmStream`'s doc for
  * the sequential-write path, where that tradeoff does not hold.
+ *
+ * `audio` is optional and defaults to omitted (video-only output): see
+ * `MuxWebmAudioTrackOptions`'s own doc for why a silent composition should
+ * omit it entirely rather than pass a track with zero chunks.
  */
 export async function muxToWebmBuffer(
   chunks: AsyncGenerator<EncodedChunkResult>,
   options: MuxWebmOptions,
   firstChunkCodec: string,
+  audio?: MuxWebmAudioTrackOptions,
 ): Promise<ArrayBuffer> {
   const target = new ArrayBufferTarget();
   const muxer = new WebmMuxer({
@@ -100,23 +148,32 @@ export async function muxToWebmBuffer(
       height: options.height,
       frameRate: options.fps,
     },
+    ...(audio !== undefined && {
+      audio: {
+        codec: toWebmAudioCodec(audio.codec),
+        numberOfChannels: audio.numberOfChannels,
+        sampleRate: audio.sampleRate,
+      },
+    }),
   });
 
-  await feedChunksIntoMuxer(muxer, chunks);
+  await feedChunksIntoMuxer(muxer, chunks, audio);
   return target.buffer;
 }
 
 /**
  * Muxes `chunks` into a WebM file and returns it as a `Blob`
  * (`video/webm`), ready to be wrapped in `URL.createObjectURL` for a browser
- * download link or `<video>` source.
+ * download link or `<video>` source. `audio` is optional; see
+ * `muxToWebmBuffer`'s doc for its optionality rationale.
  */
 export async function muxToWebmBlob(
   chunks: AsyncGenerator<EncodedChunkResult>,
   options: MuxWebmOptions,
   firstChunkCodec: string,
+  audio?: MuxWebmAudioTrackOptions,
 ): Promise<Blob> {
-  const buffer = await muxToWebmBuffer(chunks, options, firstChunkCodec);
+  const buffer = await muxToWebmBuffer(chunks, options, firstChunkCodec, audio);
   return new Blob([buffer], { type: "video/webm" });
 }
 
@@ -140,12 +197,16 @@ export async function muxToWebmBlob(
  * limitation, since holding the file in memory already implies random
  * access. Callers on this path that need a reported duration should track
  * `durationInFrames`/`fps` themselves rather than rely on the container.
+ *
+ * `audio` is optional; see `muxToWebmBuffer`'s doc for its optionality
+ * rationale.
  */
 export async function muxToWebmStream(
   chunks: AsyncGenerator<EncodedChunkResult>,
   options: MuxWebmOptions,
   firstChunkCodec: string,
   destination: NodeWritableLike | WebWritableStreamLike,
+  audio?: MuxWebmAudioTrackOptions,
 ): Promise<void> {
   const target = new WebmStreamTarget({
     onData: toSequentialOnData(destination),
@@ -159,7 +220,14 @@ export async function muxToWebmStream(
       height: options.height,
       frameRate: options.fps,
     },
+    ...(audio !== undefined && {
+      audio: {
+        codec: toWebmAudioCodec(audio.codec),
+        numberOfChannels: audio.numberOfChannels,
+        sampleRate: audio.sampleRate,
+      },
+    }),
   });
 
-  await feedChunksIntoMuxer(muxer, chunks);
+  await feedChunksIntoMuxer(muxer, chunks, audio);
 }

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { Mp4ParseError, readMp4MovieHeader, readMp4TrackTimescale } from "./mux-validate-mp4.js";
+import {
+  Mp4ParseError,
+  readMp4AudioTrackTimescale,
+  readMp4MovieHeader,
+  readMp4TrackTimescale,
+} from "./mux-validate-mp4.js";
 
 /** Writes a 4-byte big-endian ASCII box type at `offset` into `bytes`. */
 function writeAscii4(bytes: Uint8Array, offset: number, type: string): void {
@@ -23,12 +28,20 @@ function writeAscii4(bytes: Uint8Array, offset: number, type: string): void {
  * (mp4-muxer only emits version 1 once a creation time or duration exceeds
  * 32 bits, which no test composition here reaches), so version 1 is only
  * covered here, via this hand-built fixture.
+ *
+ * When `trackTimescale` is given, the constructed `trak` also carries a
+ * minimal `mdia.hdlr` box (`componentSubtype` defaulting to `"vide"` via
+ * `handlerType`): every real MP4 (muxer-produced or otherwise) has one, and
+ * `readMp4TrackTimescale`/`readMp4AudioTrackTimescale` disambiguate `trak`s
+ * by this handler type (see `mux-validate-mp4.ts`'s own doc), so this
+ * fixture must include it to stay representative of a real file's shape.
  */
 function buildMinimalMp4(options: {
   version: 0 | 1;
   timescale: number;
   durationTicks: number;
   trackTimescale?: number;
+  handlerType?: "vide" | "soun";
 }): ArrayBuffer {
   const timeFieldSize = options.version === 1 ? 8 : 4;
   // mvhd payload: version(1) + flags(3) + creationTime + modificationTime + timescale(4) + duration.
@@ -36,9 +49,13 @@ function buildMinimalMp4(options: {
   const mvhdSize = 8 + mvhdPayloadSize;
 
   const hasTrak = options.trackTimescale !== undefined;
+  const handlerType = options.handlerType ?? "vide";
+  // hdlr payload: version(1) + flags(3) + componentType(4, "mhlr") + componentSubtype(4) + manufacturer(4) + flags(4) + flagsMask(4) + name(1, empty null-terminated string).
+  const hdlrPayloadSize = 4 + 4 + 4 + 4 + 4 + 4 + 1;
+  const hdlrSize = hasTrak ? 8 + hdlrPayloadSize : 0;
   const mdhdPayloadSize = hasTrak ? 4 + timeFieldSize * 2 + 4 : 0;
   const mdhdSize = hasTrak ? 8 + mdhdPayloadSize : 0;
-  const mdiaSize = hasTrak ? 8 + mdhdSize : 0;
+  const mdiaSize = hasTrak ? 8 + mdhdSize + hdlrSize : 0;
   const trakSize = hasTrak ? 8 + mdiaSize : 0;
 
   const moovPayloadSize = mvhdSize + trakSize;
@@ -98,6 +115,20 @@ function buildMinimalMp4(options: {
     mdhdField += timeFieldSize;
 
     view.setUint32(mdhdField, options.trackTimescale!, false);
+
+    const hdlrStart = mdhdStart + mdhdSize;
+    view.setUint32(hdlrStart, hdlrSize, false);
+    writeAscii4(bytes, hdlrStart + 4, "hdlr");
+    let hdlrField = hdlrStart + 8;
+    view.setUint8(hdlrField, 0); // version
+    view.setUint8(hdlrField + 1, 0); // flags byte 1
+    view.setUint8(hdlrField + 2, 0); // flags byte 2
+    view.setUint8(hdlrField + 3, 0); // flags byte 3
+    hdlrField += 4;
+    writeAscii4(bytes, hdlrField, "mhlr"); // componentType
+    hdlrField += 4;
+    writeAscii4(bytes, hdlrField, handlerType); // componentSubtype
+    // Remaining fields (manufacturer/flags/flagsMask/name) left as 0.
 
     offset += trakSize;
   }
@@ -186,8 +217,48 @@ describe("readMp4TrackTimescale", () => {
     expect(readMp4TrackTimescale(buffer)).toBe(60000);
   });
 
-  it("throws Mp4ParseError when moov has no trak box", () => {
+  it("throws Mp4ParseError when moov has no trak box at all", () => {
     const buffer = buildMinimalMp4({ version: 0, timescale: 1000, durationTicks: 3000 });
-    expect(() => readMp4TrackTimescale(buffer)).toThrow(/no "trak" box/);
+    expect(() => readMp4TrackTimescale(buffer)).toThrow(/no video "trak"/);
+  });
+
+  it("throws Mp4ParseError when moov has a trak but it is not the video handler type", () => {
+    const buffer = buildMinimalMp4({
+      version: 0,
+      timescale: 1000,
+      durationTicks: 3000,
+      trackTimescale: 48000,
+      handlerType: "soun",
+    });
+    expect(() => readMp4TrackTimescale(buffer)).toThrow(/no video "trak"/);
+  });
+});
+
+describe("readMp4AudioTrackTimescale", () => {
+  it("reads the audio track's mdhd.timescale when its hdlr componentSubtype is soun", () => {
+    const buffer = buildMinimalMp4({
+      version: 0,
+      timescale: 1000,
+      durationTicks: 3000,
+      trackTimescale: 48000,
+      handlerType: "soun",
+    });
+    expect(readMp4AudioTrackTimescale(buffer)).toBe(48000);
+  });
+
+  it("returns undefined when the only trak is a video track (no audio track present)", () => {
+    const buffer = buildMinimalMp4({
+      version: 0,
+      timescale: 1000,
+      durationTicks: 3000,
+      trackTimescale: 30000,
+      handlerType: "vide",
+    });
+    expect(readMp4AudioTrackTimescale(buffer)).toBeUndefined();
+  });
+
+  it("returns undefined (not a throw) when moov has no trak box at all", () => {
+    const buffer = buildMinimalMp4({ version: 0, timescale: 1000, durationTicks: 3000 });
+    expect(readMp4AudioTrackTimescale(buffer)).toBeUndefined();
   });
 });
