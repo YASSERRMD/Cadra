@@ -5,6 +5,7 @@ import { interpolateVector3, lerp } from "../interpolation/lerp.js";
 import type { ColorRGBA, Vector3 } from "../scene-graph/primitives.js";
 import {
   compileKeyframeTrack,
+  resolveBooleanProperty,
   resolveColorProperty,
   resolveNumberProperty,
   resolveProperty,
@@ -220,5 +221,52 @@ describe("resolveColorProperty", () => {
       ],
     };
     expect(resolveColorProperty(property, 5)).toEqual([0.5, 0.5, 0.5, 0.5]);
+  });
+});
+
+describe("resolveBooleanProperty", () => {
+  it("resolves a constant boolean", () => {
+    expect(resolveBooleanProperty(true, 0)).toBe(true);
+    expect(resolveBooleanProperty(false, 100)).toBe(false);
+  });
+
+  it("steps at the next keyframe's exact frame for a 'hold' track", () => {
+    const property: Property<boolean> = {
+      type: "keyframeTrack",
+      keyframes: [
+        { frame: 0, value: true, easing: "hold" },
+        { frame: 10, value: false },
+      ],
+    };
+    expect(resolveBooleanProperty(property, 0)).toBe(true);
+    expect(resolveBooleanProperty(property, 5)).toBe(true);
+    expect(resolveBooleanProperty(property, 9.999)).toBe(true);
+    expect(resolveBooleanProperty(property, 10)).toBe(false);
+    expect(resolveBooleanProperty(property, 50)).toBe(false);
+  });
+
+  it("still resolves a well-defined value for a track without explicit 'hold' easing", () => {
+    const property: Property<boolean> = {
+      type: "keyframeTrack",
+      keyframes: [
+        { frame: 0, value: false },
+        { frame: 10, value: true },
+      ],
+    };
+    expect(resolveBooleanProperty(property, 0)).toBe(false);
+    expect(resolveBooleanProperty(property, 5)).toBe(false);
+    expect(resolveBooleanProperty(property, 10)).toBe(true);
+  });
+
+  it("holds at the first keyframe before the track starts and the last keyframe after it ends", () => {
+    const property: Property<boolean> = {
+      type: "keyframeTrack",
+      keyframes: [
+        { frame: 10, value: true, easing: "hold" },
+        { frame: 20, value: false },
+      ],
+    };
+    expect(resolveBooleanProperty(property, 0)).toBe(true);
+    expect(resolveBooleanProperty(property, 30)).toBe(false);
   });
 });

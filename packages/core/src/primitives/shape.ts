@@ -1,4 +1,5 @@
-import { createIdentityTransform, type Transform } from "../scene-graph/primitives.js";
+import type { Property } from "../keyframes/keyframe-track.js";
+import { type AnimatableTransform, createIdentityTransform } from "../scene-graph/primitives.js";
 import type { MeshNode } from "../scene-graph/scene-node.js";
 
 /**
@@ -9,12 +10,16 @@ import type { MeshNode } from "../scene-graph/scene-node.js";
  * `@cadra/renderer`, so it has no visibility into which refs a renderer's
  * registries actually resolve. `"box"` and `"default"` are chosen only as
  * zero-config, readable placeholder literals.
+ *
+ * `transform` and `visible` each accept either a plain value or a
+ * `KeyframeTrack` (Phase 10's `Property<T>`); passing a plain value, as every
+ * existing caller does, keeps working unchanged.
  */
 export interface ShapeProps {
   id: string;
   name?: string;
-  transform?: Transform;
-  visible?: boolean;
+  transform?: AnimatableTransform;
+  visible?: Property<boolean>;
   children?: MeshNode["children"];
   geometryRef?: string;
   materialRef?: string;

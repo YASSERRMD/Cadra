@@ -1,7 +1,12 @@
 import { interpolateColor, interpolateVector3, lerp } from "../interpolation/lerp.js";
 import type { ColorRGBA, Vector3 } from "../scene-graph/primitives.js";
 import { EASING_FUNCTIONS } from "./easing.js";
-import { isKeyframeTrack, type Keyframe, type KeyframeTrack, type Property } from "./keyframe-track.js";
+import {
+  isKeyframeTrack,
+  type Keyframe,
+  type KeyframeTrack,
+  type Property,
+} from "./keyframe-track.js";
 
 /**
  * Compiles a `KeyframeTrack<T>` into a reusable evaluator closure: a pure
@@ -134,6 +139,21 @@ function interpolateColorValue(a: ColorRGBA, b: ColorRGBA, t: number): ColorRGBA
   return interpolateColor(t, a, b);
 }
 
+/**
+ * Step-function "interpolation" for `boolean`: there is no continuous blend
+ * between `true` and `false`, so this holds `a` for the entire segment and
+ * only switches to `b` once `t` reaches `1`. In practice, `compileKeyframeTrack`
+ * already snaps to `k2.value` exactly at `frame === k2.frame` (independent of
+ * easing), so this function's `t === 1` branch is rarely the one actually
+ * invoked; it exists so `resolveBooleanProperty` still returns a well-defined
+ * value for every `t`, matching the `(a, b, t) => T` shape every other
+ * specialization uses, even for a segment authored with a continuous easing
+ * (e.g. `'linear'`) instead of the natural `'hold'`.
+ */
+function stepBooleanValue(a: boolean, b: boolean, t: number): boolean {
+  return t >= 1 ? b : a;
+}
+
 /** `resolveProperty` specialized for plain `number` properties, using `lerp`. */
 export function resolveNumberProperty(property: Property<number>, frame: number): number {
   return resolveProperty(property, frame, lerpValue);
@@ -147,4 +167,18 @@ export function resolveVector3Property(property: Property<Vector3>, frame: numbe
 /** `resolveProperty` specialized for `ColorRGBA` properties, using `interpolateColor`. */
 export function resolveColorProperty(property: Property<ColorRGBA>, frame: number): ColorRGBA {
   return resolveProperty(property, frame, interpolateColorValue);
+}
+
+/**
+ * `resolveProperty` specialized for `boolean` properties, using
+ * `stepBooleanValue`: a keyframed `visible` (or any other boolean property)
+ * steps discretely between keyframe values rather than blending, since there
+ * is nothing to blend between `true` and `false`. Authoring a boolean
+ * keyframe track with `'hold'` easing (see `Keyframe.easing`) makes this
+ * step explicit and is the recommended convention; a track authored with a
+ * continuous easing still behaves correctly (see `stepBooleanValue`), just
+ * without a meaningful "in-between" value.
+ */
+export function resolveBooleanProperty(property: Property<boolean>, frame: number): boolean {
+  return resolveProperty(property, frame, stepBooleanValue);
 }

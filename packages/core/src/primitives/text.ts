@@ -1,17 +1,28 @@
-import { type ColorRGBA, createIdentityTransform, type Transform } from "../scene-graph/primitives.js";
+import type { Property } from "../keyframes/keyframe-track.js";
+import {
+  type AnimatableTransform,
+  type ColorRGBA,
+  createIdentityTransform,
+} from "../scene-graph/primitives.js";
 import type { TextNode } from "../scene-graph/scene-node.js";
 
-/** Props for `Text`. Only `id` is required; everything else defaults. */
+/**
+ * Props for `Text`. Only `id` is required; everything else defaults.
+ *
+ * `transform`, `visible`, `fontSize`, and `color` each accept either a plain
+ * value or a `KeyframeTrack` (Phase 10's `Property<T>`); passing a plain
+ * value, as every existing caller does, keeps working unchanged.
+ */
 export interface TextProps {
   id: string;
   name?: string;
-  transform?: Transform;
-  visible?: boolean;
+  transform?: AnimatableTransform;
+  visible?: Property<boolean>;
   children?: TextNode["children"];
   content?: string;
   fontRef?: string;
-  fontSize?: number;
-  color?: ColorRGBA;
+  fontSize?: Property<number>;
+  color?: Property<ColorRGBA>;
 }
 
 /**

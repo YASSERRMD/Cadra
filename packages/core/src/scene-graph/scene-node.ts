@@ -1,5 +1,5 @@
 import type { Property } from "../keyframes/keyframe-track.js";
-import type { ColorRGBA, Transform, Vector3 } from "./primitives.js";
+import type { AnimatableTransform, ColorRGBA, Vector3 } from "./primitives.js";
 
 /**
  * Every kind of node the scene graph can represent.
@@ -13,14 +13,31 @@ import type { ColorRGBA, Transform, Vector3 } from "./primitives.js";
 export type SceneNodeKind =
   "group" | "mesh" | "camera" | "light" | "text" | "image" | "compositionRef";
 
-/** Fields shared by every scene node, regardless of kind. */
+/**
+ * Fields shared by every scene node, regardless of kind.
+ *
+ * `transform` is `AnimatableTransform`: each of `position`/`rotation`/`scale`
+ * is independently a `Property<Vector3>` (Phase 10's generic keyframe/property
+ * model), so any of the three may be a plain constant or a `KeyframeTrack`
+ * animating it over time, for every node kind alike. A plain `Transform`
+ * (all three fields as bare `Vector3`s, e.g. from `createIdentityTransform`)
+ * is always a valid `AnimatableTransform`, since a bare `T` is always a valid
+ * `Property<T>`.
+ */
 interface SceneNodeBase<Kind extends SceneNodeKind> {
   id: string;
   kind: Kind;
   /** Optional human-readable label, purely for authoring and debugging. */
   name?: string;
-  transform: Transform;
-  visible: boolean;
+  transform: AnimatableTransform;
+  /**
+   * Whether this node (and its subtree) should be rendered. `Property<boolean>`
+   * so visibility can be toggled over time via a keyframe track; a keyframed
+   * `visible` track only makes sense with `'hold'` easing between keyframes
+   * (see `compileKeyframeTrack`), since a boolean has no continuous blend
+   * between `true` and `false`.
+   */
+  visible: Property<boolean>;
   children: SceneNode[];
 }
 
@@ -43,11 +60,8 @@ export interface MeshNode extends SceneNodeBase<"mesh"> {
  *
  * `fov`, `near`, `far`, and `target` are `Property<T>` (Phase 10's generic
  * keyframe/property model), so each may be a plain constant or a
- * `KeyframeTrack` animating it over time. Only these camera-specific fields
- * are animatable this way; the shared `Transform` (`position`/`rotation`/
- * `scale`) stays a plain, non-animatable value for every node kind,
- * `CameraNode` included, since animating `Transform` itself is a separate,
- * larger effort spanning every node kind.
+ * `KeyframeTrack` animating it over time, same as the shared `transform`
+ * (`AnimatableTransform`) and `visible` every node kind now has.
  */
 export interface CameraNode extends SceneNodeBase<"camera"> {
   fov: Property<number>;
@@ -62,8 +76,8 @@ export type LightType = "ambient" | "directional" | "point" | "spot";
 /** A light source. */
 export interface LightNode extends SceneNodeBase<"light"> {
   lightType: LightType;
-  color: ColorRGBA;
-  intensity: number;
+  color: Property<ColorRGBA>;
+  intensity: Property<number>;
 }
 
 /** A block of rendered text. */
@@ -71,8 +85,8 @@ export interface TextNode extends SceneNodeBase<"text"> {
   content: string;
   /** Id of a registered font asset. Omitted means the renderer's default. */
   fontRef?: string;
-  fontSize: number;
-  color: ColorRGBA;
+  fontSize: Property<number>;
+  color: Property<ColorRGBA>;
 }
 
 /** A 2D image plane. `assetRef` is resolved against an asset registry. */
