@@ -171,7 +171,8 @@ function enrichIssue(issue: z.core.$ZodIssue): {
     }
 
     case "too_big": {
-      const bound = issue.inclusive === false ? `less than ${issue.maximum}` : `at most ${issue.maximum}`;
+      const bound =
+        issue.inclusive === false ? `less than ${issue.maximum}` : `at most ${issue.maximum}`;
       return {
         expected: `a value ${bound}`,
         suggestedFix: `Lower the value at ${where} to ${bound}.`,
@@ -179,7 +180,8 @@ function enrichIssue(issue: z.core.$ZodIssue): {
     }
 
     case "too_small": {
-      const bound = issue.inclusive === false ? `greater than ${issue.minimum}` : `at least ${issue.minimum}`;
+      const bound =
+        issue.inclusive === false ? `greater than ${issue.minimum}` : `at least ${issue.minimum}`;
       return {
         expected: `a value ${bound}`,
         suggestedFix: `Raise the value at ${where} to ${bound}.`,

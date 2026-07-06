@@ -306,9 +306,7 @@ describe("parseScene: diagnostics include expected and suggestedFix", () => {
     if (result.success) {
       return;
     }
-    const diagnostic = result.diagnostics.find(
-      (entry) => entry.path === "project.compositions[0]",
-    );
+    const diagnostic = result.diagnostics.find((entry) => entry.path === "project.compositions[0]");
     expect(diagnostic, JSON.stringify(result.diagnostics, null, 2)).toBeDefined();
     expect(diagnostic?.expected).toEqual(expect.stringMatching(/.+/));
     expect(diagnostic?.suggestedFix).toEqual(expect.stringMatching(/.+/));
