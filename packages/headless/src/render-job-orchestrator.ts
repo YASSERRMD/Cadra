@@ -186,7 +186,9 @@ export interface RenderJobStatusSnapshot<TSegment> {
  * - `"queued"` otherwise, i.e. every range is still `"pending"` and none
  *   has started yet.
  */
-export function deriveJobStatus<TSegment>(ranges: readonly RangeState<TSegment>[]): RenderJobStatus {
+export function deriveJobStatus<TSegment>(
+  ranges: readonly RangeState<TSegment>[],
+): RenderJobStatus {
   if (ranges.some((r) => r.status === "failed")) {
     return "failed";
   }
@@ -237,10 +239,7 @@ export function buildJobStatusSnapshot<TSegment>(
  * from-scratch-retry philosophy (see its doc for why a clean restart is
  * correct here, given `renderComposition`'s own full determinism).
  */
-export type RenderRangeFn<TSegment> = (
-  range: FrameRange,
-  attempt: number,
-) => Promise<TSegment>;
+export type RenderRangeFn<TSegment> = (range: FrameRange, attempt: number) => Promise<TSegment>;
 
 /** Options accepted by `submitRenderJob`. */
 export interface RenderJobOptions<TSegment> {
@@ -493,7 +492,11 @@ export function submitRenderJob<TSegment>(
 ): RenderJobHandle<TSegment> {
   const rangeSizeFrames = options.rangeSizeFrames ?? DEFAULT_RANGE_SIZE_FRAMES;
   const rangeAlignmentFrames = options.rangeAlignmentFrames ?? DEFAULT_RANGE_ALIGNMENT_FRAMES;
-  const ranges = splitIntoFrameRanges(options.durationInFrames, rangeSizeFrames, rangeAlignmentFrames);
+  const ranges = splitIntoFrameRanges(
+    options.durationInFrames,
+    rangeSizeFrames,
+    rangeAlignmentFrames,
+  );
   const rangeStates: RangeState<TSegment>[] = ranges.map((range) => ({
     range,
     status: "pending",
@@ -536,7 +539,10 @@ export function submitRenderJob<TSegment>(
  */
 export function resumeRenderJob<TSegment>(
   previousRanges: ResumableRangeStates<TSegment>,
-  options: Omit<RenderJobOptions<TSegment>, "durationInFrames" | "rangeSizeFrames" | "rangeAlignmentFrames">,
+  options: Omit<
+    RenderJobOptions<TSegment>,
+    "durationInFrames" | "rangeSizeFrames" | "rangeAlignmentFrames"
+  >,
 ): RenderJobHandle<TSegment> {
   const rangeStates: RangeState<TSegment>[] = previousRanges.map((state) => ({
     ...state,
@@ -642,7 +648,9 @@ export class RenderJobNotFoundError extends Error {
  *
  * @throws {RenderJobNotFoundError} if `jobId` names no known job.
  */
-export function getRenderJobStatus<TSegment = unknown>(jobId: string): RenderJobStatusSnapshot<TSegment> {
+export function getRenderJobStatus<TSegment = unknown>(
+  jobId: string,
+): RenderJobStatusSnapshot<TSegment> {
   const ranges = jobRegistry.get(jobId);
   if (ranges === undefined) {
     throw new RenderJobNotFoundError(jobId);

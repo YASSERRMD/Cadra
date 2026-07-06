@@ -107,7 +107,6 @@ export interface BrowserHeadlessRenderRangeConfig {
   keyframeIntervalFrames?: number;
 }
 
-
 /**
  * Real `ReadPixelsFn` for the headless-server render path: draws `target`
  * (the render canvas WebGL2/WebGPU just drew into) onto a fresh, same-sized

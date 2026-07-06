@@ -83,7 +83,10 @@ function createFakeDestination(): {
  * mirroring `runBrowserHeadlessRenderRange`'s actual real contract.
  */
 function createFakeRangePage(behavior: {
-  renderRange: (range: { startFrame: number; endFrame: number }) => Promise<SerializedEncodedChunk[]>;
+  renderRange: (range: {
+    startFrame: number;
+    endFrame: number;
+  }) => Promise<SerializedEncodedChunk[]>;
   consoleLines?: Array<{ type: string; text: string }>;
 }): HeadlessPageLike & { addScriptCalls: number; progressCalls: Array<[number, number]> } {
   const exposed = new Map<string, (...args: never[]) => unknown>();
@@ -115,8 +118,7 @@ function createFakeRangePage(behavior: {
 
       const config = (arg as { config: { startFrame: number; endFrame: number } }).config;
       const progress = exposed.get("__cadraHeadlessProgress") as
-        | ((frame: number, totalFrames: number) => Promise<void>)
-        | undefined;
+        ((frame: number, totalFrames: number) => Promise<void>) | undefined;
       // Simulate one progress call per frame in this range, mirroring what
       // a real renderComposition/onProgress call chain would report.
       for (let frame = config.startFrame; frame < config.endFrame; frame += 1) {
@@ -159,8 +161,15 @@ function createFakeBrowser(
 
 /** Builds a `browserLauncher` that, for every range attempt, calls `renderRange` with that attempt's own `[startFrame, endFrame)` and hands back whatever it resolves/rejects with, tracking every launch. */
 function createRangeAwareBrowserLauncher(
-  renderRange: (range: { startFrame: number; endFrame: number }) => Promise<SerializedEncodedChunk[]>,
-): { launcher: () => Promise<HeadlessBrowserLike>; launchCount: () => number; browsers: ReturnType<typeof createFakeBrowser>[] } {
+  renderRange: (range: {
+    startFrame: number;
+    endFrame: number;
+  }) => Promise<SerializedEncodedChunk[]>,
+): {
+  launcher: () => Promise<HeadlessBrowserLike>;
+  launchCount: () => number;
+  browsers: ReturnType<typeof createFakeBrowser>[];
+} {
   let launchCount = 0;
   const browsers: ReturnType<typeof createFakeBrowser>[] = [];
   const launcher = async (): Promise<HeadlessBrowserLike> => {

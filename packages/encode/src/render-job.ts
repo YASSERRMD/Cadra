@@ -496,7 +496,10 @@ export async function submitEncodedRenderJob(
       durationInFrames,
       renderRange,
       rangeSizeFrames: options.rangeSizeFrames,
-      rangeAlignmentFrames: options.rangeAlignmentFrames ?? options.keyframeIntervalFrames ?? DEFAULT_KEYFRAME_INTERVAL_FRAMES,
+      rangeAlignmentFrames:
+        options.rangeAlignmentFrames ??
+        options.keyframeIntervalFrames ??
+        DEFAULT_KEYFRAME_INTERVAL_FRAMES,
       maxConcurrency: options.maxConcurrency,
       maxAttemptsPerRange: options.maxAttemptsPerRange,
       onStatusChange: options.onStatusChange,

@@ -86,7 +86,8 @@ export function serializeEncodedChunk(chunkResult: EncodedChunkResult): Serializ
     duration: raw.duration,
     data: Array.from(raw.data),
     codec: decoderConfig?.codec,
-    description: decoderConfig?.description !== undefined ? toByteArray(decoderConfig.description) : undefined,
+    description:
+      decoderConfig?.description !== undefined ? toByteArray(decoderConfig.description) : undefined,
   };
 }
 
@@ -107,7 +108,9 @@ export function serializeEncodedChunk(chunkResult: EncodedChunkResult): Serializ
  * `byteLength`/`type`/`timestamp`/`duration` are plain fields copied
  * straight from `serialized`.
  */
-export function deserializeEncodedChunkResult(serialized: SerializedEncodedChunk): EncodedChunkResult {
+export function deserializeEncodedChunkResult(
+  serialized: SerializedEncodedChunk,
+): EncodedChunkResult {
   const bytes = Uint8Array.from(serialized.data);
   const chunk = {
     type: serialized.type,

@@ -46,7 +46,9 @@ describe("splitIntoFrameRanges", () => {
   });
 
   it("produces one range covering everything when durationInFrames <= the aligned range size", () => {
-    expect(splitIntoFrameRanges(10, 30, 30)).toEqual([{ rangeIndex: 0, startFrame: 0, endFrame: 10 }]);
+    expect(splitIntoFrameRanges(10, 30, 30)).toEqual([
+      { rangeIndex: 0, startFrame: 0, endFrame: 10 },
+    ]);
   });
 
   it("splits evenly-divisible durations into equal, alignment-boundary ranges", () => {
@@ -107,7 +109,11 @@ describe("splitIntoFrameRanges", () => {
   });
 
   it("defaults rangeSizeFrames/alignmentFrames match the module's exported defaults when a caller uses them explicitly", () => {
-    const withDefaults = splitIntoFrameRanges(500, DEFAULT_RANGE_SIZE_FRAMES, DEFAULT_RANGE_ALIGNMENT_FRAMES);
+    const withDefaults = splitIntoFrameRanges(
+      500,
+      DEFAULT_RANGE_SIZE_FRAMES,
+      DEFAULT_RANGE_ALIGNMENT_FRAMES,
+    );
     const withExplicitDefault = splitIntoFrameRanges(500, 120, 30);
     expect(withDefaults).toEqual(withExplicitDefault);
   });
@@ -126,7 +132,11 @@ function state(
   status: RangeState<string>["status"],
   overrides: Partial<RangeState<string>> = {},
 ): RangeState<string> {
-  const range: FrameRange = { rangeIndex, startFrame: rangeIndex * 10, endFrame: rangeIndex * 10 + 10 };
+  const range: FrameRange = {
+    rangeIndex,
+    startFrame: rangeIndex * 10,
+    endFrame: rangeIndex * 10 + 10,
+  };
   return { range, status, attempts: status === "pending" ? 0 : 1, errors: [], ...overrides };
 }
 
@@ -163,9 +173,24 @@ describe("deriveJobStatus", () => {
 describe("buildJobStatusSnapshot", () => {
   it("sums totalFrames/framesCompleted correctly across mixed-length ranges", () => {
     const ranges: RangeState<string>[] = [
-      { range: { rangeIndex: 0, startFrame: 0, endFrame: 30 }, status: "done", attempts: 1, errors: [] },
-      { range: { rangeIndex: 1, startFrame: 30, endFrame: 50 }, status: "running", attempts: 1, errors: [] },
-      { range: { rangeIndex: 2, startFrame: 50, endFrame: 90 }, status: "pending", attempts: 0, errors: [] },
+      {
+        range: { rangeIndex: 0, startFrame: 0, endFrame: 30 },
+        status: "done",
+        attempts: 1,
+        errors: [],
+      },
+      {
+        range: { rangeIndex: 1, startFrame: 30, endFrame: 50 },
+        status: "running",
+        attempts: 1,
+        errors: [],
+      },
+      {
+        range: { rangeIndex: 2, startFrame: 50, endFrame: 90 },
+        status: "pending",
+        attempts: 0,
+        errors: [],
+      },
     ];
 
     const snapshot = buildJobStatusSnapshot(ranges);
@@ -243,7 +268,9 @@ describe("createDefaultConcurrencyLimiter", () => {
   it("resolves/rejects with exactly what the task itself resolves/rejects with", async () => {
     const limiter = createDefaultConcurrencyLimiter(3);
     await expect(limiter.run(async () => 42)).resolves.toBe(42);
-    await expect(limiter.run(async () => Promise.reject(new Error("boom")))).rejects.toThrow("boom");
+    await expect(limiter.run(async () => Promise.reject(new Error("boom")))).rejects.toThrow(
+      "boom",
+    );
   });
 
   it("throws for a non-positive or non-integer maxConcurrency", () => {
@@ -494,7 +521,11 @@ describe("submitRenderJob: per-range retry", () => {
       expect(error).toBeInstanceOf(RenderJobFailedError);
       const failedError = error as RenderJobFailedError;
       expect(failedError.failedRanges).toHaveLength(1);
-      expect(failedError.failedRanges[0]?.range).toEqual({ rangeIndex: 0, startFrame: 0, endFrame: 30 });
+      expect(failedError.failedRanges[0]?.range).toEqual({
+        rangeIndex: 0,
+        startFrame: 0,
+        endFrame: 30,
+      });
       expect(failedError.message).toContain("range died");
     }
   });
@@ -528,9 +559,25 @@ describe("resumeRenderJob", () => {
   it("does not re-render ranges already marked done, only re-attempts pending/failed ones", async () => {
     const project = buildProject(90);
     const previousRanges: RangeState<string>[] = [
-      { range: { rangeIndex: 0, startFrame: 0, endFrame: 30 }, status: "done", attempts: 1, errors: [], segment: "segment-0-from-before" },
-      { range: { rangeIndex: 1, startFrame: 30, endFrame: 60 }, status: "failed", attempts: 2, errors: [new Error("earlier failure")] },
-      { range: { rangeIndex: 2, startFrame: 60, endFrame: 90 }, status: "pending", attempts: 0, errors: [] },
+      {
+        range: { rangeIndex: 0, startFrame: 0, endFrame: 30 },
+        status: "done",
+        attempts: 1,
+        errors: [],
+        segment: "segment-0-from-before",
+      },
+      {
+        range: { rangeIndex: 1, startFrame: 30, endFrame: 60 },
+        status: "failed",
+        attempts: 2,
+        errors: [new Error("earlier failure")],
+      },
+      {
+        range: { rangeIndex: 2, startFrame: 60, endFrame: 90 },
+        status: "pending",
+        attempts: 0,
+        errors: [],
+      },
     ];
     const renderedRanges: number[] = [];
 
@@ -582,7 +629,12 @@ describe("resumeRenderJob", () => {
   it("treats a resumed 'running' range (its owning process exited mid-attempt) as needing a fresh attempt", async () => {
     const project = buildProject(30);
     const previousRanges: RangeState<string>[] = [
-      { range: { rangeIndex: 0, startFrame: 0, endFrame: 30 }, status: "running", attempts: 1, errors: [] },
+      {
+        range: { rangeIndex: 0, startFrame: 0, endFrame: 30 },
+        status: "running",
+        attempts: 1,
+        errors: [],
+      },
     ];
 
     const handle = resumeRenderJob(previousRanges, {
@@ -597,7 +649,13 @@ describe("resumeRenderJob", () => {
   it("succeeds trivially when every range in the snapshot is already done", async () => {
     const project = buildProject(30);
     const previousRanges: RangeState<string>[] = [
-      { range: { rangeIndex: 0, startFrame: 0, endFrame: 30 }, status: "done", attempts: 1, errors: [], segment: "already-done" },
+      {
+        range: { rangeIndex: 0, startFrame: 0, endFrame: 30 },
+        status: "done",
+        attempts: 1,
+        errors: [],
+        segment: "already-done",
+      },
     ];
     const renderRange = vi.fn(alwaysSucceeds());
 

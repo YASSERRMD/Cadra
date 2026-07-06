@@ -66,7 +66,11 @@ function createFakePixelReadableRenderer(): Omit<
 > & {
   renderFrame: ReturnType<typeof vi.fn>;
   readPixels: ReturnType<typeof vi.fn>;
-  calls: Array<{ type: "renderFrame" | "readPixels"; sceneState?: SceneState; frameContext?: FrameContext }>;
+  calls: Array<{
+    type: "renderFrame" | "readPixels";
+    sceneState?: SceneState;
+    frameContext?: FrameContext;
+  }>;
 } {
   const calls: Array<{
     type: "renderFrame" | "readPixels";
@@ -214,10 +218,20 @@ describe("renderComposition: determinism", () => {
     const rendererB = createFakePixelReadableRenderer();
 
     await drain(
-      renderComposition({ project, compositionId: "comp-1", renderer: rendererA, seed: "shared-seed" }),
+      renderComposition({
+        project,
+        compositionId: "comp-1",
+        renderer: rendererA,
+        seed: "shared-seed",
+      }),
     );
     await drain(
-      renderComposition({ project, compositionId: "comp-1", renderer: rendererB, seed: "shared-seed" }),
+      renderComposition({
+        project,
+        compositionId: "comp-1",
+        renderer: rendererB,
+        seed: "shared-seed",
+      }),
     );
 
     const argsA = rendererA.renderFrame.mock.calls;
@@ -244,10 +258,20 @@ describe("renderComposition: determinism", () => {
     const rendererB = createFakePixelReadableRenderer();
 
     await drain(
-      renderComposition({ project, compositionId: "comp-1", renderer: rendererA, seed: "seed-one" }),
+      renderComposition({
+        project,
+        compositionId: "comp-1",
+        renderer: rendererA,
+        seed: "seed-one",
+      }),
     );
     await drain(
-      renderComposition({ project, compositionId: "comp-1", renderer: rendererB, seed: "seed-two" }),
+      renderComposition({
+        project,
+        compositionId: "comp-1",
+        renderer: rendererB,
+        seed: "seed-two",
+      }),
     );
 
     const firstCallContextA = rendererA.renderFrame.mock.calls[0]?.[1] as FrameContext;

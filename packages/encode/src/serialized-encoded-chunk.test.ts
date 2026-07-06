@@ -46,7 +46,12 @@ describe("serializeEncodedChunk", () => {
   });
 
   it("omits codec/description when metadata carries no decoderConfig", () => {
-    const chunk = createFakeChunk({ data: Uint8Array.of(1), type: "delta", timestamp: 0, duration: 1 });
+    const chunk = createFakeChunk({
+      data: Uint8Array.of(1),
+      type: "delta",
+      timestamp: 0,
+      duration: 1,
+    });
     const chunkResult: EncodedChunkResult = { frame: 0, chunk, metadata: undefined };
 
     const serialized = serializeEncodedChunk(chunkResult);
@@ -56,7 +61,12 @@ describe("serializeEncodedChunk", () => {
   });
 
   it("flattens metadata.decoderConfig.codec and description into plain fields", () => {
-    const chunk = createFakeChunk({ data: Uint8Array.of(1), type: "key", timestamp: 0, duration: 1 });
+    const chunk = createFakeChunk({
+      data: Uint8Array.of(1),
+      type: "key",
+      timestamp: 0,
+      duration: 1,
+    });
     const description = Uint8Array.of(0x01, 0x64, 0x00, 0x1f).buffer;
     const chunkResult: EncodedChunkResult = {
       frame: 0,
@@ -71,7 +81,12 @@ describe("serializeEncodedChunk", () => {
   });
 
   it("handles a description supplied as a Uint8Array view (not a bare ArrayBuffer)", () => {
-    const chunk = createFakeChunk({ data: Uint8Array.of(1), type: "key", timestamp: 0, duration: 1 });
+    const chunk = createFakeChunk({
+      data: Uint8Array.of(1),
+      type: "key",
+      timestamp: 0,
+      duration: 1,
+    });
     const description = Uint8Array.of(0xaa, 0xbb, 0xcc);
     const chunkResult: EncodedChunkResult = {
       frame: 0,
@@ -85,7 +100,12 @@ describe("serializeEncodedChunk", () => {
   });
 
   it("handles a description that is a view over a larger, offset buffer (only the view's own bytes are read)", () => {
-    const chunk = createFakeChunk({ data: Uint8Array.of(1), type: "key", timestamp: 0, duration: 1 });
+    const chunk = createFakeChunk({
+      data: Uint8Array.of(1),
+      type: "key",
+      timestamp: 0,
+      duration: 1,
+    });
     const backing = Uint8Array.of(0xff, 0xff, 0x11, 0x22, 0x33, 0xff);
     const description = new Uint8Array(backing.buffer, 2, 3);
     const chunkResult: EncodedChunkResult = {
@@ -100,11 +120,18 @@ describe("serializeEncodedChunk", () => {
   });
 
   it("produces a value that survives a JSON round trip unchanged (a stand-in for the real structured-clone boundary)", () => {
-    const chunk = createFakeChunk({ data: Uint8Array.of(1, 2, 3), type: "key", timestamp: 0, duration: 1000 });
+    const chunk = createFakeChunk({
+      data: Uint8Array.of(1, 2, 3),
+      type: "key",
+      timestamp: 0,
+      duration: 1000,
+    });
     const chunkResult: EncodedChunkResult = {
       frame: 3,
       chunk,
-      metadata: { decoderConfig: { codec: "av01.0.08M.08", description: Uint8Array.of(9, 9).buffer } },
+      metadata: {
+        decoderConfig: { codec: "av01.0.08M.08", description: Uint8Array.of(9, 9).buffer },
+      },
     };
 
     const serialized = serializeEncodedChunk(chunkResult);
@@ -114,7 +141,12 @@ describe("serializeEncodedChunk", () => {
   });
 
   it("propagates MissingChunkDurationError for a null-duration chunk, matching extractRawChunkBytes", () => {
-    const chunk = createFakeChunk({ data: Uint8Array.of(1), type: "key", timestamp: 0, duration: null });
+    const chunk = createFakeChunk({
+      data: Uint8Array.of(1),
+      type: "key",
+      timestamp: 0,
+      duration: null,
+    });
     const chunkResult: EncodedChunkResult = { frame: 7, chunk, metadata: undefined };
 
     expect(() => serializeEncodedChunk(chunkResult)).toThrow(MissingChunkDurationError);
@@ -155,24 +187,36 @@ describe("deserializeEncodedChunkResult", () => {
   });
 
   it("reconstructs metadata.decoderConfig.codec/description exactly when present", () => {
-    const chunk = createFakeChunk({ data: Uint8Array.of(1), type: "key", timestamp: 0, duration: 1 });
+    const chunk = createFakeChunk({
+      data: Uint8Array.of(1),
+      type: "key",
+      timestamp: 0,
+      duration: 1,
+    });
     const chunkResult: EncodedChunkResult = {
       frame: 0,
       chunk,
-      metadata: { decoderConfig: { codec: "avc1.42001f", description: Uint8Array.of(1, 2, 3).buffer } },
+      metadata: {
+        decoderConfig: { codec: "avc1.42001f", description: Uint8Array.of(1, 2, 3).buffer },
+      },
     };
 
     const serialized = serializeEncodedChunk(chunkResult);
     const reconstructed = deserializeEncodedChunkResult(serialized);
 
     expect(reconstructed.metadata?.decoderConfig?.codec).toBe("avc1.42001f");
-    expect(new Uint8Array(reconstructed.metadata?.decoderConfig?.description as ArrayBuffer)).toEqual(
-      Uint8Array.of(1, 2, 3),
-    );
+    expect(
+      new Uint8Array(reconstructed.metadata?.decoderConfig?.description as ArrayBuffer),
+    ).toEqual(Uint8Array.of(1, 2, 3));
   });
 
   it("reconstructs undefined metadata when no codec was present, never inventing an empty decoderConfig", () => {
-    const chunk = createFakeChunk({ data: Uint8Array.of(1), type: "delta", timestamp: 0, duration: 1 });
+    const chunk = createFakeChunk({
+      data: Uint8Array.of(1),
+      type: "delta",
+      timestamp: 0,
+      duration: 1,
+    });
     const chunkResult: EncodedChunkResult = { frame: 0, chunk, metadata: undefined };
 
     const serialized = serializeEncodedChunk(chunkResult);
@@ -182,7 +226,12 @@ describe("deserializeEncodedChunkResult", () => {
   });
 
   it("reconstructs metadata.decoderConfig with a codec but no description when description was absent", () => {
-    const chunk = createFakeChunk({ data: Uint8Array.of(1), type: "key", timestamp: 0, duration: 1 });
+    const chunk = createFakeChunk({
+      data: Uint8Array.of(1),
+      type: "key",
+      timestamp: 0,
+      duration: 1,
+    });
     const chunkResult: EncodedChunkResult = {
       frame: 0,
       chunk,
@@ -197,11 +246,18 @@ describe("deserializeEncodedChunkResult", () => {
   });
 
   it("survives a full serialize -> JSON round trip -> deserialize chain, exactly matching a direct serialize -> deserialize", () => {
-    const chunk = createFakeChunk({ data: Uint8Array.of(4, 5, 6), type: "key", timestamp: 500, duration: 999 });
+    const chunk = createFakeChunk({
+      data: Uint8Array.of(4, 5, 6),
+      type: "key",
+      timestamp: 500,
+      duration: 999,
+    });
     const chunkResult: EncodedChunkResult = {
       frame: 9,
       chunk,
-      metadata: { decoderConfig: { codec: "vp09.00.10.08", description: Uint8Array.of(42).buffer } },
+      metadata: {
+        decoderConfig: { codec: "vp09.00.10.08", description: Uint8Array.of(42).buffer },
+      },
     };
 
     const serialized = serializeEncodedChunk(chunkResult);
