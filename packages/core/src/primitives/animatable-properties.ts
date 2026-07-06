@@ -1,13 +1,18 @@
 /**
- * Metadata naming which props of each primitive are expected to become
- * keyframeable once a later phase (Phase 10) adds real keyframe binding.
+ * Metadata naming which props of each primitive are keyframeable: every
+ * field listed below is genuinely `Property<T>`-typed (Phase 10's
+ * value-or-keyframe-track model) on the corresponding `SceneNode` variant in
+ * `../scene-graph/scene-node.ts`, resolved per frame by the renderer's
+ * `applyNodeProperties` (see `@cadra/renderer`'s `reconciler/node-factory.ts`)
+ * via `resolveNumberProperty`/`resolveVector3Property`/`resolveColorProperty`/
+ * `resolveBooleanProperty`.
  *
- * This is documentation, not a functioning animation system: nothing here
- * reads or interpolates these props today. Each list names dot-paths into
- * the `SceneNode` (or `Clip`) shape the corresponding primitive produces,
- * scoped to fields that vary smoothly over time, as opposed to structural
- * fields (`id`, `kind`, `children`) that a keyframe system would never
- * target.
+ * This module is documentation/metadata, not itself part of the resolution
+ * path: nothing here reads or interpolates these props directly. Each list
+ * names dot-paths into the `SceneNode` (or `Clip`) shape the corresponding
+ * primitive produces, scoped to fields that vary smoothly (or, for `visible`,
+ * discretely via `'hold'` easing) over time, as opposed to structural fields
+ * (`id`, `kind`, `children`) that a keyframe system would never target.
  */
 
 /** Props on every scene node kind expected to become keyframeable: the shared `Transform`. */

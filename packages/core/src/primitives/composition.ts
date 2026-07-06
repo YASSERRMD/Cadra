@@ -1,4 +1,9 @@
-import type { Composition as CompositionData, Track } from "../scene-graph/timeline.js";
+import type {
+  ActiveCameraEntry,
+  AudioTrack,
+  Composition as CompositionData,
+  Track,
+} from "../scene-graph/timeline.js";
 
 /**
  * Props for `createComposition`. Named `createComposition` (matching the
@@ -8,7 +13,12 @@ import type { Composition as CompositionData, Track } from "../scene-graph/timel
  * separate modules to share a name at the same barrel, and `Composition` the
  * type has been part of the public API since Phase 2.
  *
- * `tracks` defaults to an empty array if omitted.
+ * `tracks` defaults to an empty array if omitted. `activeCameraTrack` and
+ * `audioTracks` are both omitted (not defaulted to an empty array) unless
+ * explicitly supplied, mirroring `Composition`'s own "omitted means this
+ * composition has no active-camera concept/audio at all" convention (see
+ * `../scene-graph/timeline.ts`) rather than every composition gaining an
+ * empty-but-present lane it never asked for.
  */
 export interface CompositionProps {
   id: string;
@@ -18,15 +28,19 @@ export interface CompositionProps {
   width: number;
   height: number;
   tracks?: Track[];
+  activeCameraTrack?: ActiveCameraEntry[];
+  audioTracks?: AudioTrack[];
 }
 
 /**
  * Creates a `Composition`: a fixed frame rate, integer duration, output
  * size, and the tracks of clips that populate it.
  *
- * Defaults: `tracks: []`. Every other field is required, since there is no
- * sensible default frame rate, duration, or output size for arbitrary
- * authored content.
+ * Defaults: `tracks: []`. `activeCameraTrack`/`audioTracks` are passed
+ * through only when provided, left `undefined` (not defaulted to `[]`)
+ * otherwise. Every other field is required, since there is no sensible
+ * default frame rate, duration, or output size for arbitrary authored
+ * content.
  */
 export function createComposition(props: CompositionProps): CompositionData {
   return {
@@ -37,5 +51,7 @@ export function createComposition(props: CompositionProps): CompositionData {
     width: props.width,
     height: props.height,
     tracks: props.tracks ?? [],
+    ...(props.activeCameraTrack !== undefined && { activeCameraTrack: props.activeCameraTrack }),
+    ...(props.audioTracks !== undefined && { audioTracks: props.audioTracks }),
   };
 }

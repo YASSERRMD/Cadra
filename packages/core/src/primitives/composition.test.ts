@@ -39,4 +39,50 @@ describe("createComposition", () => {
 
     expect(composition.tracks).toEqual(tracks);
   });
+
+  it("omits activeCameraTrack and audioTracks entirely when not provided", () => {
+    const composition = createComposition({
+      id: "comp-1",
+      name: "Main",
+      fps: 30,
+      durationInFrames: 300,
+      width: 1920,
+      height: 1080,
+    });
+
+    expect("activeCameraTrack" in composition).toBe(false);
+    expect("audioTracks" in composition).toBe(false);
+  });
+
+  it("preserves activeCameraTrack when provided", () => {
+    const activeCameraTrack = [{ startFrame: 0, durationInFrames: 30, cameraNodeId: "cam-1" }];
+
+    const composition = createComposition({
+      id: "comp-1",
+      name: "Main",
+      fps: 30,
+      durationInFrames: 300,
+      width: 1920,
+      height: 1080,
+      activeCameraTrack,
+    });
+
+    expect(composition.activeCameraTrack).toEqual(activeCameraTrack);
+  });
+
+  it("preserves audioTracks when provided", () => {
+    const audioTracks = [{ id: "audio-1", clips: [] }];
+
+    const composition = createComposition({
+      id: "comp-1",
+      name: "Main",
+      fps: 30,
+      durationInFrames: 300,
+      width: 1920,
+      height: 1080,
+      audioTracks,
+    });
+
+    expect(composition.audioTracks).toEqual(audioTracks);
+  });
 });

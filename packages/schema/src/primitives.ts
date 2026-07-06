@@ -1,5 +1,7 @@
-import type { ColorRGBA, Transform, Vector2, Vector3 } from "@cadra/core";
+import type { AnimatableTransform, ColorRGBA, Transform, Vector2, Vector3 } from "@cadra/core";
 import { z } from "zod";
+
+import { propertySchema } from "./keyframes.js";
 
 /**
  * Zod mirrors of the plain numeric-tuple primitives in
@@ -75,3 +77,33 @@ export const transformSchema = z
   .describe("A rigid-ish transform for a scene node: position, rotation, and scale.");
 
 type _CheckTransform = AssertTrue<AssertEqual<z.infer<typeof transformSchema>, Transform>>;
+
+/**
+ * The transform shape every scene node actually carries, mirroring
+ * `AnimatableTransform` in `@cadra/core`: each of `position`, `rotation`, and
+ * `scale` independently accepts either a plain `Vector3` or a keyframe track
+ * (via `propertySchema`), exactly like `CameraNode`'s `fov`/`near`/`far`/
+ * `target` fields. A plain `Transform`-shaped object (every field a bare
+ * `Vector3`) still parses successfully, since `propertySchema` accepts a bare
+ * value of the wrapped type as-is.
+ */
+export const animatableTransformSchema = z
+  .strictObject({
+    position: propertySchema(vector3Schema).describe(
+      "World-space translation of the node. A plain Vector3 or a keyframe track.",
+    ),
+    rotation: propertySchema(vector3Schema).describe(
+      "Euler rotation in radians, applied in intrinsic XYZ order. A plain Vector3 or a keyframe track.",
+    ),
+    scale: propertySchema(vector3Schema).describe(
+      "Per-axis scale factor of the node. A plain Vector3 or a keyframe track.",
+    ),
+  })
+  .describe(
+    "The transform shape every scene node carries: position, rotation, and scale, each " +
+      "independently a plain Vector3 or a keyframe track.",
+  );
+
+type _CheckAnimatableTransform = AssertTrue<
+  AssertEqual<z.infer<typeof animatableTransformSchema>, AnimatableTransform>
+>;

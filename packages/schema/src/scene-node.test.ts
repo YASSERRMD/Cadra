@@ -181,6 +181,29 @@ describe("sceneNodeSchema: light", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("accepts a light node with a keyframe track for color and intensity (Phase 26)", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "light",
+      lightType: "point",
+      color: {
+        type: "keyframeTrack",
+        keyframes: [
+          { frame: 0, value: [0, 0, 0, 1] },
+          { frame: 30, value: [1, 1, 1, 1] },
+        ],
+      },
+      intensity: {
+        type: "keyframeTrack",
+        keyframes: [
+          { frame: 0, value: 0 },
+          { frame: 30, value: 5 },
+        ],
+      },
+    });
+    expect(result.success).toBe(true);
+  });
 });
 
 describe("sceneNodeSchema: text", () => {
@@ -205,6 +228,103 @@ describe("sceneNodeSchema: text", () => {
       color: [1, 1, 1, 1],
     });
     expect(result.success).toBe(true);
+  });
+
+  it("accepts a text node with a keyframe track for fontSize and color (Phase 26)", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: {
+        type: "keyframeTrack",
+        keyframes: [
+          { frame: 0, value: 12 },
+          { frame: 20, value: 48 },
+        ],
+      },
+      color: {
+        type: "keyframeTrack",
+        keyframes: [
+          { frame: 0, value: [1, 0, 0, 1] },
+          { frame: 20, value: [0, 0, 1, 1] },
+        ],
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+describe("sceneNodeSchema: transform and visible are Property<T> for every node kind (Phase 26)", () => {
+  it("accepts a keyframe track for transform.position, transform.rotation, and transform.scale independently", () => {
+    const result = sceneNodeSchema.safeParse({
+      id: "node-1",
+      kind: "mesh",
+      transform: {
+        position: {
+          type: "keyframeTrack",
+          keyframes: [
+            { frame: 0, value: [0, 0, 0] },
+            { frame: 30, value: [10, 0, 0] },
+          ],
+        },
+        rotation: {
+          type: "keyframeTrack",
+          keyframes: [
+            { frame: 0, value: [0, 0, 0] },
+            { frame: 30, value: [0, Math.PI, 0] },
+          ],
+        },
+        scale: [1, 1, 1],
+      },
+      visible: true,
+      children: [],
+      geometryRef: "geo-1",
+      materialRef: "mat-1",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a keyframe track for visible with 'hold' easing", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "group",
+      visible: {
+        type: "keyframeTrack",
+        keyframes: [
+          { frame: 0, value: true, easing: "hold" },
+          { frame: 10, value: false },
+        ],
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a transform whose position keyframe track has unordered keyframes, with a precise diagnostic", () => {
+    const result = sceneNodeSchema.safeParse({
+      id: "node-1",
+      kind: "group",
+      transform: {
+        position: {
+          type: "keyframeTrack",
+          keyframes: [
+            { frame: 20, value: [0, 0, 0] },
+            { frame: 5, value: [1, 1, 1] },
+          ],
+        },
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+      },
+      visible: true,
+      children: [],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((candidate) =>
+        candidate.path.join(".").includes("transform.position.keyframes.1.frame"),
+      );
+      expect(issue).toBeDefined();
+      expect(issue?.message).toMatch(/does not come strictly after/);
+    }
   });
 });
 

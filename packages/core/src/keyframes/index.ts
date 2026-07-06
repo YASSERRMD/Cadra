@@ -1,5 +1,6 @@
 export {
   compileKeyframeTrack,
+  resolveBooleanProperty,
   resolveColorProperty,
   resolveNumberProperty,
   resolveProperty,

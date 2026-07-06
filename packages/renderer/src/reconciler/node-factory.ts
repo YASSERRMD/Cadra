@@ -1,10 +1,12 @@
 import {
+  type AnimatableTransform,
   type LightNode,
   type LightType,
+  resolveBooleanProperty,
+  resolveColorProperty,
   resolveNumberProperty,
   resolveVector3Property,
   type SceneNode,
-  type Transform,
 } from "@cadra/core";
 import * as THREE from "three";
 
@@ -116,7 +118,13 @@ function buildThreeObject(node: SceneNode, ctx: NodeFactoryContext): BuiltObject
       return { object3D: createLight(node.lightType), owned: undefined };
 
     case "text": {
-      const material = new THREE.MeshBasicMaterial({ color: colorToThree(node.color) });
+      // node.color is Property<ColorRGBA> now, not resolved to a concrete
+      // value here: applyNodeProperties (called unconditionally right after
+      // this, for every node on every reconcile) sets the real,
+      // frame-resolved color, so this constructor-time placeholder is never
+      // actually observed. Mirrors the "camera" branch's fov/near/far/target
+      // deferral above.
+      const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
       const mesh = new THREE.Mesh(PLACEHOLDER_PLANE_GEOMETRY, material);
       return { object3D: mesh, owned: { material } };
     }
@@ -136,10 +144,18 @@ function buildThreeObject(node: SceneNode, ctx: NodeFactoryContext): BuiltObject
  * nodes, since property values (color, intensity, fov, ...) may have changed
  * frame to frame without the node's id/kind/hierarchy changing at all.
  *
- * `frame` is only consumed by the `camera` branch, to resolve `fov`/`near`/
- * `far`/`target` (all `Property<T>` since Phase 11) to concrete values via
- * `resolveNumberProperty`/`resolveVector3Property`. Every other kind's own
- * fields are still plain values, so `frame` is unused there.
+ * `frame` resolves every `Property<T>` field this reconciler actually reads
+ * off `node` to a concrete value for this specific frame: the shared
+ * `transform` (`AnimatableTransform`) and `visible` every node kind has, plus
+ * kind-specific fields (`camera`'s `fov`/`near`/`far`/`target`, `light`'s
+ * `color`/`intensity`, `text`'s `color`), via `resolveNumberProperty`/
+ * `resolveVector3Property`/`resolveColorProperty`/`resolveBooleanProperty`. A
+ * plain (non-keyframed) property resolves to itself regardless of `frame`,
+ * so passing a constant value, as every node did before Phase 26, keeps
+ * behaving identically. `text.fontSize` is also `Property<number>` now, but
+ * this reconciler does not read it at all yet (real glyph rendering, which
+ * would consume it, is still deferred; see the placeholder-plane comment
+ * above), so there is nothing to resolve for it here.
  */
 export function applyNodeProperties(
   node: SceneNode,
@@ -147,8 +163,8 @@ export function applyNodeProperties(
   ctx: NodeFactoryContext,
   frame: number,
 ): void {
-  applyTransform(node.transform, object3D);
-  object3D.visible = node.visible;
+  applyTransform(node.transform, object3D, frame);
+  object3D.visible = resolveBooleanProperty(node.visible, frame);
 
   switch (node.kind) {
     case "group":
@@ -175,13 +191,14 @@ export function applyNodeProperties(
     }
 
     case "light": {
-      applyLightProperties(node, object3D as THREE.Light);
+      applyLightProperties(node, object3D as THREE.Light, frame);
       return;
     }
 
     case "text": {
       const mesh = object3D as THREE.Mesh;
-      (mesh.material as THREE.MeshBasicMaterial).color.setRGB(...colorToRgbTuple(node.color));
+      const color = resolveColorProperty(node.color, frame);
+      (mesh.material as THREE.MeshBasicMaterial).color.setRGB(...colorToRgbTuple(color));
       return;
     }
 
@@ -192,12 +209,24 @@ export function applyNodeProperties(
   }
 }
 
-/** Applies an `@cadra/core` `Transform` (Euler-XYZ-radians) onto a Three.js object in place. */
-function applyTransform(transform: Transform, object3D: THREE.Object3D): void {
-  object3D.position.set(transform.position[0], transform.position[1], transform.position[2]);
+/**
+ * Applies an `@cadra/core` `AnimatableTransform` (Euler-XYZ-radians) onto a
+ * Three.js object in place, resolving each of `position`/`rotation`/`scale`
+ * (each independently `Property<Vector3>`) to its concrete value at `frame`
+ * first via `resolveVector3Property`.
+ */
+function applyTransform(
+  transform: AnimatableTransform,
+  object3D: THREE.Object3D,
+  frame: number,
+): void {
+  const position = resolveVector3Property(transform.position, frame);
+  object3D.position.set(position[0], position[1], position[2]);
   // Three.js's default Euler order is XYZ, matching the scene graph's fixed convention.
-  object3D.rotation.set(transform.rotation[0], transform.rotation[1], transform.rotation[2]);
-  object3D.scale.set(transform.scale[0], transform.scale[1], transform.scale[2]);
+  const rotation = resolveVector3Property(transform.rotation, frame);
+  object3D.rotation.set(rotation[0], rotation[1], rotation[2]);
+  const scale = resolveVector3Property(transform.scale, frame);
+  object3D.scale.set(scale[0], scale[1], scale[2]);
 }
 
 function resolveMeshGeometry(ref: string, registry: GeometryRegistry): THREE.BufferGeometry {
@@ -221,9 +250,10 @@ function createLight(lightType: LightType): THREE.Light {
   }
 }
 
-function applyLightProperties(node: LightNode, light: THREE.Light): void {
-  light.color.setRGB(...colorToRgbTuple(node.color));
-  light.intensity = node.intensity;
+function applyLightProperties(node: LightNode, light: THREE.Light, frame: number): void {
+  const color = resolveColorProperty(node.color, frame);
+  light.color.setRGB(...colorToRgbTuple(color));
+  light.intensity = resolveNumberProperty(node.intensity, frame);
 }
 
 /** Converts an `@cadra/core` `ColorRGBA` tuple's RGB channels to a plain 3-tuple for `Color.setRGB`. */
@@ -231,9 +261,4 @@ function colorToRgbTuple(
   color: readonly [number, number, number, number],
 ): [number, number, number] {
   return [color[0], color[1], color[2]];
-}
-
-/** Converts an `@cadra/core` `ColorRGBA` to a `THREE.Color` for use in a constructor. */
-function colorToThree(color: readonly [number, number, number, number]): THREE.Color {
-  return new THREE.Color(color[0], color[1], color[2]);
 }

@@ -1,16 +1,27 @@
-import { type ColorRGBA, createIdentityTransform, type Transform } from "../scene-graph/primitives.js";
+import type { Property } from "../keyframes/keyframe-track.js";
+import {
+  type AnimatableTransform,
+  type ColorRGBA,
+  createIdentityTransform,
+} from "../scene-graph/primitives.js";
 import type { LightNode, LightType } from "../scene-graph/scene-node.js";
 
-/** Props for `Light`. Only `id` is required; everything else defaults. */
+/**
+ * Props for `Light`. Only `id` is required; everything else defaults.
+ *
+ * `transform`, `visible`, `color`, and `intensity` each accept either a plain
+ * value or a `KeyframeTrack` (Phase 10's `Property<T>`); passing a plain
+ * value, as every existing caller does, keeps working unchanged.
+ */
 export interface LightProps {
   id: string;
   name?: string;
-  transform?: Transform;
-  visible?: boolean;
+  transform?: AnimatableTransform;
+  visible?: Property<boolean>;
   children?: LightNode["children"];
   lightType?: LightType;
-  color?: ColorRGBA;
-  intensity?: number;
+  color?: Property<ColorRGBA>;
+  intensity?: Property<number>;
 }
 
 /**

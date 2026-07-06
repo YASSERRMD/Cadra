@@ -1,3 +1,5 @@
+import type { Property } from "../keyframes/keyframe-track.js";
+
 /**
  * Plain numeric-tuple primitives shared across the scene graph.
  *
@@ -20,7 +22,7 @@ export type Vector3 = [x: number, y: number, z: number];
 export type ColorRGBA = [red: number, green: number, blue: number, alpha: number];
 
 /**
- * A rigid-ish transform for a scene node.
+ * A rigid-ish transform for a scene node, with every field a plain constant.
  *
  * `rotation` is Euler angles in radians, applied in XYZ order (rotate around
  * X, then the rotated Y, then the twice-rotated Z, i.e. intrinsic XYZ, the
@@ -28,11 +30,32 @@ export type ColorRGBA = [red: number, green: number, blue: number, alpha: number
  * fixed for the whole scene graph so every consumer (renderer, timeline
  * resolver, agent SDK) can apply rotations without needing an order field on
  * every node.
+ *
+ * Kept alongside `AnimatableTransform` (the shape every `SceneNode` actually
+ * carries) as a convenience for callers that only ever deal in constant
+ * transforms, e.g. `createIdentityTransform`'s return type below.
  */
 export interface Transform {
   position: Vector3;
   rotation: Vector3;
   scale: Vector3;
+}
+
+/**
+ * The transform shape every `SceneNode` carries: each of `position`,
+ * `rotation`, and `scale` is independently a `Property<Vector3>` (Phase 10's
+ * generic keyframe/property model), so any of the three may be a plain
+ * constant or a `KeyframeTrack` animating it over time, for every node kind
+ * alike. Mirrors the same "field independently animatable via `Property<T>`"
+ * pattern `CameraNode`'s `fov`/`near`/`far`/`target` established.
+ *
+ * A plain `Transform` (all three fields as bare `Vector3`s) is always a valid
+ * `AnimatableTransform`, since a bare `T` is always a valid `Property<T>`.
+ */
+export interface AnimatableTransform {
+  position: Property<Vector3>;
+  rotation: Property<Vector3>;
+  scale: Property<Vector3>;
 }
 
 /** A `Transform` at the identity: no translation, no rotation, unit scale. */

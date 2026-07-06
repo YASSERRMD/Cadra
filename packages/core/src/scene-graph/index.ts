@@ -1,5 +1,5 @@
 export { createIdGenerator } from "./id-generator.js";
-export type { ColorRGBA, Transform, Vector2, Vector3 } from "./primitives.js";
+export type { AnimatableTransform, ColorRGBA, Transform, Vector2, Vector3 } from "./primitives.js";
 export { createIdentityTransform } from "./primitives.js";
 export type { CreateProjectInput } from "./project-factory.js";
 export { createProject } from "./project-factory.js";
