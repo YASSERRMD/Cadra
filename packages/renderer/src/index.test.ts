@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { createRenderer, PACKAGE_NAME, VERSION } from "./index.js";
+import { createBestAvailableRenderer, createRenderer, createWorkerRenderer, PACKAGE_NAME, VERSION } from "./index.js";
 
 describe("@cadra/renderer package identity", () => {
   it("exports the expected VERSION", () => {
@@ -19,6 +19,25 @@ describe("@cadra/renderer package identity", () => {
 describe("@cadra/renderer public surface", () => {
   it("exposes a usable createRenderer from the package entry point", () => {
     const renderer = createRenderer();
+    expect(typeof renderer.init).toBe("function");
+    expect(typeof renderer.renderFrame).toBe("function");
+    expect(typeof renderer.resize).toBe("function");
+    expect(typeof renderer.dispose).toBe("function");
+  });
+
+  it("exposes a usable createWorkerRenderer from the package entry point", () => {
+    const renderer = createWorkerRenderer({ createWorker: () => ({} as never) });
+    expect(typeof renderer.init).toBe("function");
+    expect(typeof renderer.renderFrame).toBe("function");
+    expect(typeof renderer.resize).toBe("function");
+    expect(typeof renderer.dispose).toBe("function");
+  });
+
+  it("exposes a usable createBestAvailableRenderer from the package entry point, falling back to the direct renderer in this environment", () => {
+    // No real OffscreenCanvas in this Node/Vitest environment, so this
+    // exercises createBestAvailableRenderer's real default detector too,
+    // not just an injected override.
+    const renderer = createBestAvailableRenderer();
     expect(typeof renderer.init).toBe("function");
     expect(typeof renderer.renderFrame).toBe("function");
     expect(typeof renderer.resize).toBe("function");
@@ -67,6 +86,12 @@ describe("@cadra/renderer Renderer-facing surface has no Three.js leakage", () =
     "assets/render-when-ready.ts",
     "assets/types.ts",
     "assets/video-loader.ts",
+    "worker/index.ts",
+    "worker/offscreen-detection.ts",
+    "worker/scene-state-diff.ts",
+    "worker/worker-host.ts",
+    "worker/worker-protocol.ts",
+    "worker/worker-renderer.ts",
   ];
   const threeImportPattern = /from\s+["']three(\/[^"']*)?["']/;
 

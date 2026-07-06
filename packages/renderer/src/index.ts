@@ -21,6 +21,14 @@
  * single-flight/content-hash-deduping orchestrator, deterministic video
  * frame sampling, and the `renderWhenAssetsReady` readiness gate. Every real
  * I/O/decode primitive is injectable, per its own module doc.
+ *
+ * `./worker` additively exports Web Worker-backed rendering:
+ * `createWorkerRenderer` moves `renderFrame`'s GPU work off the main thread
+ * via `OffscreenCanvas`, satisfying the exact same `Renderer` interface as
+ * the direct in-process renderer above, and `createBestAvailableRenderer`
+ * picks between the two based on `OffscreenCanvas` availability. See that
+ * module's own doc for the worker message protocol and scene-state diffing
+ * it uses internally.
  */
 
 export const VERSION = "0.0.0";
@@ -75,3 +83,38 @@ export type {
   RenderSize,
   RenderTarget,
 } from "./renderer.js";
+export type {
+  CreateBestAvailableRendererOptions,
+  CreateWorkerFn,
+  CreateWorkerRendererOptions,
+  DiffedLayer,
+  DiffedSceneState,
+  OffscreenCanvasDetector,
+  PostResponseFn,
+  RendererFactory,
+  SceneStateDiffTracker,
+  UnchangedLayerRef,
+  WorkerHost,
+  WorkerHostOptions,
+  WorkerLayerCache,
+  WorkerLike,
+  WorkerRequest,
+  WorkerResponse,
+} from "./worker/index.js";
+export {
+  createBestAvailableRenderer,
+  createSceneStateDiffTracker,
+  createWorkerHost,
+  createWorkerLayerCache,
+  createWorkerRenderer,
+  detectOffscreenCanvasSupport,
+  diffSceneStateLayers,
+  installWorkerHostMessageListener,
+  isUnchangedLayerRef,
+  reconstructSceneState,
+  UnknownUnchangedLayerError,
+  WorkerHostNotInitializedError,
+  WorkerRendererError,
+  WorkerRendererNotInitializedError,
+  WorkerRendererRequiresCanvasElementError,
+} from "./worker/index.js";
