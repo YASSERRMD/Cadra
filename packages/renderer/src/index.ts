@@ -29,6 +29,15 @@
  * picks between the two based on `OffscreenCanvas` availability. See that
  * module's own doc for the worker message protocol and scene-state diffing
  * it uses internally.
+ *
+ * `PixelReadableRenderer` additively extends `Renderer` with `readPixels()`,
+ * for callers (e.g. `@cadra/headless`'s deterministic capture mode) that
+ * need to read back a rendered frame's pixels: `Renderer` itself is
+ * unchanged, so every existing live-preview consumer is unaffected.
+ * `createPixelReadableRenderer` wraps the direct, in-process renderer with
+ * an injected pixel-read primitive to satisfy it (real GPU pixel readback
+ * is not exercisable in this headless Node/Vitest environment, so it is
+ * always injected, matching every other GPU-touching seam in this package).
  */
 
 export const VERSION = "0.0.0";
@@ -62,6 +71,15 @@ export { loadVideo, sampleVideoFrame } from "./assets/video-loader.js";
 export type { WebGpuDetector } from "./capability-detection.js";
 export type { CreateRendererOptions } from "./create-renderer.js";
 export { createRenderer } from "./create-renderer.js";
+export type { PixelBuffer, PixelReadableRenderer } from "./pixel-readable-renderer.js";
+export type {
+  CreatePixelReadableRendererOptions,
+  ReadPixelsFn,
+} from "./pixel-readable-three-renderer.js";
+export {
+  createPixelReadableRenderer,
+  PixelReadableRendererNotInitializedError,
+} from "./pixel-readable-three-renderer.js";
 export type {
   NodeFactoryContext,
   OwnedResources,
