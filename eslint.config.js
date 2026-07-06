@@ -93,19 +93,24 @@ export default tseslint.config(
   {
     // Scoped to Phase 2/3's scene-graph and frame-evaluation source, plus
     // Phase 5's renderer (its renderFrame path is scene-evaluation code
-    // too: it must be a pure function of sceneState/frameContext) and Phase
+    // too: it must be a pure function of sceneState/frameContext), Phase
     // 18's headless render loop (it walks every frame with no
     // requestAnimationFrame and no live playhead, so unlike
     // packages/player's Transport, which legitimately reads
     // performance.now() to anchor its wall-clock-paced tick loop, nothing in
     // headless's own frame walk has a legitimate reason to touch a wall
-    // clock or unseeded randomness at all). Extend this `files` list with
-    // further `packages/<name>/src/**/*.ts` globs as later phases grow their
-    // own scene-evaluation code; the restriction list above needs no changes.
+    // clock or unseeded randomness at all), and Phase 19's frame capture
+    // (its VideoFrame timestamps are derived purely from frame index and
+    // fps; a wall clock or unseeded randomness leaking in would break the
+    // same byte-for-byte reproducibility headless rendering guarantees).
+    // Extend this `files` list with further `packages/<name>/src/**/*.ts`
+    // globs as later phases grow their own scene-evaluation code; the
+    // restriction list above needs no changes.
     files: [
       "packages/core/src/**/*.ts",
       "packages/renderer/src/**/*.ts",
       "packages/headless/src/**/*.ts",
+      "packages/encode/src/**/*.ts",
     ],
     ignores: ["**/*.test.ts"],
     rules: {
