@@ -64,11 +64,12 @@ export const BROWSER_ENTRY_GLOBAL_NAME = "__cadraHeadlessEntry";
  * `@cadra/renderer`'s whole barrel, not just the specific exports this
  * entry file actually calls.
  *
- * `external: ["playwright", "esbuild", "node:http"]`, combined with each of
- * those being imported dynamically (`await import(...)` inside a function
- * body, not a static top-level `import`) at their own real call sites
- * (`browser-launcher.ts`'s `launchPlaywrightHeadlessBrowser`/
- * `startLocalSecureContextServer`, and this very function below), is what
+ * `external: ["playwright", "esbuild", "node:http", "webgpu"]`, combined
+ * with each of those being imported dynamically (`await import(...)` inside
+ * a function body, not a static top-level `import`) at their own real call
+ * sites (`browser-launcher.ts`'s `launchPlaywrightHeadlessBrowser`/
+ * `startLocalSecureContextServer`, this very function below, and Phase 24's
+ * `render-frame-native-gpu.ts`'s `createDefaultNativeGpuRoot`), is what
  * keeps this package's single-barrel `exports` shape (see `package.json`,
  * matching every other package in this workspace: only a `"."` subpath, no
  * way to import `render-composition.js` directly while bypassing
@@ -81,18 +82,25 @@ export const BROWSER_ENTRY_GLOBAL_NAME = "__cadraHeadlessEntry";
  * `external` alone is not sufficient on its own: it only stops esbuild
  * from erroring while bundling, but a *static* top-level `import` would
  * still compile down to an unconditional `require("playwright")`/
- * `require("esbuild")`/`require("node:http")` call that executes the
- * instant the bundle loads in a real page, throwing immediately (verified
- * against a real headless Chromium page while building this phase), even
- * though the browser-side entry script never calls
- * `launchPlaywrightHeadlessBrowser`/`bundleBrowserEntry`/
- * `startLocalSecureContextServer` itself. A *dynamic* `import()` inside a
- * function body, by contrast, is just an ordinary function call from a
- * bundler's perspective: paired with `external`, it is dropped entirely by
- * tree-shaking from any bundle whose reachable code never actually calls
- * that function, which is exactly the browser-side entry script's case (it
- * only ever reaches `renderComposition`, never this package's own Node-side
- * launcher/bundler/local-server functions).
+ * `require("esbuild")`/`require("node:http")`/`require("webgpu")` call that
+ * executes the instant the bundle loads in a real page, throwing
+ * immediately (verified against a real headless Chromium page while
+ * building this phase), even though the browser-side entry script never
+ * calls `launchPlaywrightHeadlessBrowser`/`bundleBrowserEntry`/
+ * `startLocalSecureContextServer`/`createDefaultNativeGpuRoot` itself. A
+ * *dynamic* `import()` inside a function body, by contrast, is just an
+ * ordinary function call from a bundler's perspective: paired with
+ * `external`, it is dropped entirely by tree-shaking from any bundle whose
+ * reachable code never actually calls that function, which is exactly the
+ * browser-side entry script's case (it only ever reaches
+ * `renderComposition`, never this package's own Node-side
+ * launcher/bundler/local-server/native-GPU functions). `webgpu` specifically
+ * needed adding here (verified while building Phase 24: omitting it made
+ * `bundleBrowserEntry` itself fail, not just misbehave at runtime, since
+ * `webgpu`'s own package entry statically imports genuinely Node-only
+ * built-ins `node:path`/`node:url`/`module` at its own top level, which
+ * esbuild refuses to resolve at all for a `platform: "browser"` bundle
+ * unless marked `external`).
  */
 export interface BundleBrowserEntryOptions {
   /**
@@ -135,7 +143,7 @@ export async function bundleBrowserEntry(options: BundleBrowserEntryOptions): Pr
     minify: false,
     globalName: BROWSER_ENTRY_GLOBAL_NAME,
     logOverride: { "empty-import-meta": "silent" },
-    external: ["playwright", "esbuild", "node:http"],
+    external: ["playwright", "esbuild", "node:http", "webgpu"],
   });
 
   const outputFile = result.outputFiles[0];
