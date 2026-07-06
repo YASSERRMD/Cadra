@@ -11,9 +11,10 @@
  * Image, Camera, Light), the timeline resolver (resolveSceneAtFrame), the
  * deterministic interpolation toolkit (interpolate, spring, easing curves,
  * cubicBezier), the declarative keyframe/property model (Property,
- * KeyframeTrack, resolveProperty), and the environment-agnostic asset
- * pipeline primitives (content hashing, AssetRegistry, waitForAssets) are
- * implemented.
+ * KeyframeTrack, resolveProperty), the environment-agnostic asset pipeline
+ * primitives (content hashing, AssetRegistry, waitForAssets), and the audio
+ * timeline model (AudioClip, AudioTrack, computeGainAtLocalFrame,
+ * resolveAudioMixdown) are implemented.
  */
 
 export const VERSION = "0.0.0";
@@ -25,6 +26,7 @@ export const VERSION = "0.0.0";
 export const PACKAGE_NAME = "@cadra/core";
 
 export * from "./assets/index.js";
+export * from "./audio/index.js";
 export * from "./frame/index.js";
 export * from "./interpolation/index.js";
 export * from "./keyframes/index.js";
