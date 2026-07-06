@@ -190,10 +190,10 @@ describe("renderCompositionHeadlessServer: real end-to-end browser render", () =
     "renders a real scene to a valid MP4 via a real headless browser",
     async () => {
       if (!chromiumAvailable) {
-        // eslint-disable-next-line no-console -- Deliberately visible in
-        // CI/local test output: an operator scanning for "why did the
-        // real-browser test not run" should see this line directly, not
-        // have to go hunting for a silently-skipped test.
+        // Deliberately visible in CI/local test output (no-console is not
+        // configured as a lint rule in this repo): an operator scanning for
+        // "why did the real-browser test not run" should see this line
+        // directly, not have to go hunting for a silently-skipped test.
         console.log(
           "renderCompositionHeadlessServer e2e test: skipping, real Chromium not found (no cached Playwright browser in this environment).",
         );
