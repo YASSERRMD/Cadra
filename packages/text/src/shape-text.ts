@@ -19,10 +19,10 @@ export interface ShapeTextOptions {
 /**
  * Shapes a full string of (possibly mixed-script, mixed-direction) text:
  * resolves Unicode bidi embedding levels, itemizes into single-script
- * single-direction runs, shapes each with HarfBuzz, and returns the runs
- * in visual (left-to-right on the page) order. Each returned run's glyph
- * `cluster` values are rebased to index into the original `text`, so
- * callers never need to know about the internal per-run substrings.
+ * single-direction runs, and shapes each with HarfBuzz, in logical
+ * (original string) order. Each returned run's glyph `cluster` values are
+ * rebased to index into the original `text`, so callers never need to know
+ * about the internal per-run substrings.
  *
  * Mirroring (e.g. "(" rendering as ")" inside a right-to-left run) is not
  * applied here at the character level: HarfBuzz already performs it
@@ -32,17 +32,22 @@ export interface ShapeTextOptions {
  * `resolveBidi`'s own `mirroredCharacters` directly if some other consumer
  * (e.g. caret placement) needs to know which characters are mirrored
  * without shaping.
+ *
+ * Exported (rather than kept private to `shapeText`) for the paragraph
+ * layout engine (`paragraph-layout.ts`, Phase 45): it needs runs in logical
+ * order, since line breaking operates on logical text positions and each
+ * resulting line's own runs must be independently reordered to visual order
+ * afterward (see `ShapedTextRun.level`'s own doc).
  */
-export function shapeText(
+export function shapeLogicalRuns(
   font: ParsedFont,
   text: string,
   options: ShapeTextOptions = {},
 ): ShapedTextRun[] {
   const bidiResolution = resolveBidi(text, options.direction);
   const logicalRuns = computeItemizedRuns(text, bidiResolution.levels);
-  const visualRuns = reorderRunsToVisualOrder(logicalRuns);
 
-  return visualRuns.map((run) => {
+  return logicalRuns.map((run) => {
     const runText = text.slice(run.start, run.end);
     const glyphs = shapeRun(font, runText, {
       script: unicodeScriptToIso15924(run.script),
@@ -57,8 +62,23 @@ export function shapeText(
       text: runText,
       script: run.script,
       direction: run.direction,
+      level: run.level,
       language: options.language,
       glyphs,
     };
   });
+}
+
+/**
+ * `shapeLogicalRuns` followed by reordering to visual (left-to-right on the
+ * page) order: what any caller laying out a single, already-line-broken
+ * span of text wants (Phase 44's per-explicit-newline lines, or a caller
+ * with no wrapping needs at all).
+ */
+export function shapeText(
+  font: ParsedFont,
+  text: string,
+  options: ShapeTextOptions = {},
+): ShapedTextRun[] {
+  return reorderRunsToVisualOrder(shapeLogicalRuns(font, text, options));
 }

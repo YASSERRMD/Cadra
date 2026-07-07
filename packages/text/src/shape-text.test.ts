@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { parseFontWithFontkit } from "./font-parser-fontkit.js";
-import { shapeText } from "./shape-text.js";
+import { shapeLogicalRuns, shapeText } from "./shape-text.js";
 import { loadFixtureFont } from "./test-support/load-fixture-font.js";
+import { reorderRunsToVisualOrder } from "./visual-run-order.js";
 
 const ROBOTO_FLEX = parseFontWithFontkit(loadFixtureFont("RobotoFlex-Variable"));
 const NOTO_SANS_ARABIC = parseFontWithFontkit(loadFixtureFont("NotoSansArabic-Variable"));
@@ -89,5 +90,65 @@ describe("shapeText", () => {
   it("is deterministic across repeated calls", () => {
     const text = "AB مرحبا CD";
     expect(shapeText(ROBOTO_FLEX, text)).toEqual(shapeText(ROBOTO_FLEX, text));
+  });
+});
+
+describe("shapeLogicalRuns", () => {
+  it("keeps runs in logical (original string) order, unlike shapeText's visual order", () => {
+    const text = "AB مرحبا CD";
+    const logicalRuns = shapeLogicalRuns(ROBOTO_FLEX, text);
+
+    // Logical order: exactly the order computeItemizedRuns would itemize
+    // the string in, left-to-right through the source string regardless of
+    // any run's own direction (the Arabic run stays in the middle, same as
+    // shapeText's visual-order result for this particular string, since a
+    // single embedded right-to-left run surrounded by left-to-right text
+    // does not itself move under UAX #9 reordering - so this also cross-
+    // checks against shapeText directly, not just the input's own order).
+    expect(logicalRuns.map((r) => [r.script, r.direction, r.start, r.end])).toEqual([
+      ["Latin", "ltr", 0, 3],
+      ["Arabic", "rtl", 3, 8],
+      ["Latin", "ltr", 8, 11],
+    ]);
+    expect(logicalRuns).toEqual(shapeText(ROBOTO_FLEX, text));
+  });
+
+  it("reorders to visual order differently from logical order when levels actually nest", () => {
+    // A right-to-left paragraph with an embedded left-to-right run: rule L2
+    // reverses every run at or above the paragraph's own (odd) level, which
+    // for a single-level-1 RTL paragraph containing one level-2 embedded
+    // run means the *entire* 3-run sequence reverses (verified empirically:
+    // asserting the wrong, unreversed order here first caught this).
+    const text = "مرحبا AB يا";
+    const logical = shapeLogicalRuns(NOTO_SANS_ARABIC, text, { direction: "rtl" });
+    const visual = shapeText(NOTO_SANS_ARABIC, text, { direction: "rtl" });
+
+    expect(logical.map((r) => r.script)).toEqual(["Arabic", "Latin", "Arabic"]);
+    expect(logical.map((r) => [r.start, r.end])).toEqual([
+      [0, 6],
+      [6, 8],
+      [8, 11],
+    ]);
+    expect(visual.map((r) => [r.start, r.end])).toEqual([
+      [8, 11],
+      [6, 8],
+      [0, 6],
+    ]);
+    expect(logical).not.toEqual(visual);
+  });
+
+  it("carries each run's own bidi embedding level, consistent with its direction", () => {
+    const runs = shapeLogicalRuns(ROBOTO_FLEX, "AB مرحبا CD");
+    for (const run of runs) {
+      expect(run.level % 2 === 1).toBe(run.direction === "rtl");
+    }
+  });
+
+  it("shapeText is exactly shapeLogicalRuns reordered to visual order", () => {
+    const text = "مرحبا AB يا";
+    const options = { direction: "rtl" as const };
+    expect(shapeText(NOTO_SANS_ARABIC, text, options)).toEqual(
+      reorderRunsToVisualOrder(shapeLogicalRuns(NOTO_SANS_ARABIC, text, options)),
+    );
   });
 });
