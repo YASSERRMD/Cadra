@@ -138,10 +138,39 @@ export type VideoOutOfRangeBehavior = "hold" | "loop";
 export type VideoFitMode = "cover" | "contain" | "fill" | "none";
 
 /**
+ * How a `VideoNode`'s pixels combine with whatever is already composited
+ * beneath it, mirroring the CSS/Canvas/SVG blend-mode keywords of the same
+ * names (a small, deliberately non-exhaustive subset: just the handful a
+ * generated-shot-over-synthetic-layer composite realistically needs, not a
+ * full blend-mode enum).
+ *
+ * - `'normal'`: ordinary alpha compositing (source over destination),
+ *   i.e. no blending beyond `opacity`. The default.
+ * - `'add'`: additive (linear dodge): channel-wise sum, brightening.
+ * - `'multiply'`: channel-wise product, darkening (matches shadows/soft
+ *   contact realistically).
+ * - `'screen'`: inverse-multiply-of-inverses, brightening without the harsh
+ *   clipping `'add'` produces.
+ *
+ * Phase 36 adds this as validated, round-trippable scene data only: see
+ * `VideoNode.blendMode`'s own doc for why the actual GPU blend math is not
+ * required to land in the same phase this field does.
+ */
+export type VideoBlendMode = "normal" | "add" | "multiply" | "screen";
+
+/**
  * An external video file placed as a layer, with independent trim, speed,
  * and fit. `assetRef` is resolved against an asset registry (mirroring
  * `ImageNode.assetRef`); this package never loads or decodes the referenced
- * bytes itself.
+ * bytes itself. `assetRef` may also, before a referenced generation job has
+ * finished, hold a `cadra-generation://<slotId>` placeholder ref instead of a
+ * real `cadra-asset://<hash>` one (see `@cadra/mcp-server`'s
+ * `generation-asset-binding.ts`): a caller resolving that scheme against a
+ * `GenerationStore` and rewriting it to the real asset ref once the slot
+ * reports `"ready"` is exactly how Phase 36's `add_generated_clip` binds a
+ * generation job's eventual output onto this node, with no separate
+ * out-of-band tracking table needed (the scheme is parsed straight out of
+ * this one field).
  *
  * `inFrame`/`outFrame` are source-video-local frame numbers (not composition
  * frames), both inclusive: the trimmed range is
@@ -156,12 +185,39 @@ export type VideoFitMode = "cover" | "contain" | "fill" | "none";
  * Phase 26 fields set on other node kinds), so it may be a plain constant or
  * animated over time, e.g. to fade a video layer in or out independent of
  * the containing `Clip`'s own `transitionIn`. Plain alpha compositing
- * against other layers via this field is this phase's whole "blend with
- * other layers" story: no other node kind in this codebase has a
- * blend-mode-enum concept, so this phase does not introduce one either.
+ * against other layers via this field was Phase 33's whole "blend with
+ * other layers" story; Phase 36 adds `blendMode` and `maskRef` alongside it
+ * for a generated layer that needs to combine with a synthetic one by more
+ * than plain alpha (e.g. an additive glow, or a masked cutout).
+ *
+ * `blendMode` and `maskRef` are deliberately modeled and validated here
+ * (round-tripping through the scene DSL, so an agent can express and read
+ * back "blend this generated shot additively, masked by this shape") without
+ * requiring the renderer to already implement the corresponding GPU
+ * blend/mask math: `packages/renderer`'s `"video"` node handling is still a
+ * fixed-color placeholder plane (see this doc comment's own precedent, and
+ * that module's `node-factory.ts`), so leaving these two fields as
+ * validated-but-not-yet-rendered data is consistent with that existing scope
+ * boundary, not a regression introduced by this phase.
  */
 export interface VideoNode extends SceneNodeBase<"video"> {
   assetRef: string;
+  /**
+   * How this video layer's pixels combine with whatever renders beneath it.
+   * Defaults to `'normal'` (plain alpha compositing, i.e. `opacity` alone),
+   * matching every video layer authored before Phase 36 exactly.
+   */
+  blendMode?: VideoBlendMode;
+  /**
+   * Optional reference to a mask asset (resolved against the same kind of
+   * asset registry `assetRef` is, by a later renderer phase) restricting
+   * which pixels of this video layer are visible, e.g. a luminance or alpha
+   * matte cutting a generated shot into a non-rectangular shape before it
+   * composites with a synthetic layer beneath it. Omitted means no masking:
+   * the whole (fit-mode-adjusted) rectangular plane is eligible to show,
+   * exactly like every video layer authored before Phase 36.
+   */
+  maskRef?: string;
   /** Source-video-local frame the trimmed range starts at, inclusive. Defaults to `0`. */
   inFrame?: number;
   /** Source-video-local frame the trimmed range ends at, inclusive. Defaults to the source's own last frame. */
