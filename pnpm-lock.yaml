@@ -173,6 +173,9 @@ importers:
       '@cadra/headless':
         specifier: workspace:*
         version: link:../headless
+      '@cadra/providers':
+        specifier: workspace:*
+        version: link:../providers
       '@cadra/schema':
         specifier: workspace:*
         version: link:../schema

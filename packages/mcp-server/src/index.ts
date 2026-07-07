@@ -33,6 +33,16 @@
  * Luma, Pika) remains a typed, unwired placeholder ahead of Phase 34's
  * actual generative-video provider integrations.
  *
+ * Phase 34 adds those five generative-video provider adapters in
+ * `@cadra/providers` (`VideoProvider`, submit/poll), and Phase 35 adds
+ * `get_generation_status`: reports a generative-video slot's current status
+ * against a `@cadra/providers` `GenerationStore` (a content-hash-keyed dedup
+ * cache plus caller-named generation slots) - a placeholder descriptor while
+ * generating, the finished clip's `outputUrl` once ready, or a failure
+ * reason. This phase's MCP surface is read-only (status-checking only); a
+ * tool that submits a generation and inserts it into a scene is a later
+ * phase's job.
+ *
  * Entry points:
  *   - `createCadraMcpServer` (`./server.ts`): builds an `McpServer` with no
  *     transport attached yet.
@@ -72,6 +82,8 @@ export {
   WORKSPACE_ROOT_ENV_VAR,
 } from "./config.js";
 export { CADRA_CONTRACT_RESOURCE_NAME, CADRA_CONTRACT_RESOURCE_URI } from "./contract-resource.js";
+export type { RegisterCadraGenerationToolsOptions } from "./generation-tools.js";
+export { GET_GENERATION_STATUS_TOOL_NAME, registerCadraGenerationTools } from "./generation-tools.js";
 export type {
   CadraMcpHttpServer,
   HealthCheckPayload,
