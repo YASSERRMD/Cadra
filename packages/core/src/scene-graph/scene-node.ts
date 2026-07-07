@@ -219,6 +219,72 @@ export interface TextPhysicsConfig {
   easing?: EasingName;
 }
 
+/**
+ * One segment of a `TextPathConfig`'s own curve, continuing from wherever
+ * the previous segment (or `TextPathConfig.start`, for the first segment)
+ * left off: `"line"` (a straight run to `to`), `"quadratic"` (one control
+ * point), or `"cubic"` (two control points) - the same three primitives
+ * SVG/Canvas path curves are built from. Every point is `Property<Vector3>`
+ * (not a plain `Vector3`), so a path can deform over frames (Phase 52's own
+ * task 2), exactly like `Transform.position` already can.
+ */
+export type TextPathSegment =
+  | { type: "line"; to: Property<Vector3> }
+  | { type: "quadratic"; control: Property<Vector3>; to: Property<Vector3> }
+  | { type: "cubic"; control1: Property<Vector3>; control2: Property<Vector3>; to: Property<Vector3> };
+
+/** Whether a `TextPathConfig`'s glyphs rotate to follow the curve's own tangent at each point (`"tangent"`, the typical "text on a curve" look) or stay upright, only translating (`"upright"`). */
+export type TextPathOrientation = "upright" | "tangent";
+
+/** How a `TextPathConfig` spaces glyphs along its own curve: `"advance"` preserves each glyph's own natural (per-font) advance width, so the text reads as if the original flat line were simply bent onto the curve; `"even"` distributes every unit at equal arc-length intervals regardless of its own width. */
+export type TextPathSpacing = "advance" | "even";
+
+/** Where a `TextPathConfig` anchors its own text along the curve's own extent: `"start"`/`"end"` flush the text's own first/last unit to the curve's own start/end, `"center"` centers it. */
+export type TextPathAlignment = "start" | "center" | "end";
+
+/**
+ * Places a `TextNode`'s own glyphs along a 2D or 3D curve instead of a flat
+ * line, with correct (per `spacing`) spacing and (per `orientation`)
+ * orientation. `progress`/`startOffset` are independently animatable
+ * `Property<number>`s (Phase 52's own task 2's "animating progress along
+ * the path"), reusing the same keyframe system every other animatable
+ * field in this codebase already does, rather than a bespoke timing model.
+ */
+export interface TextPathConfig {
+  start: Property<Vector3>;
+  segments: readonly TextPathSegment[];
+  /** How much of the curve's own extent the text is mapped onto, from `startOffset`: `1` (the default) maps the text across the curve's full remaining length; less than `1` compresses it into a shorter leading portion (e.g. animating this from `0` to `1` reveals the text sliding fully onto the curve). */
+  progress?: Property<number>;
+  /** Where along the curve's own arc length (`0` to `1`) the text's own `alignment`-anchored point sits. Defaults to `0`. */
+  startOffset?: Property<number>;
+  /** Defaults to `"tangent"`. */
+  orientation?: TextPathOrientation;
+  /** Defaults to `"advance"`. */
+  spacing?: TextPathSpacing;
+  /** Defaults to `"start"`. */
+  alignment?: TextPathAlignment;
+}
+
+/**
+ * Crossfade-morphs a `TextNode`'s own rendered content from `from` to its
+ * real `content`, matching `grouping`-sized units by their own reading-
+ * order index (Phase 50's own `TextUnit.index`): a matched pair
+ * interpolates position from its `from` unit's own natural position to its
+ * `content` unit's own, with `from` fading out and `content` fading in
+ * simultaneously (not a true vertex-level outline morph - see
+ * `@cadra/text`'s `resolveGlyphMorphStates` for exactly why). A unit index
+ * present in only one of the two texts (`from`/`content` of different
+ * lengths) simply fades in or out in place at its own natural position,
+ * with nothing to interpolate toward - Phase 52's own task 4's "handle
+ * counts that differ ... gracefully".
+ */
+export interface TextMorphConfig {
+  from: string;
+  grouping: TextStaggerGrouping;
+  /** `0` shows `from` exactly as laid out; `1` shows `content` exactly as laid out. */
+  progress: Property<number>;
+}
+
 /** A block of rendered text. */
 export interface TextNode extends SceneNodeBase<"text"> {
   content: string;
@@ -238,6 +304,10 @@ export interface TextNode extends SceneNodeBase<"text"> {
   stagger?: TextStaggerConfig;
   /** Expressive per-glyph animation (springs, jitter, wave, scramble, count-up), composable with `stagger`. Omitted means no physics effect. */
   physics?: TextPhysicsConfig;
+  /** Places this node's own glyphs along a curve instead of a flat line. Omitted means a normal flat layout. */
+  path?: TextPathConfig;
+  /** Crossfade-morphs this node's own content from another string. Omitted means no morphing: `content` renders as-is. */
+  morph?: TextMorphConfig;
 }
 
 /** A 2D image plane. `assetRef` is resolved against an asset registry. */
