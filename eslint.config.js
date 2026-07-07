@@ -112,6 +112,7 @@ export default tseslint.config(
       "packages/headless/src/**/*.ts",
       "packages/encode/src/**/*.ts",
       "packages/text/src/**/*.ts",
+      "packages/satori-layer/src/**/*.ts",
     ],
     ignores: ["**/*.test.ts"],
     rules: {
