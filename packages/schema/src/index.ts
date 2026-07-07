@@ -51,12 +51,16 @@ export { easingSchema, keyframeSchema, keyframeTrackSchema, propertySchema } fro
 export type { SceneMigration } from "./migrate.js";
 export { migrateSceneDocument } from "./migrate.js";
 export type {
+  DiagnosticCode,
+  SceneDiagnosticPatch,
   SceneParseDiagnostic,
   SceneParseFailure,
   SceneParseResult,
   SceneParseSuccess,
 } from "./parse.js";
-export { parseScene } from "./parse.js";
+export { DIAGNOSTIC_CODES, parseScene } from "./parse.js";
+export type { PathSegment } from "./patch-path.js";
+export { applyPatchAtPath, InvalidPathError, parsePath, PathTraversalError } from "./patch-path.js";
 export { colorRgbaSchema, transformSchema, vector2Schema, vector3Schema } from "./primitives.js";
 export {
   cameraNodeSchema,

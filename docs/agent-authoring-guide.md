@@ -183,40 +183,54 @@ Each diagnostic is:
 interface SceneParseDiagnostic {
   path: string; // e.g. "project.compositions[0].tracks[0].clips[0].node.kind"
   message: string; // human-readable explanation
+  code: string; // stable, machine-comparable error class, e.g. "UNKNOWN_NODE_KIND"
   expected?: string; // short description of what was actually expected here
-  suggestedFix?: string; // a short, actionable suggestion
+  received?: unknown; // the actual offending value, when JSON-serializable
+  suggestedFix?: string; // a short, actionable suggestion (prose, for a human/agent to read)
+  suggestedPatch?: { op: "replace" | "add" | "remove"; path: string; value?: unknown };
 }
 ```
 
 `path` always names the exact offending field, using dotted-property and
 bracketed-index notation, so you can jump straight to it without searching
-the whole document. `expected` and `suggestedFix` are populated for the
-common, structurally-recognizable error classes: an unknown node `kind`, a
-missing required field, a value outside its allowed range, an unrecognized
-field name (likely a typo), and an unsupported `schemaVersion`. For example:
+the whole document. `code` is stable across releases; branch on it directly
+instead of pattern-matching `message` (which is prose). See
+[`docs/diagnostic-codes.md`](./diagnostic-codes.md) for the exhaustive list of
+codes and what each one means. For example:
 
 ```json
 {
   "path": "project.compositions[0].tracks[0].clips[0].node.kind",
   "message": "Invalid discriminator value. Expected 'group' | 'mesh' | 'camera' | 'light' | 'text' | 'image' | 'compositionRef'",
+  "code": "UNKNOWN_NODE_KIND",
   "expected": "one of: group, mesh, camera, light, text, image, compositionRef",
   "suggestedFix": "Set project.compositions[0].tracks[0].clips[0].node.kind to one of the supported values for 'kind': group, mesh, camera, light, text, image, compositionRef."
 }
 ```
 
-`expected` and `suggestedFix` are both plain, descriptive strings meant for
-you (an agent or a human) to read and act on; they are not a machine-
-appliable patch. There is no `repair_scene` tool and no structured patch
-object in this version of the contract: correcting the document based on a
-diagnostic is still your job. (A fuller structured diagnostic, plus an
-automatic repair tool, is a deliberately separate, later piece of work, not
-part of this contract yet.)
+`expected`/`suggestedFix` are plain, descriptive strings meant for you (an
+agent or a human) to read and act on. `suggestedPatch`, when present, is a
+single machine-appliable edit (in the same `path` format) that resolves that
+specific diagnostic - but it is only ever populated for error classes with a
+genuinely safe, unambiguous automatic fix (a missing field with a
+conservative known-safe default, an out-of-range number clamped to its
+nearest bound, an unrecognized field removed, a padded asset ref trimmed); an
+unknown node `kind`, for instance, never gets one, since guessing a
+replacement `kind` could silently change what the node fundamentally is.
 
-Some diagnostics have no `expected`/`suggestedFix` at all: cross-field rules
-(a `wipe` transition missing its `direction`, a keyframe track with
-out-of-order frames, an audio fade longer than its own clip) already carry a
-complete, specific, hand-written `message` explaining exactly what is wrong,
-with nothing further to mechanically add.
+Call the `repair_scene` MCP tool (`@cadra/mcp-server`) to automatically apply
+every `suggestedPatch` a persisted scene's current diagnostics carry and
+re-validate; it only persists the result if it now actually passes, and
+reports back whatever diagnostics remain (including any it could not safely
+patch) in `remainingDiagnostics` either way. You can also apply a single patch
+yourself via `applyPatchAtPath` (`@cadra/schema`) if you want finer control
+than repairing everything at once.
+
+Some diagnostics have no `expected`/`suggestedFix`/`suggestedPatch` at all:
+cross-field rules (a `wipe` transition missing its `direction`, a keyframe
+track with out-of-order frames, an audio fade longer than its own clip)
+already carry a complete, specific, hand-written `message` explaining exactly
+what is wrong, with nothing further to mechanically add or safely automate.
 
 ## If you're building programmatically instead of hand-writing JSON
 
