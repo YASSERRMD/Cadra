@@ -18,9 +18,11 @@ describe("Video", () => {
     });
   });
 
-  it("omits inFrame, outFrame, playbackRate, fitMode, and outOfRangeBehavior when not given", () => {
+  it("omits blendMode, maskRef, inFrame, outFrame, playbackRate, fitMode, and outOfRangeBehavior when not given", () => {
     const node = Video({ id: "video-1" });
 
+    expect(node).not.toHaveProperty("blendMode");
+    expect(node).not.toHaveProperty("maskRef");
     expect(node).not.toHaveProperty("inFrame");
     expect(node).not.toHaveProperty("outFrame");
     expect(node).not.toHaveProperty("playbackRate");
@@ -34,6 +36,8 @@ describe("Video", () => {
       name: "Intro Clip",
       visible: false,
       assetRef: "intro.mp4",
+      blendMode: "multiply",
+      maskRef: "mask-asset-1",
       inFrame: 10,
       outFrame: 100,
       playbackRate: 2,
@@ -50,6 +54,8 @@ describe("Video", () => {
       visible: false,
       children: [],
       assetRef: "intro.mp4",
+      blendMode: "multiply",
+      maskRef: "mask-asset-1",
       inFrame: 10,
       outFrame: 100,
       playbackRate: 2,
