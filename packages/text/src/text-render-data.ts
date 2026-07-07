@@ -1,8 +1,9 @@
 import { computeGlyphLayout, type PositionedGlyph } from "./glyph-layout.js";
 import type { MsdfAtlasOptions, MsdfAtlasPage } from "./msdf-atlas.js";
-import { createMsdfAtlasCache, type MsdfAtlasCache } from "./msdf-atlas-cache.js";
+import type { MsdfAtlasCache } from "./msdf-atlas-cache.js";
 import type { ParsedFont } from "./parsed-font.js";
 import { shapeText, type ShapeTextOptions } from "./shape-text.js";
+import { sharedAtlasCache } from "./shared-atlas-cache.js";
 
 /** Everything a renderer needs to draw a block of text: atlas textures plus every glyph's em-space position and UVs. */
 export interface TextRenderData {
@@ -16,9 +17,6 @@ export interface PrepareTextRenderDataOptions extends ShapeTextOptions {
   /** Em-unit line-to-line baseline spacing. Defaults to the atlas's own line height. */
   lineHeight?: number;
 }
-
-/** The process-wide default MSDF atlas cache `prepareTextRenderData` uses unless a caller injects its own (e.g. for test isolation). */
-const sharedAtlasCache = createMsdfAtlasCache();
 
 /**
  * Combines HarfBuzz shaping, MSDF atlas generation, and glyph layout into
