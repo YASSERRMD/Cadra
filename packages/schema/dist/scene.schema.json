@@ -298,6 +298,54 @@
                   }
                 },
                 "additionalProperties": false
+              },
+              "environment": {
+                "description": "Optional whole-composition image-based lighting environment.",
+                "type": "object",
+                "properties": {
+                  "envMapRef": {
+                    "type": "string",
+                    "description": "Id of a registered equirectangular environment map, resolved against an environment registry."
+                  },
+                  "rotation": {
+                    "description": "Rotation around the vertical (world Y) axis, in radians. Defaults to 0.",
+                    "type": "number"
+                  },
+                  "intensity": {
+                    "description": "Multiplies the environment's own contribution to diffuse and specular image-based lighting. Defaults to 1.",
+                    "type": "number"
+                  },
+                  "showBackground": {
+                    "description": "Whether the environment map is also visible as the rendered background. Defaults to false.",
+                    "type": "boolean"
+                  },
+                  "backgroundIntensity": {
+                    "description": "Multiplies the displayed background's own brightness. Only meaningful when showBackground is true. Defaults to 1.",
+                    "type": "number"
+                  },
+                  "groundProjection": {
+                    "description": "Optional grounded-skybox projection for grounded product-style shots. Omitted means a standard infinite-sphere environment.",
+                    "type": "object",
+                    "properties": {
+                      "height": {
+                        "type": "number",
+                        "description": "How far above the ground the environment's own source photo was captured from, in scene units; must be strictly positive. The projected ground plane itself always ends up at world Y 0."
+                      },
+                      "radius": {
+                        "description": "Radius of the virtual sky sphere; should comfortably contain the whole scene. Defaults to 100.",
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "height"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "envMapRef"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [

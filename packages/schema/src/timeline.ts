@@ -6,6 +6,8 @@ import type {
   Clip,
   Composition,
   CompositionColorGrading,
+  CompositionEnvironment,
+  EnvironmentGroundProjection,
   Project,
   Track,
   Transition,
@@ -282,6 +284,54 @@ type _CheckCompositionColorGrading = AssertTrue<
   AssertEqual<z.infer<typeof compositionColorGradingSchema>, CompositionColorGrading>
 >;
 
+/** Ground-plane projection tuning for `compositionEnvironmentSchema.groundProjection`, mirroring `EnvironmentGroundProjection`. */
+export const environmentGroundProjectionSchema = z.strictObject({
+  height: z
+    .number()
+    .describe(
+      "How far above the ground the environment's own source photo was captured from, in scene units; " +
+        "must be strictly positive. The projected ground plane itself always ends up at world Y 0.",
+    ),
+  radius: z
+    .number()
+    .optional()
+    .describe("Radius of the virtual sky sphere; should comfortably contain the whole scene. Defaults to 100."),
+});
+
+type _CheckEnvironmentGroundProjection = AssertTrue<
+  AssertEqual<z.infer<typeof environmentGroundProjectionSchema>, EnvironmentGroundProjection>
+>;
+
+/** A whole-composition image-based lighting environment, mirroring `CompositionEnvironment`. */
+export const compositionEnvironmentSchema = z.strictObject({
+  envMapRef: z
+    .string()
+    .describe("Id of a registered equirectangular environment map, resolved against an environment registry."),
+  rotation: z
+    .number()
+    .optional()
+    .describe("Rotation around the vertical (world Y) axis, in radians. Defaults to 0."),
+  intensity: z
+    .number()
+    .optional()
+    .describe("Multiplies the environment's own contribution to diffuse and specular image-based lighting. Defaults to 1."),
+  showBackground: z
+    .boolean()
+    .optional()
+    .describe("Whether the environment map is also visible as the rendered background. Defaults to false."),
+  backgroundIntensity: z
+    .number()
+    .optional()
+    .describe("Multiplies the displayed background's own brightness. Only meaningful when showBackground is true. Defaults to 1."),
+  groundProjection: environmentGroundProjectionSchema
+    .optional()
+    .describe("Optional grounded-skybox projection for grounded product-style shots. Omitted means a standard infinite-sphere environment."),
+});
+
+type _CheckCompositionEnvironment = AssertTrue<
+  AssertEqual<z.infer<typeof compositionEnvironmentSchema>, CompositionEnvironment>
+>;
+
 /**
  * A single renderable timeline: a fixed frame rate, a fixed integer duration,
  * a fixed output size, and the tracks of clips that populate it.
@@ -309,6 +359,9 @@ export const compositionSchema = z.strictObject({
   colorGrading: compositionColorGradingSchema
     .optional()
     .describe("Optional whole-composition color grade (exposure and white balance)."),
+  environment: compositionEnvironmentSchema
+    .optional()
+    .describe("Optional whole-composition image-based lighting environment."),
 });
 
 type _CheckComposition = AssertTrue<AssertEqual<z.infer<typeof compositionSchema>, Composition>>;
