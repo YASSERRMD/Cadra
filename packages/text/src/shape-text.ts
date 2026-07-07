@@ -54,6 +54,7 @@ export function shapeText(
     return {
       start: run.start,
       end: run.end,
+      text: runText,
       script: run.script,
       direction: run.direction,
       language: options.language,

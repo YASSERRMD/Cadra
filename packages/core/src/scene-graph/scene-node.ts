@@ -87,6 +87,14 @@ export interface TextNode extends SceneNodeBase<"text"> {
   fontRef?: string;
   fontSize: Property<number>;
   color: Property<ColorRGBA>;
+  /**
+   * How far to extrude each glyph along its own local Z axis, in the same
+   * units as `fontSize`. Omitted or `0` renders flat MSDF-textured glyph
+   * quads (crisp at any scale, the default); a positive value instead
+   * builds real solid 3D glyph geometry from the font's own outlines, lit
+   * and shadowed like any other mesh.
+   */
+  extrudeDepth?: Property<number>;
 }
 
 /** A 2D image plane. `assetRef` is resolved against an asset registry. */

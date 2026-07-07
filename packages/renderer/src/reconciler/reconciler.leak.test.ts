@@ -17,17 +17,23 @@ function rootGroup(children: SceneNode[]): SceneNode {
   };
 }
 
-/** Reused with the same id every cycle: if the internal map ever failed to purge a removed entry, the next cycle would wrongly reuse the stale (already-disposed) object instead of creating fresh. */
-function textLeaf(): SceneNode {
+/**
+ * Reused with the same id every cycle: if the internal map ever failed to
+ * purge a removed entry, the next cycle would wrongly reuse the stale
+ * (already-disposed) object instead of creating fresh. An `image` node is
+ * this suite's stand-in for "some node kind that owns a single disposable
+ * placeholder material" (a `text` node without registered render data owns
+ * nothing at all - an empty group - so it would not exercise this at all;
+ * see `node-factory.ts`'s `buildTextObject`).
+ */
+function imageLeaf(): SceneNode {
   return {
     id: "leaf",
-    kind: "text",
+    kind: "image",
     transform: createIdentityTransform(),
     visible: true,
     children: [],
-    content: "leak-check",
-    fontSize: 10,
-    color: [1, 1, 1, 1],
+    assetRef: "leak-check",
   };
 }
 
@@ -41,7 +47,7 @@ describe("createReconciler: add-then-remove leak stress test", () => {
     expect(disposeSpy).toHaveBeenCalledTimes(0);
 
     for (let cycle = 0; cycle < CYCLE_COUNT; cycle += 1) {
-      const afterAdd = reconciler.reconcile(rootGroup([textLeaf()]), 0) as THREE.Group;
+      const afterAdd = reconciler.reconcile(rootGroup([imageLeaf()]), 0) as THREE.Group;
       expect(afterAdd.children).toHaveLength(1);
       const leafObject = afterAdd.children[0];
       expect(leafObject).toBeDefined();
@@ -76,11 +82,11 @@ describe("createReconciler: add-then-remove leak stress test", () => {
     reconciler.reconcile(rootGroup([]), 0);
 
     for (let cycle = 0; cycle < 500; cycle += 1) {
-      reconciler.reconcile(rootGroup([textLeaf()]), 0);
+      reconciler.reconcile(rootGroup([imageLeaf()]), 0);
       reconciler.reconcile(rootGroup([]), 0);
     }
 
-    const rootObject = reconciler.reconcile(rootGroup([textLeaf()]), 0) as THREE.Group;
+    const rootObject = reconciler.reconcile(rootGroup([imageLeaf()]), 0) as THREE.Group;
     const leafObject = rootObject.children[0] as THREE.Mesh;
     const disposeSpy = vi.spyOn(leafObject.material as THREE.Material, "dispose");
 

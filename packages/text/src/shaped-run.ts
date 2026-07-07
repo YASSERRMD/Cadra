@@ -26,6 +26,8 @@ export interface ShapedTextRun {
   start: number;
   /** UTF-16 end index (exclusive) into the original full string this run came from. */
   end: number;
+  /** This run's own substring of the original full string (`fullString.slice(start, end)`), before mirroring/shaping. */
+  text: string;
   script: string;
   direction: TextDirection;
   language?: string;

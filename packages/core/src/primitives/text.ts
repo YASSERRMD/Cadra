@@ -23,6 +23,7 @@ export interface TextProps {
   fontRef?: string;
   fontSize?: Property<number>;
   color?: Property<ColorRGBA>;
+  extrudeDepth?: Property<number>;
 }
 
 /**
@@ -31,7 +32,8 @@ export interface TextProps {
  * Defaults: identity transform, `visible: true`, no children, empty
  * `content`, `fontSize: 24`, opaque white `color`. `fontRef` is left
  * `undefined` unless supplied, matching `TextNode`'s "omitted means the
- * renderer's default" convention.
+ * renderer's default" convention; `extrudeDepth` is likewise left
+ * `undefined` unless supplied, matching its own "omitted means flat" default.
  */
 export function Text(props: TextProps): TextNode {
   return {
@@ -45,5 +47,6 @@ export function Text(props: TextProps): TextNode {
     ...(props.fontRef !== undefined && { fontRef: props.fontRef }),
     fontSize: props.fontSize ?? 24,
     color: props.color ?? [1, 1, 1, 1],
+    ...(props.extrudeDepth !== undefined && { extrudeDepth: props.extrudeDepth }),
   };
 }

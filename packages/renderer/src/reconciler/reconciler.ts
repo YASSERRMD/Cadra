@@ -1,6 +1,7 @@
 import type { SceneNode, SceneNodeKind } from "@cadra/core";
 import type * as THREE from "three";
 
+import type { TextRenderRegistry } from "../text/text-render-registry.js";
 import {
   applyNodeProperties,
   createThreeObject,
@@ -21,10 +22,17 @@ interface ReconciledEntry {
   owned: OwnedResources | undefined;
 }
 
-/** Dependencies a `Reconciler` resolves `mesh` geometry/material refs against. Both are optional; omitted registries default to the small in-memory seed set in `registries.ts`. */
+/**
+ * Dependencies a `Reconciler` resolves node references against.
+ * `geometryRegistry`/`materialRegistry` are optional; omitted, they default
+ * to the small in-memory seed set in `registries.ts`. `textRenderRegistry`
+ * is also optional; omitted, every `text` node renders as an empty group
+ * (see `node-factory.ts`'s `buildTextObject`).
+ */
 export interface ReconcilerOptions {
   geometryRegistry?: GeometryRegistry;
   materialRegistry?: MaterialRegistry;
+  textRenderRegistry?: TextRenderRegistry;
 }
 
 /**
@@ -61,6 +69,7 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
   const ctx: NodeFactoryContext = {
     geometryRegistry: options.geometryRegistry ?? createDefaultGeometryRegistry(),
     materialRegistry: options.materialRegistry ?? createDefaultMaterialRegistry(),
+    ...(options.textRenderRegistry !== undefined && { textRenderRegistry: options.textRenderRegistry }),
   };
 
   const entries = new Map<string, ReconciledEntry>();
@@ -122,7 +131,10 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
       object3D = createEntry(node);
     }
 
-    applyNodeProperties(node, object3D, ctx, frame);
+    // Always re-read from `entries` (rather than trusting `existing`) since
+    // both the "brand new" and "kind changed" branches above just replaced
+    // this id's entry via createEntry.
+    applyNodeProperties(node, object3D, ctx, frame, entries.get(node.id)?.owned);
 
     if (parentObject3D !== null && object3D.parent !== parentObject3D) {
       // Either brand new, or an existing node that moved to a different
@@ -184,18 +196,34 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
   }
 
   /**
-   * Reassigns `parent.children` to `orderedChildren` directly rather than
-   * through repeated `remove`/`add` calls: every element is already a member
-   * of `parent.children` with `.parent` already correctly set, so this is a
-   * pure order fix with no add/remove side effects, and a no-op when the
-   * order already matches.
+   * Reassigns `parent.children` to `orderedChildren` (prefixed by any
+   * "foreign" children in their existing relative order) directly rather
+   * than through repeated `remove`/`add` calls: every element is already a
+   * member of `parent.children` with `.parent` already correctly set, so
+   * this is a pure order fix with no add/remove side effects, and a no-op
+   * when the order already matches.
+   *
+   * "Foreign" means not present in `orderedChildren` at all: a node
+   * factory can build internal Object3D structure of its own beneath a
+   * node's own top-level object (e.g. `text`'s per-line/per-word/per-glyph
+   * groups, see `node-factory.ts`'s `buildTextObject`) that has no
+   * corresponding `SceneNode` child and so would never appear in
+   * `orderedChildren`; without preserving it here, this function would
+   * silently discard it the moment it ever disagreed with
+   * `parent.children`'s current length, since a plain length/content
+   * comparison against only the scene-graph-tracked children cannot tell
+   * "genuinely reordered" apart from "something else is also parented here".
    */
   function reorderChildren(parent: THREE.Object3D, orderedChildren: THREE.Object3D[]): void {
     const currentOrder = parent.children;
-    if (currentOrder.length === orderedChildren.length) {
+    const orderedSet = new Set(orderedChildren);
+    const foreignChildren = currentOrder.filter((child) => !orderedSet.has(child));
+    const desiredOrder = [...foreignChildren, ...orderedChildren];
+
+    if (currentOrder.length === desiredOrder.length) {
       let matches = true;
-      for (let i = 0; i < orderedChildren.length; i += 1) {
-        if (currentOrder[i] !== orderedChildren[i]) {
+      for (let i = 0; i < desiredOrder.length; i += 1) {
+        if (currentOrder[i] !== desiredOrder[i]) {
           matches = false;
           break;
         }
@@ -204,14 +232,23 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
         return;
       }
     }
-    parent.children = orderedChildren;
+    parent.children = desiredOrder;
   }
 
   /** Detaches `entry.object3D` from its parent and disposes exactly the resources it owns. */
   function disposeEntry(entry: ReconciledEntry): void {
     entry.object3D.removeFromParent();
-    if (entry.owned !== undefined) {
-      entry.owned.material.dispose();
+    entry.owned?.material?.dispose();
+    if (entry.owned?.text !== undefined) {
+      for (const geometry of entry.owned.text.geometries) {
+        geometry.dispose();
+      }
+      for (const material of entry.owned.text.materials) {
+        material.dispose();
+      }
+      for (const texture of entry.owned.text.textures) {
+        texture.dispose();
+      }
     }
   }
 

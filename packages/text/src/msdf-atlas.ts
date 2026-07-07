@@ -1,6 +1,6 @@
 import type { Glyph as MsdfGlyph } from "msdfgen-wasm";
 
-import { getMsdfgenInstance } from "./msdfgen-instance.js";
+import { Bitmap, getMsdfgenInstance } from "./msdfgen-instance.js";
 import type { ParsedFont } from "./parsed-font.js";
 
 /** Where one glyph landed in the packed atlas, plus the MSDF parameters needed to sample it correctly. */
@@ -21,10 +21,13 @@ export interface MsdfGlyphPlacement {
   yTranslate: number;
 }
 
-/** One packed atlas texture: a deterministic PNG encoding an RGBA multi-channel signed distance field. */
+/** One packed atlas texture: an RGBA multi-channel signed distance field, deterministic for the same inputs. */
 export interface MsdfAtlasPage {
   width: number;
   height: number;
+  /** Raw RGBA8 pixels, row-major, top-to-bottom, `width * height * 4` bytes: the direct GPU texture upload path, needing no image decoder in any environment. */
+  pixels: Uint8Array;
+  /** The same pixels, PNG-encoded, for on-disk caching or debugging. */
   png: Uint8Array;
 }
 
@@ -126,7 +129,22 @@ export async function generateMsdfAtlas(
   const pages: MsdfAtlasPage[] = [];
   const glyphs: MsdfGlyphPlacement[] = [];
   bins.forEach((bin, page) => {
-    pages.push({ width: bin.width, height: bin.height, png: msdfgen.createAtlasImage(bin) });
+    // Composite this bin's glyphs onto one Bitmap ourselves (mirroring
+    // msdfgen-wasm's own createAtlasImage) so the raw RGBA pixels are
+    // available directly, not only reachable by decoding a PNG back.
+    const composited = new Bitmap(bin.width, bin.height);
+    for (const rect of bin.rects) {
+      if (rect.width > 0 && rect.height > 0) {
+        const glyphBitmap = msdfgen.generateBitmap(rect.glyph, rect.msdfData);
+        composited.blit(glyphBitmap, rect.x, rect.y, rect.rot);
+      }
+    }
+    pages.push({
+      width: bin.width,
+      height: bin.height,
+      pixels: new Uint8Array(composited.buffer),
+      png: msdfgen.createPng(composited, 9),
+    });
     for (const rect of bin.rects) {
       glyphs.push({
         glyphId: rect.glyph.index,

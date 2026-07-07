@@ -82,6 +82,7 @@ function buildDescriptors(
 const TEXT_EXTRA_DESCRIPTORS = new Map<string, PropertyDescriptor>([
   ["color", { path: "color", label: "Color", valueKind: "color" }],
   ["fontSize", { path: "fontSize", label: "Font Size", valueKind: "number" }],
+  ["extrudeDepth", { path: "extrudeDepth", label: "Extrude Depth", valueKind: "number" }],
 ]);
 
 /** Extra descriptors for `VIDEO_ANIMATABLE_PROPERTIES`. */

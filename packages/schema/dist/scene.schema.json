@@ -2948,6 +2948,71 @@
               ],
               "description": "The color to render the text in. A plain ColorRGBA or a keyframe track."
             },
+            "extrudeDepth": {
+              "description": "How far to extrude each glyph along its own local Z axis, in fontSize units. Omitted or 0 renders flat MSDF quads; a positive value builds solid 3D glyph geometry instead. A plain number or a keyframe track.",
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "number",
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
             "children": {
               "type": "array",
               "items": {

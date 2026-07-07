@@ -279,6 +279,9 @@ importers:
       '@cadra/core':
         specifier: workspace:*
         version: link:../core
+      '@cadra/text':
+        specifier: workspace:*
+        version: link:../text
       three:
         specifier: ^0.185.1
         version: 0.185.1
