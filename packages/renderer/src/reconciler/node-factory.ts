@@ -7,9 +7,12 @@ import {
   resolveNumberProperty,
   resolveVector3Property,
   type SceneNode,
+  type TextNode,
 } from "@cadra/core";
 import * as THREE from "three";
 
+import { buildTextGroup, type TextGroupResources } from "../text/build-text-group.js";
+import { computeTextNodeRenderKey, type TextRenderRegistry } from "../text/text-render-registry.js";
 import type { GeometryRegistry, MaterialRegistry } from "./registries.js";
 
 /**
@@ -53,13 +56,18 @@ const DEFAULT_MESH_GEOMETRY = new THREE.BoxGeometry(0.5, 0.5, 0.5);
 const DEFAULT_MESH_MATERIAL = new THREE.MeshStandardMaterial({ color: 0x999999 });
 
 /**
- * Dependencies the node factory needs to build/update `mesh` nodes. Kept as
- * one bag so `createThreeObject`/`applyNodeProperties` share a single
- * signature regardless of node kind.
+ * Dependencies the node factory needs to build/update `mesh` and `text`
+ * nodes. Kept as one bag so `createThreeObject`/`applyNodeProperties` share
+ * a single signature regardless of node kind. `textRenderRegistry` is
+ * optional (omitting it renders every `text` node as an empty group, the
+ * same "asset not ready" fallback `image`/`video` placeholders are still
+ * waiting on their own asset pipeline wiring to outgrow) so every existing
+ * caller that never touches text keeps compiling unchanged.
  */
 export interface NodeFactoryContext {
   geometryRegistry: GeometryRegistry;
   materialRegistry: MaterialRegistry;
+  textRenderRegistry?: TextRenderRegistry;
 }
 
 /**
@@ -72,8 +80,18 @@ export interface NodeFactoryContext {
  * or they have none), so this is `undefined` for them.
  */
 export interface OwnedResources {
-  /** The per-node placeholder material created for a `text` or `image` node. */
-  material: THREE.Material;
+  /** The per-node placeholder material created for an `image` node (or a `text` node whose render data was not ready when built). */
+  material?: THREE.Material;
+  /**
+   * A `text` node's own geometries/materials/textures, built once from its
+   * resolved `TextRenderEntry` (see `text/build-text-group.ts`). Its own
+   * `setColor` is what `applyNodeProperties` calls to push a per-frame
+   * resolved `color` onto whichever material(s) are actually in play
+   * (per-atlas-page MSDF materials for the flat path, one shared
+   * `MeshStandardMaterial` for the extruded path) without rebuilding any
+   * geometry.
+   */
+  text?: TextGroupResources;
 }
 
 /** The result of building a fresh Three.js object for a node: the object plus what it owns. */
@@ -129,17 +147,8 @@ function buildThreeObject(node: SceneNode, ctx: NodeFactoryContext): BuiltObject
     case "light":
       return { object3D: createLight(node.lightType), owned: undefined };
 
-    case "text": {
-      // node.color is Property<ColorRGBA> now, not resolved to a concrete
-      // value here: applyNodeProperties (called unconditionally right after
-      // this, for every node on every reconcile) sets the real,
-      // frame-resolved color, so this constructor-time placeholder is never
-      // actually observed. Mirrors the "camera" branch's fov/near/far/target
-      // deferral above.
-      const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
-      const mesh = new THREE.Mesh(PLACEHOLDER_PLANE_GEOMETRY, material);
-      return { object3D: mesh, owned: { material } };
-    }
+    case "text":
+      return buildTextObject(node, ctx);
 
     case "image": {
       const material = new THREE.MeshBasicMaterial({ color: IMAGE_PLACEHOLDER_COLOR });
@@ -160,6 +169,38 @@ function buildThreeObject(node: SceneNode, ctx: NodeFactoryContext): BuiltObject
       return { object3D: mesh, owned: { material } };
     }
   }
+}
+
+/**
+ * Builds a `text` node's `Object3D`: an empty `THREE.Group` if its
+ * `TextRenderEntry` is not yet registered (an expected "asset not ready"
+ * runtime state, not a programming error - mirrors `image`/`video`'s own
+ * placeholder fallback), or the real `Group(line) -> Group(word) ->
+ * Mesh(glyph)` hierarchy `buildTextGroup` produces otherwise.
+ *
+ * Whether to extrude is decided once here, at frame 0: `extrudeDepth` is a
+ * `Property<number>` and so *can* be keyframed, but geometry (flat MSDF
+ * quads vs. solid `ExtrudeGeometry`) is a structural choice this reconciler
+ * only remakes when the node is rebuilt (a new node id, or a kind change),
+ * not per frame - the same scope boundary `content`/`fontRef` themselves
+ * are already under (changing either on a *persisting* node id without a
+ * kind change does not yet trigger a rebuild; this mirrors `image`/`video`
+ * still being placeholders rather than a regression this phase introduces).
+ */
+function buildTextObject(node: TextNode, ctx: NodeFactoryContext): BuiltObject {
+  const entry = ctx.textRenderRegistry?.resolve(computeTextNodeRenderKey(node));
+  if (entry === undefined) {
+    return { object3D: new THREE.Group(), owned: undefined };
+  }
+
+  const extrudeDepth = resolveNumberProperty(node.extrudeDepth ?? 0, 0);
+  const resources = buildTextGroup(entry.data, {
+    color: resolveColorProperty(node.color, 0),
+    extrudeDepth,
+    font: { bytes: entry.fontBytes, contentHash: entry.fontContentHash },
+  });
+
+  return { object3D: resources.group, owned: { text: resources } };
 }
 
 /**
@@ -187,6 +228,7 @@ export function applyNodeProperties(
   object3D: THREE.Object3D,
   ctx: NodeFactoryContext,
   frame: number,
+  owned?: OwnedResources,
 ): void {
   applyTransform(node.transform, object3D, frame);
   object3D.visible = resolveBooleanProperty(node.visible, frame);
@@ -221,9 +263,15 @@ export function applyNodeProperties(
     }
 
     case "text": {
-      const mesh = object3D as THREE.Mesh;
       const color = resolveColorProperty(node.color, frame);
-      (mesh.material as THREE.MeshBasicMaterial).color.setRGB(...colorToRgbTuple(color));
+      const fontSize = resolveNumberProperty(node.fontSize, frame);
+      // Glyph geometry is built once, in font-size-independent em units (see
+      // build-text-group.ts); a fontSize *animating* over time is exactly
+      // why this is a per-frame scale multiply here rather than baked into
+      // the geometry, which is built only once (or when the resolved
+      // render-key/extrusion state changes; see buildTextObject).
+      object3D.scale.multiplyScalar(fontSize);
+      owned?.text?.setColor(color[0], color[1], color[2], color[3]);
       return;
     }
 
