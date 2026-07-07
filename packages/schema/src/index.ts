@@ -48,6 +48,7 @@ export type { NamedSceneDocumentExample } from "./examples.js";
 export { EXAMPLE_SCENE_DOCUMENTS } from "./examples.js";
 export { generateSceneJsonSchema } from "./json-schema.js";
 export { easingSchema, keyframeSchema, keyframeTrackSchema, propertySchema } from "./keyframes.js";
+export { layerElementSchema, layerElementTypeSchema, layerStyleSchema } from "./layer-element.js";
 export type { SceneMigration } from "./migrate.js";
 export { migrateSceneDocument } from "./migrate.js";
 export type {
@@ -62,7 +63,6 @@ export { DIAGNOSTIC_CODES, parseScene } from "./parse.js";
 export type { PathSegment } from "./patch-path.js";
 export { applyPatchAtPath, InvalidPathError, parsePath, PathTraversalError } from "./patch-path.js";
 export { colorRgbaSchema, transformSchema, vector2Schema, vector3Schema } from "./primitives.js";
-export { layerElementSchema, layerElementTypeSchema, layerStyleSchema } from "./layer-element.js";
 export {
   cameraNodeSchema,
   compositionRefNodeSchema,
