@@ -279,6 +279,25 @@
                   ],
                   "additionalProperties": false
                 }
+              },
+              "colorGrading": {
+                "description": "Optional whole-composition color grade (exposure and white balance).",
+                "type": "object",
+                "properties": {
+                  "exposureStops": {
+                    "description": "Photographic stops of exposure adjustment. Defaults to 0 (no adjustment).",
+                    "type": "number"
+                  },
+                  "whiteBalanceTemperatureK": {
+                    "description": "Assumed scene illuminant color temperature, in Kelvin. Defaults to 6500.",
+                    "type": "number"
+                  },
+                  "whiteBalanceTint": {
+                    "description": "Green-magenta fine adjustment, roughly -1 to 1. Defaults to 0 (no tint).",
+                    "type": "number"
+                  }
+                },
+                "additionalProperties": false
               }
             },
             "required": [

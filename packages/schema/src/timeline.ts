@@ -5,6 +5,7 @@ import type {
   AudioTrack,
   Clip,
   Composition,
+  CompositionColorGrading,
   Project,
   Track,
   Transition,
@@ -261,6 +262,26 @@ type _CheckActiveCameraEntry = AssertTrue<
   AssertEqual<z.infer<typeof activeCameraEntrySchema>, ActiveCameraEntry>
 >;
 
+/** Zod mirror of `CompositionColorGrading` in `@cadra/core`'s `scene-graph/timeline.ts`. */
+export const compositionColorGradingSchema = z.strictObject({
+  exposureStops: z
+    .number()
+    .optional()
+    .describe("Photographic stops of exposure adjustment. Defaults to 0 (no adjustment)."),
+  whiteBalanceTemperatureK: z
+    .number()
+    .optional()
+    .describe("Assumed scene illuminant color temperature, in Kelvin. Defaults to 6500."),
+  whiteBalanceTint: z
+    .number()
+    .optional()
+    .describe("Green-magenta fine adjustment, roughly -1 to 1. Defaults to 0 (no tint)."),
+});
+
+type _CheckCompositionColorGrading = AssertTrue<
+  AssertEqual<z.infer<typeof compositionColorGradingSchema>, CompositionColorGrading>
+>;
+
 /**
  * A single renderable timeline: a fixed frame rate, a fixed integer duration,
  * a fixed output size, and the tracks of clips that populate it.
@@ -285,6 +306,9 @@ export const compositionSchema = z.strictObject({
     .array(audioTrackSchema)
     .optional()
     .describe("Optional lanes of audio content, independent of tracks."),
+  colorGrading: compositionColorGradingSchema
+    .optional()
+    .describe("Optional whole-composition color grade (exposure and white balance)."),
 });
 
 type _CheckComposition = AssertTrue<AssertEqual<z.infer<typeof compositionSchema>, Composition>>;
