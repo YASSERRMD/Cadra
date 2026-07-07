@@ -4,6 +4,7 @@ import type { JSX } from "react";
 import { useState } from "react";
 
 import { AssetPanel } from "./components/AssetPanel.js";
+import { DslPanel } from "./components/DslPanel.js";
 import { InspectorPanel } from "./components/InspectorPanel.js";
 import { TimelinePanel } from "./components/TimelinePanel.js";
 import { Toolbar } from "./components/Toolbar.js";
@@ -58,6 +59,22 @@ export interface AppProps {
  * as `onSelectNode`, so clicking a clip there is what actually sets it (see
  * that component's own doc), and `InspectorPanel` only ever reads the
  * resulting id back out of the store, never sets it itself.
+ *
+ * Unified selection and code round trip (Phase 40): the same `selectedNodeId`/
+ * `selectNode` pair is now also threaded to `Viewport` (its own raycast
+ * click-to-select calls `selectNode` via `onSelectNode`, and it reads
+ * `selectedNodeId` back to know which node to attach a transform gizmo to)
+ * and to the new `DslPanel` (its own bounded textarea-click-to-select also
+ * calls `selectNode`, and it reads `selectedNodeId` back for its own
+ * selection-driven highlight). Since `Viewport`, `TimelinePanel`, and
+ * `DslPanel` all read the exact same store field and all funnel their edits
+ * through the exact same `commitDocument` (`Viewport`'s gizmo drags directly;
+ * `DslPanel`'s manual edits via `commitDslEdit`, below, the identical
+ * "commit and read back diagnostics on failure" shape `commitPropertyEdit`
+ * already established for `InspectorPanel`), there is exactly one selection
+ * and exactly one document for all three surfaces to ever disagree about -
+ * this phase adds no second synchronization mechanism, only more readers/
+ * writers of the one that already existed.
  */
 export function App({
   useStore = useDocumentStore,
@@ -101,6 +118,20 @@ export function App({
     return committed ? undefined : useStore.getState().lastValidationError;
   }
 
+  /**
+   * `DslPanel`'s own commit path: byte-identical logic to
+   * `commitPropertyEdit` above (same synchronous-`lastValidationError`-
+   * readback reasoning applies verbatim), kept as its own named function
+   * rather than reusing `commitPropertyEdit` directly under a second prop
+   * name, so each panel's own prop name stays self-documenting about which
+   * edit surface produced a given candidate, without actually duplicating
+   * any commit logic.
+   */
+  function commitDslEdit(candidate: unknown): SceneParseDiagnostic[] | undefined {
+    const committed = commitDocument(candidate);
+    return committed ? undefined : useStore.getState().lastValidationError;
+  }
+
   return (
     <div className="cadra-studio-shell">
       <Toolbar
@@ -119,6 +150,9 @@ export function App({
             document={document}
             selectedCompositionId={selectedCompositionId}
             onHandleChange={setPreviewHandle}
+            selectedNodeId={selectedNodeId}
+            onSelectNode={selectNode}
+            commitDocument={commitDocument}
             {...(createRenderer !== undefined && { createRenderer })}
             {...(observeResize !== undefined && { observeResize })}
           />
@@ -138,6 +172,12 @@ export function App({
           selectedNodeId={selectedNodeId}
           previewHandle={previewHandle}
           commitPropertyEdit={commitPropertyEdit}
+        />
+        <DslPanel
+          document={document}
+          commitDslEdit={commitDslEdit}
+          selectedNodeId={selectedNodeId}
+          onSelectNode={selectNode}
         />
       </div>
     </div>

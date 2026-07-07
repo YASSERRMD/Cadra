@@ -67,6 +67,7 @@ describe("App", () => {
     expect(container.querySelector('[data-testid="studio-timeline-panel"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="studio-inspector-panel"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="studio-asset-panel"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="studio-dsl-panel"]')).not.toBeNull();
   });
 
   it("shows the current document's provenance name in the toolbar", async () => {
