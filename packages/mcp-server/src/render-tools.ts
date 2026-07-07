@@ -15,18 +15,46 @@
  * onto that path, and hands it all to `submitEncodedRenderJob` together with
  * `@cadra/encode`'s own exported `BROWSER_HEADLESS_RENDER_ENTRY_PATH` (never
  * a hand-guessed path into that package).
+ *
+ * Phase 36 adds a generation-readiness pre-flight check before any of that:
+ * `submitEncodedRenderJob`'s own deep dependency chain (`@cadra/encode` ->
+ * `@cadra/headless` -> a bundled browser-side render entry script) has no
+ * `getPendingAssets`-style seam to plug a live async status check into (see
+ * `./generation-pending-assets.ts`'s own doc for the lower-level
+ * `renderComposition` `getPendingAssets` gate this phase adds for any
+ * caller driving that loop directly - `render_scene` itself does not go
+ * through that loop, it goes through the browser-bundled range-parallel
+ * pipeline instead). So `render_scene` achieves the same "gate the render
+ * on generation readiness" outcome at this outer, MCP-tool level instead:
+ * before ever calling `submitEncodedRenderJob`, it binds any newly-ready
+ * generation slots onto their waiting `VideoNode`s (`./generation-asset-
+ * binding.ts`'s `bindReadyGenerationsForScene`, this being exactly one of
+ * the "something already checks a slot's status" call sites that performs
+ * the "bind on completion" rewrite, persisting that rewrite if anything
+ * changed), and refuses to submit the render (with an actionable diagnostic
+ * naming every still-not-ready node) if any generation-backed node in the
+ * target composition remains unresolved.
  */
 import { createWriteStream } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 
-import { BROWSER_HEADLESS_RENDER_ENTRY_PATH, getEncodedRenderJobStatus, submitEncodedRenderJob } from "@cadra/encode";
+import {
+  BROWSER_HEADLESS_RENDER_ENTRY_PATH,
+  getEncodedRenderJobStatus,
+  submitEncodedRenderJob,
+} from "@cadra/encode";
 import { RenderJobNotFoundError } from "@cadra/headless";
+import { createGenerationStore, type GenerationStore } from "@cadra/providers";
 import { parseScene } from "@cadra/schema";
 import type { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import type { CadraMcpServerConfig } from "./config.js";
+import {
+  bindReadyGenerationsForScene,
+  findPendingGenerationNodes,
+} from "./generation-asset-binding.js";
 import type { Logger } from "./logger.js";
 import {
   getRenderJobRecord,
@@ -44,6 +72,27 @@ export const RENDER_SCENE_TOOL_NAME = "render_scene";
 export const GET_RENDER_STATUS_TOOL_NAME = "get_render_status";
 /** Registered tool name for fetching a finished render job's output reference. */
 export const GET_RENDER_OUTPUT_TOOL_NAME = "get_render_output";
+
+/** Options accepted by {@link registerCadraRenderTools}, beyond the `(server, config, logger)` triple every other tool-registration function in this package already takes. */
+export interface RegisterCadraRenderToolsOptions {
+  /**
+   * The {@link GenerationStore} `render_scene`'s pre-flight generation-
+   * readiness check reads from (see this module's own doc). Must be the
+   * *same* store instance `add_generated_clip`/`get_generation_status`
+   * submit into and read from, so a slot this store knows about is actually
+   * observable here; `./server.ts` constructs one shared store and passes
+   * it to all three. Defaults to a freshly constructed, empty store (no
+   * providers registered) when omitted, matching `./generation-tools.ts`'s
+   * own default rationale: with no shared store injected, every
+   * generation-backed node this check encounters resolves to
+   * `"unknownSlot"` (refusing the render), which is the conservative,
+   * correct behavior for a scene referencing a slot this process cannot
+   * possibly know about. Always inject a pre-populated fake-provider-backed
+   * store in tests that exercise this gate; no test in this package's
+   * suite may make a real network/vendor call.
+   */
+  generationStore?: GenerationStore;
+}
 
 /** Wraps a JSON-serializable payload as a single-text-block MCP tool result, matching the convention `scene-tools.ts` already established. */
 function jsonResult(payload: unknown): { content: Array<{ type: "text"; text: string }> } {
@@ -110,8 +159,10 @@ export function registerCadraRenderTools(
   server: McpServer,
   config: CadraMcpServerConfig,
   logger: Logger,
+  options: RegisterCadraRenderToolsOptions = {},
 ): RegisteredTool[] {
   const toolLogger = logger.child("render-tools");
+  const generationStore = options.generationStore ?? createGenerationStore({ providers: {} });
 
   const renderSceneTool = server.registerTool(
     RENDER_SCENE_TOOL_NAME,
@@ -122,11 +173,15 @@ export function registerCadraRenderTools(
         "immediately without waiting for the render to finish. Poll get_render_status with the " +
         "returned job id to track progress, and call get_render_output once it reports done.",
       inputSchema: {
-        sceneId: z.string().describe("Id of the scene (as persisted by create_scene/update_scene) to render."),
+        sceneId: z
+          .string()
+          .describe("Id of the scene (as persisted by create_scene/update_scene) to render."),
         compositionId: z.string().describe("Id of the composition, within that scene, to render."),
         seed: z
           .union([z.string(), z.number()])
-          .describe("Base seed for every frame's rendering; the same seed renders deterministically."),
+          .describe(
+            "Base seed for every frame's rendering; the same seed renders deterministically.",
+          ),
         format: z.enum(["mp4", "webm"]).describe("Output container format."),
         bitrate: z.number().positive().describe("Target video bitrate, in bits per second."),
         rangeSizeFrames: z
@@ -134,26 +189,34 @@ export function registerCadraRenderTools(
           .int()
           .positive()
           .optional()
-          .describe("Target frames per parallel render range, before keyframe-alignment rounding. Optional; defaults to @cadra/encode's own default."),
+          .describe(
+            "Target frames per parallel render range, before keyframe-alignment rounding. Optional; defaults to @cadra/encode's own default.",
+          ),
         maxConcurrency: z
           .number()
           .int()
           .positive()
           .optional()
-          .describe("Maximum ranges rendered concurrently (i.e. concurrent headless browser instances). Optional; defaults to @cadra/encode's own default."),
+          .describe(
+            "Maximum ranges rendered concurrently (i.e. concurrent headless browser instances). Optional; defaults to @cadra/encode's own default.",
+          ),
       },
     },
     async ({ sceneId, compositionId, seed, format, bitrate, rangeSizeFrames, maxConcurrency }) => {
       const idValidation = sanitizeSceneId(sceneId);
       if (!idValidation.valid) {
-        return jsonResult({ success: false, message: idValidation.reason } satisfies RenderToolFailurePayload);
+        return jsonResult({
+          success: false,
+          message: idValidation.reason,
+        } satisfies RenderToolFailurePayload);
       }
 
       const file = await readSceneFile(config.workspaceRoot, idValidation.sceneId);
       if (file === undefined) {
         return jsonResult({
           success: false,
-          message: `No scene with id "${idValidation.sceneId}" was found in this workspace. Call ` +
+          message:
+            `No scene with id "${idValidation.sceneId}" was found in this workspace. Call ` +
             "list_scenes to see every scene id currently persisted, or create_scene to create it first.",
         } satisfies RenderToolFailurePayload);
       }
@@ -166,7 +229,8 @@ export function registerCadraRenderTools(
         });
         return jsonResult({
           success: false,
-          message: `Scene "${idValidation.sceneId}" is persisted but no longer validates against the ` +
+          message:
+            `Scene "${idValidation.sceneId}" is persisted but no longer validates against the ` +
             "current scene schema; call get_scene or validate_scene for full diagnostics.",
         } satisfies RenderToolFailurePayload);
       }
@@ -176,8 +240,42 @@ export function registerCadraRenderTools(
         const availableIds = parsed.document.project.compositions.map((c) => c.id);
         return jsonResult({
           success: false,
-          message: `Scene "${idValidation.sceneId}" has no composition with id "${compositionId}". ` +
+          message:
+            `Scene "${idValidation.sceneId}" has no composition with id "${compositionId}". ` +
             `Available composition ids: ${availableIds.length > 0 ? availableIds.join(", ") : "(none)"}.`,
+        } satisfies RenderToolFailurePayload);
+      }
+
+      // Generation-readiness pre-flight (Phase 36): bindReadyGenerationsForScene
+      // rewrites any newly-ready generation slot's node onto a real asset
+      // ref and persists that rewrite (this call site is exactly one of the
+      // "something already checks a slot's status" triggers the "bind on
+      // completion" rewrite fires from). Then refuse to render if the
+      // target composition still has any node left waiting on a
+      // not-yet-ready generation, rather than submitting a render against a
+      // broken/placeholder ref. See this module's own doc for why this
+      // check happens here (an outer MCP-tool pre-flight) rather than deep
+      // inside submitEncodedRenderJob's own render loop.
+      const bindingResult = await bindReadyGenerationsForScene(
+        config.workspaceRoot,
+        idValidation.sceneId,
+        generationStore,
+        toolLogger,
+      );
+      const effectiveProject = bindingResult?.document.project ?? parsed.document.project;
+      const stillPendingInComposition = findPendingGenerationNodes({
+        ...effectiveProject,
+        compositions: effectiveProject.compositions.filter((c) => c.id === compositionId),
+      });
+      if (stillPendingInComposition.length > 0) {
+        const nodeIds = stillPendingInComposition.map((pending) => pending.node.id).join(", ");
+        return jsonResult({
+          success: false,
+          message:
+            `Composition "${compositionId}" of scene "${idValidation.sceneId}" has ` +
+            `${stillPendingInComposition.length} VideoNode(s) still waiting on a generation job (${nodeIds}). ` +
+            "Call get_generation_status for each slot id (matching the node's own id) to check on it, " +
+            "and submit render_scene again once every one reports ready.",
         } satisfies RenderToolFailurePayload);
       }
 
@@ -189,7 +287,7 @@ export function registerCadraRenderTools(
       let handle;
       try {
         handle = await submitEncodedRenderJob({
-          project: parsed.document.project,
+          project: effectiveProject,
           compositionId,
           seed,
           format,
@@ -256,7 +354,8 @@ export function registerCadraRenderTools(
       if (record === undefined) {
         return jsonResult({
           success: false,
-          message: `No render job with id "${jobId}" is known to this server. It may not exist, or ` +
+          message:
+            `No render job with id "${jobId}" is known to this server. It may not exist, or ` +
             "this server process may have restarted since it was submitted.",
         } satisfies RenderToolFailurePayload);
       }
@@ -268,7 +367,8 @@ export function registerCadraRenderTools(
         if (error instanceof RenderJobNotFoundError) {
           return jsonResult({
             success: false,
-            message: `Render job "${jobId}" is registered but its underlying render status is no ` +
+            message:
+              `Render job "${jobId}" is registered but its underlying render status is no ` +
               "longer available.",
           } satisfies RenderToolFailurePayload);
         }
@@ -307,7 +407,8 @@ export function registerCadraRenderTools(
       if (record === undefined) {
         return jsonResult({
           success: false,
-          message: `No render job with id "${jobId}" is known to this server. It may not exist, or ` +
+          message:
+            `No render job with id "${jobId}" is known to this server. It may not exist, or ` +
             "this server process may have restarted since it was submitted.",
         } satisfies RenderToolFailurePayload);
       }
@@ -315,7 +416,8 @@ export function registerCadraRenderTools(
       if (record.outcome === undefined) {
         return jsonResult({
           success: false,
-          message: `Render job "${jobId}" has not finished yet. Call get_render_status to check its ` +
+          message:
+            `Render job "${jobId}" has not finished yet. Call get_render_status to check its ` +
             "current progress.",
         } satisfies RenderToolFailurePayload);
       }
