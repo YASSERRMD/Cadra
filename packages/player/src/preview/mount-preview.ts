@@ -45,6 +45,9 @@ export interface MountPreviewOptions {
   observeResize?: ObserveResizeFn;
 }
 
+/** Unsubscribes a handler previously registered via `PreviewHandle.onFrameChanged`. */
+export type UnsubscribeFrameChangedFn = () => void;
+
 /** Imperative handle returned by `mountPreview`. */
 export interface PreviewHandle {
   /** Jumps directly to `frame`, same clamping as `Transport.seek`. */
@@ -55,6 +58,25 @@ export interface PreviewHandle {
   pause(): void;
   /** The frame currently resolved and rendered. */
   getFrame(): number;
+  /**
+   * Subscribes `handler` to be called whenever the resolved frame changes,
+   * for any reason: playback advancing, a `seek()` call made through this
+   * same handle, or a scrub against this preview's own built-in scrubber
+   * control. A thin passthrough to the underlying `Transport`'s own
+   * `"frameChanged"` event (see `packages/player/src/transport.ts`), added so
+   * a second, independent UI (e.g. a studio app's timeline panel) can react
+   * to this preview's frame without polling `getFrame()` and without needing
+   * its own separate `Transport`.
+   *
+   * Since `renderer.init()` may still be in flight when this is called (the
+   * `Transport` does not exist yet), a subscription made before that point is
+   * held and attached to the real `Transport` once it is constructed, so no
+   * `frameChanged` occurring after subscription is ever missed. Returns an
+   * unsubscribe function; calling it after `dispose()` (or more than once) is
+   * a harmless no-op, matching every other `PreviewHandle` method's
+   * post-dispose behavior.
+   */
+  onFrameChanged(handler: (frame: number) => void): UnsubscribeFrameChangedFn;
   /**
    * Tears down everything `mountPreview` created: the canvas element, the
    * transport UI, the keydown listener, resize observation, and the
@@ -133,6 +155,16 @@ export function mountPreview(container: HTMLElement, options: MountPreviewOption
     { kind: "seek"; frame: number } | { kind: "play" } | { kind: "pause" }
   > = [];
   let pendingFrameForGetFrame = 0;
+
+  // External `onFrameChanged` subscribers (e.g. a studio timeline panel).
+  // Held here (not registered directly on the Transport) because the
+  // Transport itself may not exist yet: a subscription made while
+  // renderer.init() is still in flight must still receive every
+  // frameChanged emitted once the Transport is constructed, so this set is
+  // fanned out to by a single internal handler attached at construction time
+  // below, exactly like the existing internal frameChanged handler that
+  // drives updateReadouts.
+  const frameChangedHandlers = new Set<(frame: number) => void>();
 
   // --- DOM construction ---
 
@@ -391,6 +423,9 @@ export function mountPreview(container: HTMLElement, options: MountPreviewOption
     createdTransport.on("frameChanged", (frame) => {
       pendingFrameForGetFrame = frame;
       updateReadouts(frame);
+      for (const handler of frameChangedHandlers) {
+        handler(frame);
+      }
     });
     createdTransport.on("ended", () => {
       setPlayPauseButtonLabel(false);
@@ -433,6 +468,7 @@ export function mountPreview(container: HTMLElement, options: MountPreviewOption
 
     transport?.dispose();
     options.renderer.dispose();
+    frameChangedHandlers.clear();
 
     root.remove();
   }
@@ -458,6 +494,17 @@ export function mountPreview(container: HTMLElement, options: MountPreviewOption
     },
     getFrame() {
       return transport?.currentFrame ?? pendingFrameForGetFrame;
+    },
+    onFrameChanged(handler: (frame: number) => void): UnsubscribeFrameChangedFn {
+      if (isDisposed) {
+        return () => {
+          // no-op unsubscribe: nothing was ever added.
+        };
+      }
+      frameChangedHandlers.add(handler);
+      return () => {
+        frameChangedHandlers.delete(handler);
+      };
     },
     dispose,
   };
