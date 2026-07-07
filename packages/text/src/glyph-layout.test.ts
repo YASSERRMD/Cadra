@@ -77,6 +77,19 @@ describe("computeGlyphLayout", () => {
     expect(secondLineGlyph?.quad.top).toBeLessThan(firstLineGlyph?.quad.top as number);
   });
 
+  it("gives every glyph a positive MSDF distance-field range, in the same em-unit space as its own quad", async () => {
+    const layout = await layoutFor(["Vote"]);
+
+    for (const glyph of layout.glyphs) {
+      expect(glyph.range).toBeGreaterThan(0);
+      // Sanity-bound against the glyph's own quad size: the encoded range
+      // is a fringe around the glyph's own edge, not a multiple of its
+      // whole size.
+      const quadWidth = glyph.quad.right - glyph.quad.left;
+      expect(glyph.range).toBeLessThan(quadWidth);
+    }
+  });
+
   it("is deterministic across repeated calls", async () => {
     const first = await layoutFor(["Vote"]);
     const second = await layoutFor(["Vote"]);

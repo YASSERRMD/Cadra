@@ -31,6 +31,18 @@ export interface PositionedGlyph {
   /** Normalized (0-1) texture coordinates into that atlas page, raw pixel row order (row 0 = top of the PNG). */
   uv: { u0: number; v0: number; u1: number; v1: number };
   /**
+   * This glyph's own MSDF distance-field range, in the same em-unit space
+   * as `origin`/`quad` (`MsdfGlyphPlacement.range`, scaled by this glyph's
+   * own per-span `fontSizeScale` exactly like `quad`'s own dimensions
+   * already are - see `placeGlyphQuad`'s own doc on `scale`). A shader
+   * needs this to convert an em-unit width (an outline's own `width`, a
+   * glow's own `radius`, a shadow's own offset) into the atlas-encoded
+   * signed-distance-field's own normalized unit space before comparing it
+   * against the field's own sampled value - see
+   * `packages/renderer/src/text/msdf-material.ts`.
+   */
+  range: number;
+  /**
    * This glyph's own inline-style-span color override (`paragraph-layout.ts`,
    * Phase 45), when it has one. `computeGlyphLayout` (Phase 44, no
    * inline-style concept) never sets this; a renderer with no per-glyph
@@ -72,6 +84,7 @@ export interface GlyphQuadPlacement {
   quad: { left: number; right: number; bottom: number; top: number };
   page: number;
   uv: { u0: number; v0: number; u1: number; v1: number };
+  range: number;
 }
 
 /**
@@ -136,6 +149,7 @@ export function placeGlyphQuad(
       u1: (placement.x + placement.width) / pageDimensions.width,
       v1: (placement.y + placement.height) / pageDimensions.height,
     },
+    range: placement.range * scale,
   };
 }
 

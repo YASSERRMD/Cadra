@@ -16,6 +16,7 @@ function glyph(overrides: Partial<PositionedGlyph> & { cluster: number }): Posit
     quad: QUAD,
     page: 0,
     uv: UV,
+    range: 0.1,
     ...overrides,
   };
 }

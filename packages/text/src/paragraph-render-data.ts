@@ -82,6 +82,7 @@ export async function prepareParagraphRenderData(
       quad: placed.quad,
       page: placed.page + pageOffset,
       uv: placed.uv,
+      range: placed.range,
       ...(glyph.color !== undefined && { color: glyph.color }),
     });
   }
