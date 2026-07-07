@@ -9,6 +9,7 @@ import {
   resolveColorProperty,
   resolveNumberProperty,
   resolveProperty,
+  resolveVariationAxesProperty,
   resolveVector3Property,
 } from "./compile.js";
 import type { KeyframeTrack, Property } from "./keyframe-track.js";
@@ -268,5 +269,48 @@ describe("resolveBooleanProperty", () => {
     };
     expect(resolveBooleanProperty(property, 0)).toBe(true);
     expect(resolveBooleanProperty(property, 30)).toBe(false);
+  });
+});
+
+describe("resolveVariationAxesProperty", () => {
+  it("resolves a constant set of axis coordinates", () => {
+    expect(resolveVariationAxesProperty({ wght: 400, wdth: 100 }, 0)).toEqual({ wght: 400, wdth: 100 });
+  });
+
+  it("interpolates a shared axis linearly between two keyframes", () => {
+    const property: Property<Readonly<Record<string, number>>> = {
+      type: "keyframeTrack",
+      keyframes: [
+        { frame: 0, value: { wght: 400 } },
+        { frame: 10, value: { wght: 700 } },
+      ],
+    };
+    expect(resolveVariationAxesProperty(property, 0)).toEqual({ wght: 400 });
+    expect(resolveVariationAxesProperty(property, 5)).toEqual({ wght: 550 });
+    expect(resolveVariationAxesProperty(property, 10)).toEqual({ wght: 700 });
+  });
+
+  it("holds an axis present on only one side at its one known value, rather than dipping toward 0", () => {
+    const property: Property<Readonly<Record<string, number>>> = {
+      type: "keyframeTrack",
+      keyframes: [
+        { frame: 0, value: { wght: 400 } },
+        { frame: 10, value: { wght: 700, wdth: 120 } },
+      ],
+    };
+    // wdth is missing from the first keyframe entirely: it must hold at
+    // 120 throughout, never blend toward 0 partway through.
+    expect(resolveVariationAxesProperty(property, 5)).toEqual({ wght: 550, wdth: 120 });
+  });
+
+  it("interpolates every distinct axis across both keyframes independently", () => {
+    const property: Property<Readonly<Record<string, number>>> = {
+      type: "keyframeTrack",
+      keyframes: [
+        { frame: 0, value: { wght: 400, wdth: 100, slnt: 0 } },
+        { frame: 10, value: { wght: 700, wdth: 120, slnt: -10 } },
+      ],
+    };
+    expect(resolveVariationAxesProperty(property, 5)).toEqual({ wght: 550, wdth: 110, slnt: -5 });
   });
 });
