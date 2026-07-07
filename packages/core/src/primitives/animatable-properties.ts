@@ -36,6 +36,13 @@ export const TEXT_ANIMATABLE_PROPERTIES = [
 /** `Image` (`ImageNode`) animatable props: transform and visibility. */
 export const IMAGE_ANIMATABLE_PROPERTIES = [...TRANSFORM_ANIMATABLE_PROPERTIES, "visible"] as const;
 
+/** `Video` (`VideoNode`) animatable props: transform, visibility, and opacity. */
+export const VIDEO_ANIMATABLE_PROPERTIES = [
+  ...TRANSFORM_ANIMATABLE_PROPERTIES,
+  "visible",
+  "opacity",
+] as const;
+
 /** `Camera` (`CameraNode`) animatable props: transform, look-at target, and lens. */
 export const CAMERA_ANIMATABLE_PROPERTIES = [
   ...TRANSFORM_ANIMATABLE_PROPERTIES,

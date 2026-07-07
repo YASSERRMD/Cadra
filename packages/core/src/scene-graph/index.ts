@@ -14,6 +14,9 @@ export type {
   SceneNode,
   SceneNodeKind,
   TextNode,
+  VideoFitMode,
+  VideoNode,
+  VideoOutOfRangeBehavior,
 } from "./scene-node.js";
 export type {
   ActiveCameraEntry,

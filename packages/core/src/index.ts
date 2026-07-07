@@ -8,7 +8,7 @@
  * its pure tree operations, the deterministic frame/time model (FrameContext,
  * seeded per-frame randomness, frame/time conversions), the authoring
  * primitives library (createComposition, Sequence, Series, Shape, Text,
- * Image, Camera, Light), the timeline resolver (resolveSceneAtFrame), the
+ * Image, Camera, Light, Video), the timeline resolver (resolveSceneAtFrame), the
  * deterministic interpolation toolkit (interpolate, spring, easing curves,
  * cubicBezier), the declarative keyframe/property model (Property,
  * KeyframeTrack, resolveProperty), the environment-agnostic asset pipeline
@@ -45,6 +45,8 @@ export type {
   SeriesEntry,
   ShapeProps,
   TextProps,
+  VideoFrameMapping,
+  VideoProps,
 } from "./primitives/index.js";
 export {
   Camera,
@@ -56,12 +58,15 @@ export {
   Light,
   LIGHT_ANIMATABLE_PROPERTIES,
   resolveSequenceFrame,
+  resolveVideoSourceFrame,
   Sequence,
   Series,
   Shape,
   SHAPE_ANIMATABLE_PROPERTIES,
   Text,
   TEXT_ANIMATABLE_PROPERTIES,
+  Video,
+  VIDEO_ANIMATABLE_PROPERTIES,
 } from "./primitives/index.js";
 export * from "./scene-graph/index.js";
 export * from "./timeline-engine/index.js";

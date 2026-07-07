@@ -13,20 +13,32 @@ import * as THREE from "three";
 import type { GeometryRegistry, MaterialRegistry } from "./registries.js";
 
 /**
- * Geometry shared by every `text` and `image` placeholder node, module-level
- * so it is constructed exactly once per process and never disposed: the same
- * ownership rule as a registry-provided geometry (see `registries.ts`), even
- * though this one lives here rather than in a registry, since text/image
- * placeholders are not `mesh` nodes and do not go through `geometryRef`.
+ * Geometry shared by every `text`, `image`, and `video` placeholder node,
+ * module-level so it is constructed exactly once per process and never
+ * disposed: the same ownership rule as a registry-provided geometry (see
+ * `registries.ts`), even though this one lives here rather than in a
+ * registry, since these placeholders are not `mesh` nodes and do not go
+ * through `geometryRef`.
  *
- * Real glyph rendering (text) and real texture loading (image) are deferred:
- * text to a future font/glyph system, image to Phase 12's asset pipeline.
+ * Real glyph rendering (text), real texture loading (image), and real video
+ * texture decoding/display (video) are all deferred: text to a future
+ * font/glyph system, image to Phase 12's asset pipeline, video to a future
+ * phase (out of scope for Phase 33, which focuses on the data model and
+ * frame-mapping math; see `VideoNode`'s own doc comment in `@cadra/core`).
  * This plane is purely a visible stand-in shape until then.
  */
 const PLACEHOLDER_PLANE_GEOMETRY = new THREE.PlaneGeometry(1, 1);
 
 /** Fallback color for `image` placeholders, since `assetRef` cannot resolve to real image data yet. */
 const IMAGE_PLACEHOLDER_COLOR = 0x808080;
+
+/**
+ * Fallback color for `video` placeholders, since `assetRef` cannot resolve to
+ * a decoded video frame yet. Distinct from `IMAGE_PLACEHOLDER_COLOR` (a
+ * darker gray) purely so the two placeholder kinds are visually
+ * distinguishable in a rendered preview, with no other significance.
+ */
+const VIDEO_PLACEHOLDER_COLOR = 0x404040;
 
 /**
  * Fallback geometry/material used when a mesh's `geometryRef`/`materialRef`
@@ -134,6 +146,19 @@ function buildThreeObject(node: SceneNode, ctx: NodeFactoryContext): BuiltObject
       const mesh = new THREE.Mesh(PLACEHOLDER_PLANE_GEOMETRY, material);
       return { object3D: mesh, owned: { material } };
     }
+
+    case "video": {
+      // Real video texture decoding/display is out of scope for this phase
+      // (see VideoNode's own doc comment); this is the same kind of
+      // shared-plane-plus-owned-material placeholder the "image" branch
+      // above already uses, distinguished only by its fallback color.
+      const material = new THREE.MeshBasicMaterial({
+        color: VIDEO_PLACEHOLDER_COLOR,
+        transparent: true,
+      });
+      const mesh = new THREE.Mesh(PLACEHOLDER_PLANE_GEOMETRY, material);
+      return { object3D: mesh, owned: { material } };
+    }
   }
 }
 
@@ -206,6 +231,22 @@ export function applyNodeProperties(
       // Fixed placeholder color; assetRef cannot resolve to real image data
       // until Phase 12's asset pipeline exists, so there is nothing to react to.
       return;
+
+    case "video": {
+      // Fixed placeholder color, same reason as "image" above (assetRef
+      // cannot resolve to a decoded video frame yet; see VideoNode's own
+      // doc comment for why real video texture display is out of scope for
+      // this phase). opacity is resolved and applied here regardless: it is
+      // a genuine Property<number> this phase adds, independent of texture
+      // decoding, so there is something real to react to for it even while
+      // the frame this placeholder shows is fixed.
+      const mesh = object3D as THREE.Mesh;
+      (mesh.material as THREE.MeshBasicMaterial).opacity = resolveNumberProperty(
+        node.opacity,
+        frame,
+      );
+      return;
+    }
   }
 }
 
