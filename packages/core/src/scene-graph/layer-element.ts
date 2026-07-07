@@ -1,4 +1,30 @@
 /**
+ * The pure-data shape of a Satori 2D layer's element tree (`SatoriNode.layer`,
+ * `scene-node.ts`): a curated, typed subset of HTML/CSS, restricted to
+ * exactly what Satori (`@cadra/satori-layer`'s rendering engine) itself
+ * implements. Defined here, in `@cadra/core`, rather than in
+ * `@cadra/satori-layer` itself, since `@cadra/satori-layer` already depends
+ * on `@cadra/core` (for `ColorRGBA`/`Property`/etc.) - the reverse dependency
+ * would be circular. `@cadra/satori-layer` re-exports these same types
+ * rather than redefining its own copy, so there is exactly one
+ * canonical definition.
+ */
+
+/**
+ * The three element kinds this layer spec supports: `"div"` (a flexbox
+ * container, the workhorse of any layout), `"span"` (an inline text run,
+ * for styling part of a line differently from its surroundings), and
+ * `"img"` (an embedded raster or vector image). This is Satori's own
+ * "constrained HTML subset" (its README's phrase), narrowed to exactly the
+ * three tags every layout, typography, and image-embedding need in
+ * practice actually requires - not the full HTML tag set Satori happens to
+ * recognize, which also includes heading/paragraph tags whose only
+ * practical difference from `div`/`span` here is a preset default style
+ * this spec does not rely on (every style is authored explicitly).
+ */
+export type LayerElementType = "div" | "span" | "img";
+
+/**
  * A curated, typed subset of CSS a `LayerElement` can carry, restricted to
  * exactly what Satori itself implements (verified against Satori's own
  * supported-CSS documentation; Satori is a from-scratch layout and
@@ -6,8 +32,7 @@
  * real CSS - anything outside this type would silently do nothing or throw
  * inside Satori, which a hand-authored raw style object could not catch at
  * compile time). Property names match Satori's own (React-style camelCase)
- * so no translation is needed when this is handed to Satori; see
- * `layer-to-satori-node.ts`.
+ * so no translation is needed when this is handed to Satori.
  */
 export interface LayerStyle {
   display?: "flex" | "none";
@@ -98,4 +123,35 @@ export interface LayerStyle {
 
   objectFit?: "fill" | "contain" | "cover" | "none" | "scale-down";
   objectPosition?: string;
+}
+
+/**
+ * One node in a layer's element tree: a typed, agent-safe alternative to
+ * raw JSX or HTML (this is the only input `@cadra/satori-layer`'s
+ * `renderLayerToSvg` accepts), so a caller (an agent or a UI) can only ever
+ * construct something its Satori-node conversion knows how to translate,
+ * rather than a string that might contain an unsupported tag or a typo'd
+ * property name that would silently do nothing inside Satori.
+ */
+export interface LayerElement {
+  /**
+   * Optional stable identifier, unique within one `SatoriNode.layer` tree.
+   * Not read by Satori itself at all (it is not copied into Satori's own
+   * `props`); its only purpose is as a lookup key for
+   * `SatoriNode.elementAnimations`, so an individual element within a
+   * layer can be targeted for its own per-frame animation independent of
+   * the rest of the tree (Phase 48's "named element handles").
+   */
+  id?: string;
+  type: LayerElementType;
+  style?: LayerStyle;
+  /** Text content and/or nested elements, in document order (Satori paints later siblings on top of earlier ones; there is no `z-index` in SVG). */
+  children?: ReadonlyArray<LayerElement | string>;
+  /** `img` only: the image source, a `data:` URI (recommended - no I/O needed) or an `http(s)://` URL. */
+  src?: string;
+  /** `img` only, in layer units (recommended: Satori stretches an unsized image to fill its element). */
+  width?: number;
+  height?: number;
+  /** BCP-47-ish language tag, e.g. `"ja-JP"`, forcing which locale-specific font/shaping Satori uses for this element's own text (see Satori's own `Locale` support). */
+  lang?: string;
 }

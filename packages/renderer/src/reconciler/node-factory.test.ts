@@ -1,8 +1,13 @@
-import { createIdentityTransform, type SceneNode } from "@cadra/core";
+import { createIdentityTransform, type SatoriNode, type SceneNode } from "@cadra/core";
+import type { RasterizedSvg } from "@cadra/svg-raster";
 import type { TextRenderData } from "@cadra/text";
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
 
+import {
+  computeSatoriLayerRenderKey,
+  createInMemorySatoriLayerRenderRegistry,
+} from "../svg-layer/satori-layer-render-registry.js";
 import type { TextGroupResources } from "../text/build-text-group.js";
 import { createInMemoryTextRenderRegistry } from "../text/text-render-registry.js";
 import { applyNodeProperties, createThreeObject, type NodeFactoryContext } from "./node-factory.js";
@@ -335,5 +340,165 @@ describe("node-factory: Phase 26 keyframed properties resolve to different value
     applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
 
     expect(built.object3D.scale.toArray()).toEqual([20, 20, 20]);
+  });
+});
+
+function fakeRasterizedSvg(width: number, height: number): RasterizedSvg {
+  return { width, height, pixels: new Uint8Array(width * height * 4).fill(200) };
+}
+
+function satoriNode(overrides: Partial<SatoriNode> = {}): SatoriNode {
+  return {
+    id: "lower-third",
+    kind: "satori",
+    transform: createIdentityTransform(),
+    visible: true,
+    children: [],
+    layer: { type: "div", children: ["Cadra"] },
+    width: 400,
+    height: 200,
+    opacity: 1,
+    ...overrides,
+  };
+}
+
+describe("node-factory: satori", () => {
+  it("renders an empty group when a satori node's render data is not yet registered", () => {
+    const ctx = makeCtx();
+    const node = satoriNode();
+    const built = createThreeObject(node, ctx);
+
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+
+    expect(built.object3D).toBeInstanceOf(THREE.Group);
+    expect(built.object3D.children).toHaveLength(0);
+  });
+
+  it("builds a real textured mesh, sized from width/height, once render data is registered", () => {
+    const satoriLayerRenderRegistry = createInMemorySatoriLayerRenderRegistry();
+    const ctx: NodeFactoryContext = { ...makeCtx(), satoriLayerRenderRegistry };
+    const node = satoriNode();
+    const renderKey = computeSatoriLayerRenderKey(node, 0);
+    satoriLayerRenderRegistry.register(renderKey, { rasterized: fakeRasterizedSvg(400, 200) });
+
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+
+    const group = built.object3D as THREE.Group;
+    const mesh = group.children[0] as THREE.Mesh;
+    expect(mesh).toBeInstanceOf(THREE.Mesh);
+    const geometry = mesh.geometry as THREE.PlaneGeometry;
+    expect(geometry.parameters.width).toBe(400);
+    expect(geometry.parameters.height).toBe(200);
+    expect((mesh.material as THREE.MeshBasicMaterial).map).toBeInstanceOf(THREE.DataTexture);
+  });
+
+  it("resolves opacity per frame, independent of whether the render key changed", () => {
+    const satoriLayerRenderRegistry = createInMemorySatoriLayerRenderRegistry();
+    const ctx: NodeFactoryContext = { ...makeCtx(), satoriLayerRenderRegistry };
+    const node = satoriNode({
+      opacity: {
+        type: "keyframeTrack",
+        keyframes: [
+          { frame: 0, value: 0 },
+          { frame: 10, value: 1 },
+        ],
+      },
+    });
+    const renderKey = computeSatoriLayerRenderKey(node, 0);
+    satoriLayerRenderRegistry.register(renderKey, { rasterized: fakeRasterizedSvg(400, 200) });
+
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+    const mesh = (built.object3D as THREE.Group).children[0] as THREE.Mesh;
+    expect((mesh.material as THREE.MeshBasicMaterial).opacity).toBe(0);
+
+    applyNodeProperties(node, built.object3D, ctx, 10, built.owned);
+    expect((mesh.material as THREE.MeshBasicMaterial).opacity).toBe(1);
+  });
+
+  it("maps every blendMode to the correct Three.js blending constant", () => {
+    const satoriLayerRenderRegistry = createInMemorySatoriLayerRenderRegistry();
+    const ctx: NodeFactoryContext = { ...makeCtx(), satoriLayerRenderRegistry };
+
+    const expected: Array<[SatoriNode["blendMode"], THREE.Blending]> = [
+      [undefined, THREE.NormalBlending],
+      ["normal", THREE.NormalBlending],
+      ["add", THREE.AdditiveBlending],
+      ["multiply", THREE.MultiplyBlending],
+      ["screen", THREE.CustomBlending],
+    ];
+
+    for (const [blendMode, blending] of expected) {
+      const node = satoriNode({ id: `node-${String(blendMode)}`, blendMode });
+      const renderKey = computeSatoriLayerRenderKey(node, 0);
+      satoriLayerRenderRegistry.register(renderKey, { rasterized: fakeRasterizedSvg(400, 200) });
+
+      const built = createThreeObject(node, ctx);
+      applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+      const mesh = (built.object3D as THREE.Group).children[0] as THREE.Mesh;
+      expect((mesh.material as THREE.MeshBasicMaterial).blending).toBe(blending);
+    }
+  });
+
+  it("implements screen blending with the correct custom blend factors", () => {
+    const satoriLayerRenderRegistry = createInMemorySatoriLayerRenderRegistry();
+    const ctx: NodeFactoryContext = { ...makeCtx(), satoriLayerRenderRegistry };
+    const node = satoriNode({ blendMode: "screen" });
+    const renderKey = computeSatoriLayerRenderKey(node, 0);
+    satoriLayerRenderRegistry.register(renderKey, { rasterized: fakeRasterizedSvg(400, 200) });
+
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+    const mesh = (built.object3D as THREE.Group).children[0] as THREE.Mesh;
+    const material = mesh.material as THREE.MeshBasicMaterial;
+
+    expect(material.blendEquation).toBe(THREE.AddEquation);
+    expect(material.blendSrc).toBe(THREE.OneMinusDstColorFactor);
+    expect(material.blendDst).toBe(THREE.OneFactor);
+  });
+
+  it("swaps the texture when a later frame resolves to a different render key", () => {
+    const satoriLayerRenderRegistry = createInMemorySatoriLayerRenderRegistry();
+    const ctx: NodeFactoryContext = { ...makeCtx(), satoriLayerRenderRegistry };
+    const node = satoriNode({
+      elementAnimations: { title: { opacity: { type: "keyframeTrack", keyframes: [{ frame: 0, value: 0 }, { frame: 10, value: 1 }] } } },
+    });
+
+    const keyAtFrame0 = computeSatoriLayerRenderKey(node, 0);
+    const keyAtFrame10 = computeSatoriLayerRenderKey(node, 10);
+    expect(keyAtFrame0).not.toBe(keyAtFrame10);
+    satoriLayerRenderRegistry.register(keyAtFrame0, { rasterized: fakeRasterizedSvg(400, 200) });
+    satoriLayerRenderRegistry.register(keyAtFrame10, { rasterized: fakeRasterizedSvg(400, 200) });
+
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+    const mesh = (built.object3D as THREE.Group).children[0] as THREE.Mesh;
+    const firstMaterial = mesh.material;
+    const firstTexture = (firstMaterial as THREE.MeshBasicMaterial).map;
+
+    applyNodeProperties(node, built.object3D, ctx, 10, built.owned);
+    expect(mesh.material).not.toBe(firstMaterial);
+    expect((mesh.material as THREE.MeshBasicMaterial).map).not.toBe(firstTexture);
+  });
+
+  it("does not rebuild the material or texture across frames that resolve to the same render key", () => {
+    const satoriLayerRenderRegistry = createInMemorySatoriLayerRenderRegistry();
+    const ctx: NodeFactoryContext = { ...makeCtx(), satoriLayerRenderRegistry };
+    const node = satoriNode();
+    const renderKey = computeSatoriLayerRenderKey(node, 0);
+    satoriLayerRenderRegistry.register(renderKey, { rasterized: fakeRasterizedSvg(400, 200) });
+
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+    const mesh = (built.object3D as THREE.Group).children[0] as THREE.Mesh;
+    const firstMaterial = mesh.material;
+
+    // A static satori node (no elementAnimations) resolves the exact same
+    // render key at every frame, so this second call must not rebuild
+    // anything - proving the "only rebuild when the key actually changes"
+    // optimization, not just that it happens to still look correct.
+    applyNodeProperties(node, built.object3D, ctx, 1, built.owned);
+    expect(mesh.material).toBe(firstMaterial);
   });
 });

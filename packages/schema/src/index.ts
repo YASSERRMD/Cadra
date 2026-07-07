@@ -48,6 +48,7 @@ export type { NamedSceneDocumentExample } from "./examples.js";
 export { EXAMPLE_SCENE_DOCUMENTS } from "./examples.js";
 export { generateSceneJsonSchema } from "./json-schema.js";
 export { easingSchema, keyframeSchema, keyframeTrackSchema, propertySchema } from "./keyframes.js";
+export { layerElementSchema, layerElementTypeSchema, layerStyleSchema } from "./layer-element.js";
 export type { SceneMigration } from "./migrate.js";
 export { migrateSceneDocument } from "./migrate.js";
 export type {
@@ -70,6 +71,9 @@ export {
   lightNodeSchema,
   lightTypeSchema,
   meshNodeSchema,
+  satoriElementKeyframesSchema,
+  satoriLayerFontRefSchema,
+  satoriNodeSchema,
   sceneNodeKindSchema,
   sceneNodeSchema,
   textNodeSchema,

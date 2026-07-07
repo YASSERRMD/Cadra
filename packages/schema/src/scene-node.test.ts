@@ -14,7 +14,17 @@ function baseFields() {
 
 describe("sceneNodeKindSchema", () => {
   it("accepts every known kind", () => {
-    const kinds = ["group", "mesh", "camera", "light", "text", "image", "video", "compositionRef"];
+    const kinds = [
+      "group",
+      "mesh",
+      "camera",
+      "light",
+      "text",
+      "image",
+      "video",
+      "compositionRef",
+      "satori",
+    ];
     for (const kind of kinds) {
       expect(sceneNodeKindSchema.safeParse(kind).success).toBe(true);
     }
@@ -500,6 +510,128 @@ describe("sceneNodeSchema: compositionRef", () => {
       compositionId: "comp-2",
     });
     expect(result.success).toBe(true);
+  });
+});
+
+describe("sceneNodeSchema: satori", () => {
+  function minimalSatoriFields() {
+    return {
+      ...baseFields(),
+      kind: "satori" as const,
+      layer: { type: "div" as const, children: ["Hello"] },
+      width: 400,
+      height: 200,
+      opacity: 1,
+    };
+  }
+
+  it("accepts a minimal satori node", () => {
+    const result = sceneNodeSchema.safeParse(minimalSatoriFields());
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a satori node with a nested, styled layer tree, fonts, and element animations", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...minimalSatoriFields(),
+      layer: {
+        type: "div",
+        style: {
+          display: "flex",
+          flexDirection: "column",
+          backgroundColor: "#111827",
+          borderRadius: 16,
+        },
+        children: [
+          {
+            id: "title",
+            type: "span",
+            style: { fontFamily: "Inter", fontWeight: 700, fontSize: 32, color: "white" },
+            children: ["Cadra"],
+          },
+          { type: "img", src: "data:image/png;base64,AAA", width: 40, height: 40 },
+        ],
+      },
+      fonts: [{ family: "Inter", fontRef: "inter-bold", weight: 700, variationCoordinates: { wght: 700 } }],
+      elementAnimations: {
+        title: { opacity: 0.5, x: 10, y: -5, color: [1, 1, 1, 1] },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a satori node with a keyframe track for opacity", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...minimalSatoriFields(),
+      opacity: {
+        type: "keyframeTrack",
+        keyframes: [
+          { frame: 0, value: 0 },
+          { frame: 30, value: 1 },
+        ],
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts every known blendMode", () => {
+    for (const blendMode of ["normal", "add", "multiply", "screen"]) {
+      const result = sceneNodeSchema.safeParse({ ...minimalSatoriFields(), blendMode });
+      expect(result.success).toBe(true);
+    }
+  });
+
+  it("rejects an unknown blendMode", () => {
+    const result = sceneNodeSchema.safeParse({ ...minimalSatoriFields(), blendMode: "darken" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a satori node missing layer, width, height, or opacity", () => {
+    const fields = minimalSatoriFields();
+    for (const omit of ["layer", "width", "height", "opacity"] as const) {
+      const { [omit]: _omitted, ...rest } = fields;
+      expect(sceneNodeSchema.safeParse(rest).success).toBe(false);
+    }
+  });
+
+  it("rejects an unsupported layer element type", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...minimalSatoriFields(),
+      layer: { type: "h1", children: ["Cadra"] },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an unsupported style value, with a diagnostic pointing at the offending path", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...minimalSatoriFields(),
+      layer: { type: "div", style: { display: "grid" } },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((candidate) =>
+        candidate.path.join(".").includes("layer.style.display"),
+      );
+      expect(issue).toBeDefined();
+    }
+  });
+
+  it("rejects a stray, unrecognized field on the layer element (strict object)", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...minimalSatoriFields(),
+      layer: { type: "div", unknownField: true, children: ["Hello"] },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a nested layer element with an invalid type, several levels deep", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...minimalSatoriFields(),
+      layer: {
+        type: "div",
+        children: [{ type: "div", children: [{ type: "p", children: ["bad"] }] }],
+      },
+    });
+    expect(result.success).toBe(false);
   });
 });
 

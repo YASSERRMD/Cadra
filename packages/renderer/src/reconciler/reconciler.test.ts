@@ -2,13 +2,19 @@ import {
   type CameraNode,
   createIdentityTransform,
   type KeyframeTrack,
+  type LayerElement,
   type SceneNode,
   type Transform,
 } from "@cadra/core";
+import type { RasterizedSvg } from "@cadra/svg-raster/browser";
 import type { TextRenderData } from "@cadra/text";
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
 
+import {
+  computeSatoriLayerRenderKey,
+  createInMemorySatoriLayerRenderRegistry,
+} from "../svg-layer/satori-layer-render-registry.js";
 import { createInMemoryTextRenderRegistry } from "../text/text-render-registry.js";
 import { createReconciler } from "./reconciler.js";
 import { createDefaultGeometryRegistry, createDefaultMaterialRegistry } from "./registries.js";
@@ -29,6 +35,13 @@ const FAKE_TEXT_RENDER_DATA: TextRenderData = {
       uv: { u0: 0, v0: 0, u1: 1, v1: 1 },
     },
   ],
+};
+
+/** A minimal, structurally-valid `RasterizedSvg`: real Satori/resvg rendering is `@cadra/satori-layer`'s and `@cadra/svg-raster`'s own test responsibility, not this reconciler's. */
+const FAKE_RASTERIZED_SVG: RasterizedSvg = {
+  width: 2,
+  height: 2,
+  pixels: new Uint8Array(2 * 2 * 4).fill(255),
 };
 
 /** Builds a `Transform` at the identity, optionally overriding `position`. */
@@ -139,6 +152,29 @@ function image(id: string, assetRef = "asset-1"): SceneNode {
     visible: true,
     children: [],
     assetRef,
+  };
+}
+
+function satori(
+  id: string,
+  overrides: Partial<{
+    layer: LayerElement;
+    width: number;
+    height: number;
+    opacity: number;
+  }> = {},
+): SceneNode {
+  return {
+    id,
+    kind: "satori",
+    transform: transformAt(),
+    visible: true,
+    children: [],
+    layer: { type: "div", children: ["Cadra"] },
+    width: 400,
+    height: 200,
+    opacity: 1,
+    ...overrides,
   };
 }
 
@@ -275,6 +311,47 @@ describe("createReconciler: kind-to-Three.js mapping", () => {
     const secondMaterial = (rootObject.children[1] as THREE.Mesh).material;
     expect(firstMaterial).not.toBe(secondMaterial);
   });
+
+  it("maps a satori node with no registered render data to an empty group", () => {
+    const reconciler = createReconciler();
+    const result = reconciler.reconcile(satori("root"), 0) as THREE.Group;
+    expect(result).toBeInstanceOf(THREE.Group);
+    expect(result.children).toHaveLength(0);
+  });
+
+  it("maps satori with registered render data to a real textured mesh, sized to the node's width/height", () => {
+    const node = satori("root") as Extract<SceneNode, { kind: "satori" }>;
+    const satoriLayerRenderRegistry = createInMemorySatoriLayerRenderRegistry();
+    satoriLayerRenderRegistry.register(computeSatoriLayerRenderKey(node, 0), {
+      rasterized: FAKE_RASTERIZED_SVG,
+    });
+    const reconciler = createReconciler({ satoriLayerRenderRegistry });
+    const result = reconciler.reconcile(node, 0) as THREE.Group;
+
+    const layerMesh = result.children[0] as THREE.Mesh;
+    expect(layerMesh).toBeInstanceOf(THREE.Mesh);
+    expect(layerMesh.geometry).toBeInstanceOf(THREE.PlaneGeometry);
+    const parameters = (layerMesh.geometry as THREE.PlaneGeometry).parameters;
+    expect(parameters.width).toBe(400);
+    expect(parameters.height).toBe(200);
+  });
+
+  it("resolves a satori node's opacity for the given frame onto the built material", () => {
+    const node = satori("root", {
+      opacity: 0.25,
+    }) as Extract<SceneNode, { kind: "satori" }>;
+    const satoriLayerRenderRegistry = createInMemorySatoriLayerRenderRegistry();
+    satoriLayerRenderRegistry.register(computeSatoriLayerRenderKey(node, 0), {
+      rasterized: FAKE_RASTERIZED_SVG,
+    });
+    const reconciler = createReconciler({ satoriLayerRenderRegistry });
+    const result = reconciler.reconcile(node, 0) as THREE.Group;
+
+    const layerMesh = result.children[0] as THREE.Mesh;
+    const material = layerMesh.material as THREE.MeshBasicMaterial;
+    expect(material.opacity).toBeCloseTo(0.25);
+    expect(material.transparent).toBe(true);
+  });
 });
 
 describe("createReconciler: add, update, remove", () => {
@@ -408,6 +485,29 @@ describe("createReconciler: add, update, remove", () => {
 
     expect(geometryDisposeSpy).toHaveBeenCalledTimes(1);
     expect(materialDisposeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconcile(null) disposes the geometry, material, and texture a satori node's own render resources own", () => {
+    const node = satori("s1") as Extract<SceneNode, { kind: "satori" }>;
+    const satoriLayerRenderRegistry = createInMemorySatoriLayerRenderRegistry();
+    satoriLayerRenderRegistry.register(computeSatoriLayerRenderKey(node, 0), {
+      rasterized: FAKE_RASTERIZED_SVG,
+    });
+    const reconciler = createReconciler({ satoriLayerRenderRegistry });
+    const rootObject = reconciler.reconcile(node, 0) as THREE.Group;
+    const layerMesh = rootObject.children[0] as THREE.Mesh;
+    const geometryDisposeSpy = vi.spyOn(layerMesh.geometry, "dispose");
+    const materialDisposeSpy = vi.spyOn(layerMesh.material as THREE.Material, "dispose");
+    const textureDisposeSpy = vi.spyOn(
+      (layerMesh.material as THREE.MeshBasicMaterial).map as THREE.Texture,
+      "dispose",
+    );
+
+    reconciler.reconcile(null, 0);
+
+    expect(geometryDisposeSpy).toHaveBeenCalledTimes(1);
+    expect(materialDisposeSpy).toHaveBeenCalledTimes(1);
+    expect(textureDisposeSpy).toHaveBeenCalledTimes(1);
   });
 });
 

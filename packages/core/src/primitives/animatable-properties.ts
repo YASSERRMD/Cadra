@@ -59,3 +59,20 @@ export const LIGHT_ANIMATABLE_PROPERTIES = [
   "color",
   "intensity",
 ] as const;
+
+/**
+ * `Satori` (`SatoriNode`) animatable props: transform, visibility, and
+ * opacity - the same shape as `VIDEO_ANIMATABLE_PROPERTIES`. `layer`,
+ * `blendMode`, `fonts`, and `elementAnimations` are deliberately excluded:
+ * `layer`/`fonts`/`blendMode` are not `Property<T>`-typed at all (changing
+ * them means a full re-render, not a per-frame resolve), and
+ * `elementAnimations`' own per-element `Property<T>` fields are resolved
+ * through a dedicated path (`resolveSatoriElementStyles`), not this
+ * dot-path-based one, since they target elements *within* `layer` rather
+ * than a field directly on the node itself.
+ */
+export const SATORI_ANIMATABLE_PROPERTIES = [
+  ...TRANSFORM_ANIMATABLE_PROPERTIES,
+  "visible",
+  "opacity",
+] as const;

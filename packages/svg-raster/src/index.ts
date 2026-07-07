@@ -23,5 +23,6 @@ export const PACKAGE_NAME = "@cadra/svg-raster";
 export type { RasterizedSvg, RasterizeSvgOptions } from "./rasterize-svg.js";
 export { rasterizeSvg } from "./rasterize-svg.js";
 export { downsamplePremultipliedRgba, unpremultiplyRgba } from "./rgba-pixel-math.js";
+export { sharedSvgRasterCache } from "./shared-svg-raster-cache.js";
 export type { SvgRasterCache } from "./svg-raster-cache.js";
 export { computeSvgRasterCacheKey, createSvgRasterCache } from "./svg-raster-cache.js";

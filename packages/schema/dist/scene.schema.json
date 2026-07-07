@@ -4338,8 +4338,1454 @@
             "children"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Unique identifier for this scene node within the project."
+            },
+            "kind": {
+              "type": "string",
+              "const": "satori",
+              "description": "Discriminant identifying this node as a Satori 2D layer."
+            },
+            "name": {
+              "description": "Optional human-readable label, purely for authoring and debugging.",
+              "type": "string"
+            },
+            "transform": {
+              "type": "object",
+              "properties": {
+                "position": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "World-space translation of the node. A plain Vector3 or a keyframe track."
+                },
+                "rotation": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "Euler rotation in radians, applied in intrinsic XYZ order. A plain Vector3 or a keyframe track."
+                },
+                "scale": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "Per-axis scale factor of the node. A plain Vector3 or a keyframe track."
+                }
+              },
+              "required": [
+                "position",
+                "rotation",
+                "scale"
+              ],
+              "additionalProperties": false,
+              "description": "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track."
+            },
+            "visible": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "boolean",
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track."
+            },
+            "layer": {
+              "description": "The root of this layer's own element tree, authored inline.",
+              "$ref": "#/$defs/__schema2"
+            },
+            "width": {
+              "type": "number",
+              "description": "This layer's own fixed rendering resolution width, in layer units (what Satori lays out and resvg rasterizes at). Not a Property<number>: changing it means a full re-render, unlike transform.scale."
+            },
+            "height": {
+              "type": "number",
+              "description": "This layer's own fixed rendering resolution height, in layer units. See width."
+            },
+            "opacity": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "number",
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Opacity this layer is composited at, 0 to 1. A plain number or a keyframe track. Defaults to 1."
+            },
+            "blendMode": {
+              "description": "How this layer's pixels combine with whatever renders beneath it. Defaults to 'normal'.",
+              "type": "string",
+              "enum": [
+                "normal",
+                "add",
+                "multiply",
+                "screen"
+              ]
+            },
+            "fonts": {
+              "description": "Every font layer's own styles reference by fontFamily. Omitted or empty is only valid when layer contains no text.",
+              "readOnly": true,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "family": {
+                    "type": "string",
+                    "description": "CSS fontFamily name this font is selected by within the layer's own styles."
+                  },
+                  "fontRef": {
+                    "type": "string",
+                    "description": "Id of a registered font asset, resolved against the same font registry TextNode.fontRef uses."
+                  },
+                  "weight": {
+                    "description": "Font weight, 100 to 900. Defaults to 400.",
+                    "type": "number"
+                  },
+                  "style": {
+                    "description": "Font style. Defaults to 'normal'.",
+                    "type": "string",
+                    "enum": [
+                      "normal",
+                      "italic"
+                    ]
+                  },
+                  "variationCoordinates": {
+                    "description": "Explicit variation coordinates for this font (e.g. { wght: 700 }). Axes not mentioned default to the font's own declared default.",
+                    "readOnly": true,
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "number"
+                    }
+                  }
+                },
+                "required": [
+                  "family",
+                  "fontRef"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "elementAnimations": {
+              "description": "Per-frame animatable overrides for individual elements within layer, keyed by each target element's own id.",
+              "readOnly": true,
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "opacity": {
+                    "description": "A plain number or a keyframe track.",
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "keyframeTrack",
+                            "description": "Discriminant identifying this value as a keyframe track."
+                          },
+                          "keyframes": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "frame": {
+                                  "type": "number",
+                                  "description": "The integer frame this keyframe's value applies at."
+                                },
+                                "value": {
+                                  "type": "number",
+                                  "description": "The value at `frame`."
+                                },
+                                "easing": {
+                                  "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                  "type": "string",
+                                  "enum": [
+                                    "linear",
+                                    "easeInCubic",
+                                    "easeOutCubic",
+                                    "easeInOutCubic",
+                                    "easeInExpo",
+                                    "easeOutExpo",
+                                    "easeInOutExpo",
+                                    "easeInBack",
+                                    "easeOutBack",
+                                    "easeInOutBack",
+                                    "easeInElastic",
+                                    "easeOutElastic",
+                                    "easeInOutElastic",
+                                    "hold"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "frame",
+                                "value"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "description": "The ordered keyframes describing how this property varies over time."
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "keyframes"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "x": {
+                    "description": "Horizontal translation added on top of the element's own natural flex-resolved position. A plain number or a keyframe track.",
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "keyframeTrack",
+                            "description": "Discriminant identifying this value as a keyframe track."
+                          },
+                          "keyframes": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "frame": {
+                                  "type": "number",
+                                  "description": "The integer frame this keyframe's value applies at."
+                                },
+                                "value": {
+                                  "type": "number",
+                                  "description": "The value at `frame`."
+                                },
+                                "easing": {
+                                  "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                  "type": "string",
+                                  "enum": [
+                                    "linear",
+                                    "easeInCubic",
+                                    "easeOutCubic",
+                                    "easeInOutCubic",
+                                    "easeInExpo",
+                                    "easeOutExpo",
+                                    "easeInOutExpo",
+                                    "easeInBack",
+                                    "easeOutBack",
+                                    "easeInOutBack",
+                                    "easeInElastic",
+                                    "easeOutElastic",
+                                    "easeInOutElastic",
+                                    "hold"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "frame",
+                                "value"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "description": "The ordered keyframes describing how this property varies over time."
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "keyframes"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "y": {
+                    "description": "Vertical translation added on top of the element's own natural flex-resolved position. A plain number or a keyframe track.",
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "keyframeTrack",
+                            "description": "Discriminant identifying this value as a keyframe track."
+                          },
+                          "keyframes": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "frame": {
+                                  "type": "number",
+                                  "description": "The integer frame this keyframe's value applies at."
+                                },
+                                "value": {
+                                  "type": "number",
+                                  "description": "The value at `frame`."
+                                },
+                                "easing": {
+                                  "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                  "type": "string",
+                                  "enum": [
+                                    "linear",
+                                    "easeInCubic",
+                                    "easeOutCubic",
+                                    "easeInOutCubic",
+                                    "easeInExpo",
+                                    "easeOutExpo",
+                                    "easeInOutExpo",
+                                    "easeInBack",
+                                    "easeOutBack",
+                                    "easeInOutBack",
+                                    "easeInElastic",
+                                    "easeOutElastic",
+                                    "easeInOutElastic",
+                                    "hold"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "frame",
+                                "value"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "description": "The ordered keyframes describing how this property varies over time."
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "keyframes"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "color": {
+                    "description": "A plain ColorRGBA or a keyframe track.",
+                    "anyOf": [
+                      {
+                        "type": "array",
+                        "prefixItems": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "description": "The red channel, in the inclusive range 0 to 1."
+                          },
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "description": "The green channel, in the inclusive range 0 to 1."
+                          },
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "description": "The blue channel, in the inclusive range 0 to 1."
+                          },
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "description": "The alpha channel, in the inclusive range 0 to 1."
+                          }
+                        ],
+                        "description": "A straight (non-premultiplied) RGBA color. Each channel is a number in the inclusive range 0 to 1, not 0 to 255."
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "keyframeTrack",
+                            "description": "Discriminant identifying this value as a keyframe track."
+                          },
+                          "keyframes": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "frame": {
+                                  "type": "number",
+                                  "description": "The integer frame this keyframe's value applies at."
+                                },
+                                "value": {
+                                  "type": "array",
+                                  "prefixItems": [
+                                    {
+                                      "type": "number",
+                                      "minimum": 0,
+                                      "maximum": 1,
+                                      "description": "The red channel, in the inclusive range 0 to 1."
+                                    },
+                                    {
+                                      "type": "number",
+                                      "minimum": 0,
+                                      "maximum": 1,
+                                      "description": "The green channel, in the inclusive range 0 to 1."
+                                    },
+                                    {
+                                      "type": "number",
+                                      "minimum": 0,
+                                      "maximum": 1,
+                                      "description": "The blue channel, in the inclusive range 0 to 1."
+                                    },
+                                    {
+                                      "type": "number",
+                                      "minimum": 0,
+                                      "maximum": 1,
+                                      "description": "The alpha channel, in the inclusive range 0 to 1."
+                                    }
+                                  ],
+                                  "description": "The value at `frame`."
+                                },
+                                "easing": {
+                                  "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                  "type": "string",
+                                  "enum": [
+                                    "linear",
+                                    "easeInCubic",
+                                    "easeOutCubic",
+                                    "easeInOutCubic",
+                                    "easeInExpo",
+                                    "easeOutExpo",
+                                    "easeInOutExpo",
+                                    "easeInBack",
+                                    "easeOutBack",
+                                    "easeInOutBack",
+                                    "easeInElastic",
+                                    "easeOutElastic",
+                                    "easeInOutElastic",
+                                    "hold"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "frame",
+                                "value"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "description": "The ordered keyframes describing how this property varies over time."
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "keyframes"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "description": "Child scene nodes nested under this node."
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "transform",
+            "visible",
+            "layer",
+            "width",
+            "height",
+            "opacity",
+            "children"
+          ],
+          "additionalProperties": false
         }
       ]
+    },
+    "__schema2": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Optional stable identifier, unique within one layer tree. A lookup key for a SatoriNode's own elementAnimations, not read by Satori itself at all.",
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "div",
+            "span",
+            "img"
+          ],
+          "description": "Which of the three supported element kinds this layer element is."
+        },
+        "style": {
+          "type": "object",
+          "properties": {
+            "display": {
+              "type": "string",
+              "enum": [
+                "flex",
+                "none"
+              ]
+            },
+            "position": {
+              "type": "string",
+              "enum": [
+                "relative",
+                "absolute",
+                "static"
+              ]
+            },
+            "top": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "right": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "bottom": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "left": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "width": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "height": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "minWidth": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "minHeight": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "maxWidth": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "maxHeight": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "margin": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "marginTop": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "marginRight": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "marginBottom": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "marginLeft": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "padding": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "paddingTop": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "paddingRight": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "paddingBottom": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "paddingLeft": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "flexDirection": {
+              "type": "string",
+              "enum": [
+                "row",
+                "row-reverse",
+                "column",
+                "column-reverse"
+              ]
+            },
+            "flexWrap": {
+              "type": "string",
+              "enum": [
+                "wrap",
+                "nowrap",
+                "wrap-reverse"
+              ]
+            },
+            "flexGrow": {
+              "type": "number"
+            },
+            "flexShrink": {
+              "type": "number"
+            },
+            "flexBasis": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "alignItems": {
+              "type": "string",
+              "enum": [
+                "stretch",
+                "center",
+                "flex-start",
+                "flex-end",
+                "baseline",
+                "normal"
+              ]
+            },
+            "alignContent": {
+              "type": "string"
+            },
+            "alignSelf": {
+              "type": "string"
+            },
+            "justifyContent": {
+              "type": "string",
+              "enum": [
+                "flex-start",
+                "flex-end",
+                "center",
+                "space-between",
+                "space-around",
+                "space-evenly"
+              ]
+            },
+            "gap": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "rowGap": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "columnGap": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "color": {
+              "type": "string"
+            },
+            "fontFamily": {
+              "type": "string"
+            },
+            "fontSize": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "fontWeight": {
+              "type": "number"
+            },
+            "fontStyle": {
+              "type": "string",
+              "enum": [
+                "normal",
+                "italic"
+              ]
+            },
+            "lineHeight": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "letterSpacing": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "textAlign": {
+              "type": "string",
+              "enum": [
+                "start",
+                "end",
+                "left",
+                "right",
+                "center",
+                "justify"
+              ]
+            },
+            "textTransform": {
+              "type": "string",
+              "enum": [
+                "none",
+                "lowercase",
+                "uppercase",
+                "capitalize"
+              ]
+            },
+            "textOverflow": {
+              "type": "string",
+              "enum": [
+                "clip",
+                "ellipsis"
+              ]
+            },
+            "textDecoration": {
+              "type": "string"
+            },
+            "whiteSpace": {
+              "type": "string",
+              "enum": [
+                "normal",
+                "pre",
+                "pre-wrap",
+                "pre-line",
+                "nowrap"
+              ]
+            },
+            "wordBreak": {
+              "type": "string",
+              "enum": [
+                "normal",
+                "break-all",
+                "break-word",
+                "keep-all"
+              ]
+            },
+            "textShadow": {
+              "type": "string"
+            },
+            "backgroundColor": {
+              "type": "string"
+            },
+            "backgroundImage": {
+              "type": "string"
+            },
+            "backgroundPosition": {
+              "type": "string"
+            },
+            "backgroundSize": {
+              "type": "string"
+            },
+            "backgroundRepeat": {
+              "type": "string",
+              "enum": [
+                "repeat",
+                "repeat-x",
+                "repeat-y",
+                "no-repeat"
+              ]
+            },
+            "border": {
+              "type": "string"
+            },
+            "borderWidth": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "borderColor": {
+              "type": "string"
+            },
+            "borderStyle": {
+              "type": "string",
+              "enum": [
+                "solid",
+                "dashed"
+              ]
+            },
+            "borderRadius": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "borderTopLeftRadius": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "borderTopRightRadius": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "borderBottomLeftRadius": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "borderBottomRightRadius": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "boxShadow": {
+              "type": "string"
+            },
+            "opacity": {
+              "type": "number"
+            },
+            "overflow": {
+              "type": "string",
+              "enum": [
+                "visible",
+                "hidden"
+              ]
+            },
+            "transform": {
+              "type": "string"
+            },
+            "transformOrigin": {
+              "type": "string"
+            },
+            "objectFit": {
+              "type": "string",
+              "enum": [
+                "fill",
+                "contain",
+                "cover",
+                "none",
+                "scale-down"
+              ]
+            },
+            "objectPosition": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "description": "A curated, typed subset of CSS restricted to exactly what Satori itself implements."
+        },
+        "children": {
+          "description": "Text content and/or nested elements, in document order. Satori paints later siblings on top of earlier ones; there is no z-index in SVG.",
+          "readOnly": true,
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/__schema2"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "src": {
+          "description": "img only: the image source, a data: URI (recommended) or an http(s):// URL.",
+          "type": "string"
+        },
+        "width": {
+          "description": "img only, in layer units.",
+          "type": "number"
+        },
+        "height": {
+          "description": "img only, in layer units.",
+          "type": "number"
+        },
+        "lang": {
+          "description": "BCP-47-ish language tag forcing which locale-specific font/shaping Satori uses.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
     }
   }
 }

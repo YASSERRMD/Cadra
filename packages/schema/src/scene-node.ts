@@ -6,6 +6,9 @@ import type {
   LightNode,
   LightType,
   MeshNode,
+  SatoriElementKeyframes,
+  SatoriLayerFontRef,
+  SatoriNode,
   SceneNode,
   SceneNodeKind,
   TextNode,
@@ -17,6 +20,7 @@ import type {
 import { z } from "zod";
 
 import { propertySchema } from "./keyframes.js";
+import { layerElementSchema } from "./layer-element.js";
 import { animatableTransformSchema, colorRgbaSchema, vector3Schema } from "./primitives.js";
 
 /**
@@ -58,7 +62,7 @@ type AssertTrue<T extends true> = T;
 
 /** Every kind of node the scene graph can represent, mirroring `SceneNodeKind`. */
 export const sceneNodeKindSchema = z
-  .enum(["group", "mesh", "camera", "light", "text", "image", "video", "compositionRef"])
+  .enum(["group", "mesh", "camera", "light", "text", "image", "video", "compositionRef", "satori"])
   .describe("Which of the fixed set of scene node kinds this node is.");
 
 type _CheckSceneNodeKind = AssertTrue<
@@ -461,10 +465,130 @@ type _CheckCompositionRefNode = AssertTrue<
   AssertEqual<z.infer<typeof compositionRefNodeSchema>, CompositionRefNode>
 >;
 
+/** One font a Satori layer's own styles can select via CSS `fontFamily`, mirroring `SatoriLayerFontRef`. */
+export const satoriLayerFontRefSchema = z.strictObject({
+  family: z.string().describe("CSS fontFamily name this font is selected by within the layer's own styles."),
+  fontRef: z
+    .string()
+    .describe(
+      "Id of a registered font asset, resolved against the same font registry TextNode.fontRef uses.",
+    ),
+  weight: z.number().optional().describe("Font weight, 100 to 900. Defaults to 400."),
+  style: z.enum(["normal", "italic"]).optional().describe("Font style. Defaults to 'normal'."),
+  variationCoordinates: z
+    .record(z.string(), z.number())
+    .readonly()
+    .optional()
+    .describe(
+      "Explicit variation coordinates for this font (e.g. { wght: 700 }). Axes not mentioned " +
+        "default to the font's own declared default.",
+    ),
+});
+
+type _CheckSatoriLayerFontRef = AssertTrue<
+  AssertEqual<z.infer<typeof satoriLayerFontRefSchema>, SatoriLayerFontRef>
+>;
+
+/**
+ * Per-frame animatable overrides for one element within a Satori layer's own
+ * tree, mirroring `SatoriElementKeyframes`. Each field accepts either a
+ * plain value or a keyframe track, via `propertySchema` (mirroring
+ * `Property<T>`), same as every other keyframeable field on any node kind.
+ */
+export const satoriElementKeyframesSchema = z.strictObject({
+  opacity: propertySchema(z.number()).optional().describe("A plain number or a keyframe track."),
+  x: propertySchema(z.number())
+    .optional()
+    .describe(
+      "Horizontal translation added on top of the element's own natural flex-resolved " +
+        "position. A plain number or a keyframe track.",
+    ),
+  y: propertySchema(z.number())
+    .optional()
+    .describe(
+      "Vertical translation added on top of the element's own natural flex-resolved " +
+        "position. A plain number or a keyframe track.",
+    ),
+  color: propertySchema(colorRgbaSchema).optional().describe("A plain ColorRGBA or a keyframe track."),
+});
+
+type _CheckSatoriElementKeyframes = AssertTrue<
+  AssertEqual<z.infer<typeof satoriElementKeyframesSchema>, SatoriElementKeyframes>
+>;
+
+/**
+ * A Satori-rendered 2D layer placed as a textured plane, mirroring
+ * `SatoriNode` in `@cadra/core`. `layer` is this node's own inline content
+ * (like `TextNode.content`), validated against `layerElementSchema`
+ * (`layer-element.ts`) - Phase 48's own "validate the layer spec in the
+ * schema with clear diagnostics" requirement.
+ *
+ * `opacity` accepts either a plain value or a keyframe track, via
+ * `propertySchema` (mirroring `Property<number>` on `SatoriNode`), same as
+ * `videoNodeSchema.opacity`. `blendMode` reuses `videoBlendModeSchema`
+ * directly rather than declaring a duplicate: `SatoriBlendMode` is a plain
+ * alias of `VideoBlendMode` in `@cadra/core`, so there is only one real
+ * mode enum to validate against.
+ */
+export const satoriNodeSchema = z.strictObject({
+  id: z.string().describe("Unique identifier for this scene node within the project."),
+  kind: z.literal("satori").describe("Discriminant identifying this node as a Satori 2D layer."),
+  name: z
+    .string()
+    .optional()
+    .describe("Optional human-readable label, purely for authoring and debugging."),
+  transform: animatableTransformSchema.describe(
+    "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track.",
+  ),
+  visible: propertySchema(z.boolean()).describe(
+    "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track.",
+  ),
+  layer: layerElementSchema.describe("The root of this layer's own element tree, authored inline."),
+  width: z
+    .number()
+    .describe(
+      "This layer's own fixed rendering resolution width, in layer units (what Satori lays out " +
+        "and resvg rasterizes at). Not a Property<number>: changing it means a full re-render, " +
+        "unlike transform.scale.",
+    ),
+  height: z
+    .number()
+    .describe("This layer's own fixed rendering resolution height, in layer units. See width."),
+  opacity: propertySchema(z.number()).describe(
+    "Opacity this layer is composited at, 0 to 1. A plain number or a keyframe track. Defaults to 1.",
+  ),
+  blendMode: videoBlendModeSchema
+    .optional()
+    .describe(
+      "How this layer's pixels combine with whatever renders beneath it. Defaults to 'normal'.",
+    ),
+  fonts: z
+    .array(satoriLayerFontRefSchema)
+    .readonly()
+    .optional()
+    .describe(
+      "Every font layer's own styles reference by fontFamily. Omitted or empty is only valid " +
+        "when layer contains no text.",
+    ),
+  elementAnimations: z
+    .record(z.string(), satoriElementKeyframesSchema)
+    .readonly()
+    .optional()
+    .describe(
+      "Per-frame animatable overrides for individual elements within layer, keyed by each " +
+        "target element's own id.",
+    ),
+  get children(): z.ZodArray<typeof sceneNodeSchema> {
+    return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
+  },
+});
+
+type _CheckSatoriNode = AssertTrue<AssertEqual<z.infer<typeof satoriNodeSchema>, SatoriNode>>;
+
 /**
  * A node in the scene graph, discriminated on `kind`. Mirrors the `SceneNode`
  * union in `@cadra/core` exactly: every variant is a strict, closed shape,
- * and an object whose `kind` does not match one of the eight known literals
+ * and an object whose `kind` does not match one of the nine known literals
  * is rejected rather than coerced into the closest variant.
  */
 export const sceneNodeSchema: z.ZodDiscriminatedUnion<
@@ -477,6 +601,7 @@ export const sceneNodeSchema: z.ZodDiscriminatedUnion<
     typeof imageNodeSchema,
     typeof videoNodeSchema,
     typeof compositionRefNodeSchema,
+    typeof satoriNodeSchema,
   ]
 > = z.discriminatedUnion("kind", [
   groupNodeSchema,
@@ -487,6 +612,7 @@ export const sceneNodeSchema: z.ZodDiscriminatedUnion<
   imageNodeSchema,
   videoNodeSchema,
   compositionRefNodeSchema,
+  satoriNodeSchema,
 ]);
 
 type _CheckSceneNode = AssertTrue<AssertEqual<z.infer<typeof sceneNodeSchema>, SceneNode>>;

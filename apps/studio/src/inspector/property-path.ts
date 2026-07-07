@@ -75,6 +75,11 @@ export function getPropertyAtPath(node: SceneNode, path: string): AnyPropertyVal
         return node.opacity;
       }
       break;
+    case "satori":
+      if (path === "opacity") {
+        return node.opacity;
+      }
+      break;
     case "camera":
       if (path === "target") {
         return node.target;
@@ -142,6 +147,11 @@ export function setPropertyAtPath(node: SceneNode, path: string, value: AnyPrope
       }
       break;
     case "video":
+      if (path === "opacity") {
+        return { ...node, opacity: value as Property<number> };
+      }
+      break;
+    case "satori":
       if (path === "opacity") {
         return { ...node, opacity: value as Property<number> };
       }

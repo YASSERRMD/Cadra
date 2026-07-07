@@ -1,6 +1,7 @@
 import type { SceneNode, SceneNodeKind } from "@cadra/core";
 import type * as THREE from "three";
 
+import type { SatoriLayerRenderRegistry } from "../svg-layer/satori-layer-render-registry.js";
 import type { TextRenderRegistry } from "../text/text-render-registry.js";
 import {
   applyNodeProperties,
@@ -25,14 +26,16 @@ interface ReconciledEntry {
 /**
  * Dependencies a `Reconciler` resolves node references against.
  * `geometryRegistry`/`materialRegistry` are optional; omitted, they default
- * to the small in-memory seed set in `registries.ts`. `textRenderRegistry`
- * is also optional; omitted, every `text` node renders as an empty group
- * (see `node-factory.ts`'s `buildTextObject`).
+ * to the small in-memory seed set in `registries.ts`. `textRenderRegistry`/
+ * `satoriLayerRenderRegistry` are also optional; omitted, every `text`/
+ * `satori` node renders as an empty group (see `node-factory.ts`'s
+ * `buildTextObject`/`buildThreeObject`'s own `"satori"` case).
  */
 export interface ReconcilerOptions {
   geometryRegistry?: GeometryRegistry;
   materialRegistry?: MaterialRegistry;
   textRenderRegistry?: TextRenderRegistry;
+  satoriLayerRenderRegistry?: SatoriLayerRenderRegistry;
 }
 
 /**
@@ -70,6 +73,9 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
     geometryRegistry: options.geometryRegistry ?? createDefaultGeometryRegistry(),
     materialRegistry: options.materialRegistry ?? createDefaultMaterialRegistry(),
     ...(options.textRenderRegistry !== undefined && { textRenderRegistry: options.textRenderRegistry }),
+    ...(options.satoriLayerRenderRegistry !== undefined && {
+      satoriLayerRenderRegistry: options.satoriLayerRenderRegistry,
+    }),
   };
 
   const entries = new Map<string, ReconciledEntry>();
@@ -249,6 +255,11 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
       for (const texture of entry.owned.text.textures) {
         texture.dispose();
       }
+    }
+    if (entry.owned?.satori !== undefined) {
+      entry.owned.satori.geometry.dispose();
+      entry.owned.satori.material?.dispose();
+      entry.owned.satori.texture?.dispose();
     }
   }
 

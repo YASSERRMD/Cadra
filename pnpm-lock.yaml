@@ -279,6 +279,9 @@ importers:
       '@cadra/core':
         specifier: workspace:*
         version: link:../core
+      '@cadra/satori-layer':
+        specifier: workspace:*
+        version: link:../satori-layer
       '@cadra/svg-raster':
         specifier: workspace:*
         version: link:../svg-raster

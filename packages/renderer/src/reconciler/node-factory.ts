@@ -6,11 +6,18 @@ import {
   resolveColorProperty,
   resolveNumberProperty,
   resolveVector3Property,
+  type SatoriBlendMode,
+  type SatoriNode,
   type SceneNode,
   type TextNode,
 } from "@cadra/core";
 import * as THREE from "three";
 
+import { createSvgTexture } from "../svg-layer/create-svg-texture.js";
+import {
+  computeSatoriLayerRenderKey,
+  type SatoriLayerRenderRegistry,
+} from "../svg-layer/satori-layer-render-registry.js";
 import { buildTextGroup, type TextGroupResources } from "../text/build-text-group.js";
 import { computeTextNodeRenderKey, type TextRenderRegistry } from "../text/text-render-registry.js";
 import type { GeometryRegistry, MaterialRegistry } from "./registries.js";
@@ -56,18 +63,41 @@ const DEFAULT_MESH_GEOMETRY = new THREE.BoxGeometry(0.5, 0.5, 0.5);
 const DEFAULT_MESH_MATERIAL = new THREE.MeshStandardMaterial({ color: 0x999999 });
 
 /**
- * Dependencies the node factory needs to build/update `mesh` and `text`
- * nodes. Kept as one bag so `createThreeObject`/`applyNodeProperties` share
- * a single signature regardless of node kind. `textRenderRegistry` is
- * optional (omitting it renders every `text` node as an empty group, the
- * same "asset not ready" fallback `image`/`video` placeholders are still
- * waiting on their own asset pipeline wiring to outgrow) so every existing
- * caller that never touches text keeps compiling unchanged.
+ * Dependencies the node factory needs to build/update `mesh`, `text`, and
+ * `satori` nodes. Kept as one bag so `createThreeObject`/`applyNodeProperties`
+ * share a single signature regardless of node kind. `textRenderRegistry`/
+ * `satoriLayerRenderRegistry` are both optional (omitting either renders
+ * every node of that kind as an empty group, the same "asset not ready"
+ * fallback `image`/`video` placeholders are still waiting on their own
+ * asset pipeline wiring to outgrow) so every existing caller that never
+ * touches text or Satori layers keeps compiling unchanged.
  */
 export interface NodeFactoryContext {
   geometryRegistry: GeometryRegistry;
   materialRegistry: MaterialRegistry;
   textRenderRegistry?: TextRenderRegistry;
+  satoriLayerRenderRegistry?: SatoriLayerRenderRegistry;
+}
+
+/**
+ * A `satori` node's own owned resources: a stable outer `group` (the
+ * node's own `object3D`, never swapped) holding at most one `mesh`, built
+ * lazily once a `SatoriLayerRenderEntry` first resolves and then swapped
+ * (not rebuilt from scratch) whenever a later frame resolves to a
+ * different one - `geometry` is the one exception, sized once from
+ * `SatoriNode.width`/`height` (fixed, non-`Property<T>` fields; see that
+ * type's own doc for why) and reused across every texture swap, since
+ * only the pixels themselves ever change from frame to frame, never the
+ * plane's own dimensions.
+ */
+export interface SatoriLayerResources {
+  group: THREE.Group;
+  geometry: THREE.PlaneGeometry;
+  mesh?: THREE.Mesh;
+  material?: THREE.Material;
+  texture?: THREE.Texture;
+  /** The `computeSatoriLayerRenderKey` this node's current `mesh`/`material`/`texture` were last built from, so `applyNodeProperties` only rebuilds them when a new frame actually resolves to different pixels, not on every single frame. */
+  lastRenderKey?: string;
 }
 
 /**
@@ -92,6 +122,8 @@ export interface OwnedResources {
    * geometry.
    */
   text?: TextGroupResources;
+  /** A `satori` node's own owned resources; see `SatoriLayerResources`'s own doc. */
+  satori?: SatoriLayerResources;
 }
 
 /** The result of building a fresh Three.js object for a node: the object plus what it owns. */
@@ -167,6 +199,21 @@ function buildThreeObject(node: SceneNode, ctx: NodeFactoryContext): BuiltObject
       });
       const mesh = new THREE.Mesh(PLACEHOLDER_PLANE_GEOMETRY, material);
       return { object3D: mesh, owned: { material } };
+    }
+
+    case "satori": {
+      // The real mesh/material/texture are built lazily, in
+      // applyNodeProperties, once a SatoriLayerRenderEntry first resolves
+      // (mirroring text's own "empty group until ready" fallback) - unlike
+      // text, that first resolve is not guaranteed to happen at this node's
+      // very first applyNodeProperties call in isolation from frame, since
+      // a satori node's own rendered pixels can genuinely vary by frame
+      // (elementAnimations), so there is no single "frame 0 only" moment to
+      // special-case the way text's own extrudeDepth is. geometry is
+      // built once here regardless, since width/height are fixed fields.
+      const group = new THREE.Group();
+      const geometry = new THREE.PlaneGeometry(node.width, node.height);
+      return { object3D: group, owned: { satori: { group, geometry } } };
     }
   }
 }
@@ -295,6 +342,11 @@ export function applyNodeProperties(
       );
       return;
     }
+
+    case "satori": {
+      applySatoriLayerProperties(node, ctx, frame, owned?.satori);
+      return;
+    }
   }
 }
 
@@ -350,4 +402,87 @@ function colorToRgbTuple(
   color: readonly [number, number, number, number],
 ): [number, number, number] {
   return [color[0], color[1], color[2]];
+}
+
+/**
+ * Applies this frame's resolved state onto a `satori` node's own owned
+ * resources: rebuilds its `mesh`/`material`/`texture` only when
+ * `computeSatoriLayerRenderKey` actually changed since the last frame (a
+ * static layer, or one whose `elementAnimations` currently hold at a
+ * constant value, resolves to the exact same key every frame, so this
+ * never rebuilds anything for it), then applies `opacity` and `blendMode`
+ * every frame regardless (both are cheap to update in place and, for
+ * `opacity`, itself a genuine `Property<number>` independent of whether the
+ * underlying pixels changed at all this frame).
+ *
+ * No-ops entirely when `resources` is `undefined` (this reconciler was not
+ * given `satoriLayerRenderRegistry`-owned resources for this node at all,
+ * which should not happen for a real `satori` node built by this same
+ * module's own `buildThreeObject`, but mirrors this file's existing
+ * defensive style elsewhere rather than assuming it).
+ */
+function applySatoriLayerProperties(
+  node: SatoriNode,
+  ctx: NodeFactoryContext,
+  frame: number,
+  resources: SatoriLayerResources | undefined,
+): void {
+  if (resources === undefined) {
+    return;
+  }
+
+  const renderKey = computeSatoriLayerRenderKey(node, frame);
+  const entry = ctx.satoriLayerRenderRegistry?.resolve(renderKey);
+  if (entry !== undefined && resources.lastRenderKey !== renderKey) {
+    resources.texture?.dispose();
+    resources.material?.dispose();
+
+    const texture = createSvgTexture(entry.rasterized);
+    const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
+    if (resources.mesh === undefined) {
+      resources.mesh = new THREE.Mesh(resources.geometry, material);
+      resources.group.add(resources.mesh);
+    } else {
+      resources.mesh.material = material;
+    }
+    resources.texture = texture;
+    resources.material = material;
+    resources.lastRenderKey = renderKey;
+  }
+
+  if (resources.material instanceof THREE.MeshBasicMaterial) {
+    resources.material.opacity = resolveNumberProperty(node.opacity, frame);
+    applySatoriBlendMode(resources.material, node.blendMode);
+  }
+}
+
+/**
+ * Sets a material's Three.js blending mode to match a `SatoriBlendMode`.
+ * `'normal'`/`'add'`/`'multiply'` map directly to Three.js's own built-in
+ * blending constants; `'screen'` has no built-in equivalent, so it is
+ * expressed via `CustomBlending` with explicit factors implementing the
+ * real screen-blend formula `result = src + dst - src * dst`: with the
+ * `AddEquation` (`result = src * srcFactor + dst * dstFactor`),
+ * `srcFactor = 1 - dst` (`OneMinusDstColorFactor`) and `dstFactor = 1`
+ * (`OneFactor`) gives `src * (1 - dst) + dst * 1 = src + dst - src * dst`,
+ * exactly that formula.
+ */
+function applySatoriBlendMode(material: THREE.Material, blendMode: SatoriBlendMode | undefined): void {
+  switch (blendMode ?? "normal") {
+    case "normal":
+      material.blending = THREE.NormalBlending;
+      return;
+    case "add":
+      material.blending = THREE.AdditiveBlending;
+      return;
+    case "multiply":
+      material.blending = THREE.MultiplyBlending;
+      return;
+    case "screen":
+      material.blending = THREE.CustomBlending;
+      material.blendEquation = THREE.AddEquation;
+      material.blendSrc = THREE.OneMinusDstColorFactor;
+      material.blendDst = THREE.OneFactor;
+      return;
+  }
 }
