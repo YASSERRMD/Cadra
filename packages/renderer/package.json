@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@cadra/core": "workspace:*",
+    "@cadra/svg-raster": "workspace:*",
     "@cadra/text": "workspace:*",
     "three": "^0.185.1"
   },
