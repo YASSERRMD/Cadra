@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   Camera,
+  createTextToSceneAdapter,
+  extractJsonFromLlmResponse,
   Image,
   Light,
   PACKAGE_NAME,
@@ -40,6 +42,11 @@ describe("@cadra/agent-sdk barrel: every public entry point is reachable from th
   it("exports both typed error classes", () => {
     expect(SceneBuildError).toBeInstanceOf(Function);
     expect(SceneBuilderUsageError).toBeInstanceOf(Function);
+  });
+
+  it("exports the Phase 32 text-to-scene entry points", () => {
+    expect(typeof createTextToSceneAdapter).toBe("function");
+    expect(typeof extractJsonFromLlmResponse).toBe("function");
   });
 
   it("builds a minimal document end to end using only barrel imports", () => {

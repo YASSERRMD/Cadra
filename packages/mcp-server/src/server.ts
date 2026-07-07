@@ -6,16 +6,19 @@
  * (`render_scene`, `get_render_status`, `get_render_output`), the Phase 30
  * asset tools (`upload_asset`, `list_assets`), the Phase 31 `repair_scene`
  * tool (applies every safe, automatically-derivable fix a scene's current
- * diagnostics carry), and one minimal diagnostic tool.
+ * diagnostics carry), the Phase 32 `generate_scene_from_text` tool (turns a
+ * natural-language brief into a validated, persisted scene via an LLM), and
+ * one minimal diagnostic tool.
  *
- * This closes the loop from prompt to finished video: an agent can create a
- * scene, upload assets and reference them by ref in a scene patch, render the
- * scene (`render_scene` submits the job to `@cadra/encode`'s Phase 25
- * orchestrator and returns immediately with a job id), poll progress
- * (`get_render_status`), and fetch the finished file's reference once done
- * (`get_render_output`). See `./render-store.ts`/`./asset-store.ts` for the
- * workspace/output sandboxing these tools apply, mirroring `scene-store.ts`'s
- * own allow-list-plus-resolved-path-check discipline.
+ * This closes the loop from prompt to finished video: an agent can generate
+ * or create a scene, upload assets and reference them by ref in a scene
+ * patch, render the scene (`render_scene` submits the job to
+ * `@cadra/encode`'s Phase 25 orchestrator and returns immediately with a job
+ * id), poll progress (`get_render_status`), and fetch the finished file's
+ * reference once done (`get_render_output`). See
+ * `./render-store.ts`/`./asset-store.ts` for the workspace/output sandboxing
+ * these tools apply, mirroring `scene-store.ts`'s own
+ * allow-list-plus-resolved-path-check discipline.
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -29,6 +32,7 @@ import { createLogger } from "./logger.js";
 import { registerCadraRenderTools } from "./render-tools.js";
 import { registerCadraRepairSceneTool } from "./repair-scene-tools.js";
 import { registerCadraSceneTools } from "./scene-tools.js";
+import { registerCadraTextToSceneTools, type RegisterCadraTextToSceneToolsOptions } from "./text-to-scene-tools.js";
 
 /** `Implementation.name` this server advertises during the MCP handshake. */
 export const SERVER_NAME = "cadra-mcp-server";
@@ -45,6 +49,13 @@ export interface CreateCadraMcpServerOptions {
   config?: CadraMcpServerConfigInput;
   /** Logger to use; defaults to a stderr-only {@link createLogger} rooted at `"mcp-server"`. Always writes to stderr regardless of which transport is later attached (see `./logger.ts`'s doc for why this is unconditional). */
   logger?: Logger;
+  /**
+   * Options forwarded to {@link registerCadraTextToSceneTools}, chiefly its
+   * `adapterFactory` override. Always supply a fake `adapterFactory` here in
+   * tests (see that module's own doc): the real default talks to a paid LLM
+   * API, which no test in this codebase may ever actually call.
+   */
+  textToScene?: RegisterCadraTextToSceneToolsOptions;
 }
 
 /** An `McpServer` plus the resolved configuration and logger it was built with, so a caller (e.g. the stdio/HTTP entrypoints) can log/introspect without re-deriving either. */
@@ -79,12 +90,13 @@ export function createCadraMcpServer(options: CreateCadraMcpServerOptions = {}):
         logging: {},
       },
       instructions:
-        "Cadra exposes a code-first, agent-first 3D video animation scene format. Read the cadra://contract resource for the full JSON Schema, capability manifest, and example scene documents. Use create_scene, get_scene, update_scene, validate_scene, and list_scenes to author and query scene documents persisted in this server's workspace. Use upload_asset to store an image/video/audio/font/glTF asset (by URL or by raw base64 bytes) and get back a cadra-asset:// ref usable in a scene node's assetRef field, and list_assets to see everything already stored. Use render_scene to render a scene's composition to a video file (returns a job id immediately), get_render_status to poll that job's progress, and get_render_output to fetch a reference to the finished file once the job is done. If a write is rejected, its diagnostics may carry a suggestedPatch; call repair_scene to automatically apply every safe one and re-validate, or fix the remaining diagnostics manually via update_scene.",
+        "Cadra exposes a code-first, agent-first 3D video animation scene format. Read the cadra://contract resource for the full JSON Schema, capability manifest, and example scene documents. Use create_scene, get_scene, update_scene, validate_scene, and list_scenes to author and query scene documents persisted in this server's workspace. Use generate_scene_from_text to generate a scene straight from a natural-language brief via an LLM, persisting the result the same way create_scene does; it self-corrects on an invalid first draft and returns its final diagnostics if every attempt fails. Use upload_asset to store an image/video/audio/font/glTF asset (by URL or by raw base64 bytes) and get back a cadra-asset:// ref usable in a scene node's assetRef field, and list_assets to see everything already stored. Use render_scene to render a scene's composition to a video file (returns a job id immediately), get_render_status to poll that job's progress, and get_render_output to fetch a reference to the finished file once the job is done. If a write is rejected, its diagnostics may carry a suggestedPatch; call repair_scene to automatically apply every safe one and re-validate, or fix the remaining diagnostics manually via update_scene.",
     },
   );
 
   registerCadraContractResource(server);
   registerCadraSceneTools(server, config, logger);
+  registerCadraTextToSceneTools(server, config, logger, options.textToScene);
   registerCadraAssetTools(server, config, logger);
   registerCadraRenderTools(server, config, logger);
   registerCadraRepairSceneTool(server, config.workspaceRoot, logger);

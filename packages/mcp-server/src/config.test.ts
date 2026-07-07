@@ -91,4 +91,13 @@ describe("resolveCadraMcpServerConfig", () => {
 
     expect(config.providerKeys).toEqual({ luma: "luma-key" });
   });
+
+  it("reads CADRA_PROVIDER_KEY_ANTHROPIC into providerKeys.anthropic, exactly like any other provider (Phase 32's first real consumer of this bag)", () => {
+    const config = resolveCadraMcpServerConfig(
+      {},
+      fakeEnv({ [`${PROVIDER_KEY_ENV_VAR_PREFIX}ANTHROPIC`]: "anthropic-key" }),
+    );
+
+    expect(config.providerKeys).toEqual({ anthropic: "anthropic-key" });
+  });
 });

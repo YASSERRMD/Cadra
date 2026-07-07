@@ -23,6 +23,7 @@
     "lint": "eslint src"
   },
   "dependencies": {
+    "@cadra/agent-sdk": "workspace:*",
     "@cadra/core": "workspace:*",
     "@cadra/encode": "workspace:*",
     "@cadra/headless": "workspace:*",

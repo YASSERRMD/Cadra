@@ -18,12 +18,20 @@
  * reference to the finished file once done; `upload_asset` stores an asset
  * (by URL or by raw base64 bytes) content-addressed under the workspace and
  * returns a `cadra-asset://<hash>` ref usable directly in a scene node's
- * `assetRef` field, and `list_assets` lists everything stored. A single
- * minimal `ping` diagnostic tool remains registered alongside them all.
+ * `assetRef` field, and `list_assets` lists everything stored. Phase 32 adds
+ * `generate_scene_from_text`: turns a natural-language brief (plus optional
+ * duration/fps/size constraints) into a validated scene document via an LLM
+ * (`@cadra/agent-sdk`'s `TextToScene` adapter, self-correcting on an invalid
+ * first draft by re-prompting with the exact validation diagnostics found),
+ * persisting the result under the workspace exactly like `create_scene`
+ * does. This is `providerKeys` in `./config.ts`'s first real consumer:
+ * `providerKeys.anthropic`, if set, is used as the API key for this tool's
+ * default `@anthropic-ai/sdk`-backed adapter. A single minimal `ping`
+ * diagnostic tool remains registered alongside them all.
  *
- * Scope boundary: `providerKeys` in `./config.ts` remains a typed, unwired
- * placeholder ahead of Phase 34's actual generative-video provider
- * integrations.
+ * Scope boundary: every other `providerKeys` entry (Veo, Runway, Kling,
+ * Luma, Pika) remains a typed, unwired placeholder ahead of Phase 34's
+ * actual generative-video provider integrations.
  *
  * Entry points:
  *   - `createCadraMcpServer` (`./server.ts`): builds an `McpServer` with no
@@ -128,3 +136,13 @@ export type { CadraMcpServer, CreateCadraMcpServerOptions } from "./server.js";
 export { createCadraMcpServer, PING_TOOL_NAME, SERVER_NAME, SERVER_VERSION } from "./server.js";
 export type { CadraMcpStdioServer } from "./stdio.js";
 export { connectCadraMcpServerStdio } from "./stdio.js";
+export type {
+  RegisterCadraTextToSceneToolsOptions,
+  TextToSceneAdapterFactory,
+  TextToSceneAdapterFactoryOptions,
+} from "./text-to-scene-tools.js";
+export {
+  createDefaultTextToSceneAdapter,
+  GENERATE_SCENE_FROM_TEXT_TOOL_NAME,
+  registerCadraTextToSceneTools,
+} from "./text-to-scene-tools.js";
