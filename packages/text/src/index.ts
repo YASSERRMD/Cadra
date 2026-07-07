@@ -32,6 +32,13 @@
  * atlas, so text stays crisp under arbitrary 2D or 3D scale.
  * `createMsdfAtlasCache` content-hashes a request (font, glyph set,
  * options) so the same glyphs are only ever generated once.
+ *
+ * Phase 44: renderer-agnostic glyph layout. `prepareTextRenderData`
+ * combines shaping, atlas generation, and `computeGlyphLayout` into the
+ * one call a 3D (or 2D) renderer needs: every glyph's em-space quad
+ * (world-independent - a renderer multiplies by its own `fontSize` to get
+ * world units, so geometry never needs rebuilding just because `fontSize`
+ * animates), atlas UV rectangle, and line/word grouping.
  */
 
 export const VERSION = "0.0.0";
@@ -52,6 +59,10 @@ export type { FontRegistration, FontRegistry, FontRegistryOptions } from "./font
 export { createFontRegistry } from "./font-registry.js";
 export type { FontSubsetOptions } from "./font-subset.js";
 export { codePointSetKey, subsetFontToCodePoints } from "./font-subset.js";
+export type { GlyphLayoutOptions, GlyphLayoutResult, PositionedGlyph } from "./glyph-layout.js";
+export { computeGlyphLayout } from "./glyph-layout.js";
+export type { GlyphPathCommand } from "./glyph-path.js";
+export { getGlyphPathCommands } from "./glyph-path.js";
 export type { ShapeRunOptions } from "./harfbuzz-shaping.js";
 export { shapeRun } from "./harfbuzz-shaping.js";
 export type {
@@ -75,6 +86,8 @@ export {
 export type { ShapeTextOptions } from "./shape-text.js";
 export { shapeText } from "./shape-text.js";
 export type { ShapedGlyph, ShapedTextRun } from "./shaped-run.js";
+export type { PrepareTextRenderDataOptions, TextRenderData } from "./text-render-data.js";
+export { computeTextRenderCacheKey, prepareTextRenderData } from "./text-render-data.js";
 export type { NamedInstance, VariationAxis } from "./variable-font.js";
 export { clampToAxisRange, findNamedInstance } from "./variable-font.js";
 export { reorderRunsToVisualOrder } from "./visual-run-order.js";
