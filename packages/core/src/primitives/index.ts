@@ -2,6 +2,7 @@ export {
   CAMERA_ANIMATABLE_PROPERTIES,
   IMAGE_ANIMATABLE_PROPERTIES,
   LIGHT_ANIMATABLE_PROPERTIES,
+  SATORI_ANIMATABLE_PROPERTIES,
   SHAPE_ANIMATABLE_PROPERTIES,
   TEXT_ANIMATABLE_PROPERTIES,
   VIDEO_ANIMATABLE_PROPERTIES,
@@ -14,6 +15,10 @@ export type { ImageProps } from "./image.js";
 export { Image } from "./image.js";
 export type { LightProps } from "./light.js";
 export { Light } from "./light.js";
+export type { SatoriProps } from "./satori.js";
+export { Satori } from "./satori.js";
+export type { ResolvedSatoriElementStyle } from "./satori-element-animation.js";
+export { resolveSatoriElementStyles } from "./satori-element-animation.js";
 export type {
   SequenceFrameResolution,
   SequenceProps,
