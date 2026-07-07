@@ -113,6 +113,7 @@ function resolveComposition(
     height: composition.height,
     layers: pending.map((layer, index) => ({ ...layer, zIndex: index })),
     ...(activeCameraNodeId !== undefined && { activeCameraNodeId }),
+    ...(composition.colorGrading !== undefined && { colorGrading: composition.colorGrading }),
   };
 }
 

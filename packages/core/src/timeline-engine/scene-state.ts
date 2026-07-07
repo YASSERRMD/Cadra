@@ -1,4 +1,5 @@
 import type { SceneNode } from "../scene-graph/scene-node.js";
+import type { CompositionColorGrading } from "../scene-graph/timeline.js";
 
 /**
  * One resolved, positioned piece of content contributed by a single `Clip` at
@@ -77,4 +78,6 @@ export interface SceneState {
    * modeled as an error here.
    */
   activeCameraNodeId?: string;
+  /** This composition's own `Composition.colorGrading`, unchanged. `undefined` when the composition has none, i.e. a neutral grade. */
+  colorGrading?: CompositionColorGrading;
 }

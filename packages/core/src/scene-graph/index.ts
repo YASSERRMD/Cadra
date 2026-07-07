@@ -51,6 +51,7 @@ export type {
   AudioTrack,
   Clip,
   Composition,
+  CompositionColorGrading,
   Project,
   Track,
   Transition,

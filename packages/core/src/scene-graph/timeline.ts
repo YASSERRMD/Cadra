@@ -165,6 +165,45 @@ export interface Composition {
    * before Phase 16. See `AudioTrack`/`AudioClip`.
    */
   audioTracks?: AudioTrack[];
+  /**
+   * A whole-composition color grade (exposure and white balance), applied
+   * on top of this composition's own linear-light render, before tone
+   * mapping. Fixed for the composition's entire length rather than
+   * `Property<T>`-animatable: every other field on `Composition` itself
+   * (`fps`/`width`/`height`/`durationInFrames`) is likewise a one-time
+   * setting, not something that varies frame to frame. Omitted means a
+   * neutral grade (0 exposure stops, 6500K/no tint white balance - a
+   * no-op).
+   */
+  colorGrading?: CompositionColorGrading;
+}
+
+/**
+ * A whole-composition color grade. See `Composition.colorGrading`'s own
+ * doc for why this is a fixed, non-`Property<T>` setting.
+ */
+export interface CompositionColorGrading {
+  /**
+   * In photographic stops: each `+1` doubles the render's own brightness
+   * before tone mapping, each `-1` halves it, matching a real camera's own
+   * exposure compensation dial. Defaults to `0` (no adjustment).
+   */
+  exposureStops?: number;
+  /**
+   * The correlated color temperature, in Kelvin, this composition's own
+   * scene illuminant is assumed to be, which the render is corrected
+   * toward appearing neutral under (see `computeWhiteBalanceGain`).
+   * Defaults to `6500` (standard daylight, the sRGB/D65 reference white -
+   * approximately, not exactly, this correction's own true no-op point;
+   * see `computeWhiteBalanceGain`'s own doc).
+   */
+  whiteBalanceTemperatureK?: number;
+  /**
+   * A green-magenta fine adjustment on top of `whiteBalanceTemperatureK`,
+   * roughly `-1` (green) to `1` (magenta). Defaults to `0` (no tint
+   * correction).
+   */
+  whiteBalanceTint?: number;
 }
 
 /** The top-level authoring unit: a named collection of compositions. */

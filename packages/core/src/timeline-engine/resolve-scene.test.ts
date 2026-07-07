@@ -791,3 +791,51 @@ describe("resolveSceneAtFrame: activeCameraNodeId resolution", () => {
     expect(state.activeCameraNodeId).toBeUndefined();
   });
 });
+
+describe("resolveSceneAtFrame: colorGrading passthrough", () => {
+  it("carries the composition's own colorGrading through unchanged", () => {
+    const shape = Shape({ id: "graded-shape" });
+    const colorGrading = { exposureStops: 0.5, whiteBalanceTemperatureK: 5000, whiteBalanceTint: -0.2 };
+    const composition = createComposition({
+      id: "comp-graded",
+      name: "Graded",
+      fps: 30,
+      durationInFrames: 30,
+      width: 100,
+      height: 100,
+      tracks: [
+        {
+          id: "track-content",
+          clips: [Sequence({ id: "clip-content", from: 0, durationInFrames: 30, content: shape })],
+        },
+      ],
+      colorGrading,
+    });
+    const project = createProject({ id: "p-graded", name: "Project", compositions: [composition] });
+
+    const state = resolveSceneAtFrame(project, "comp-graded", 5);
+    expect(state.colorGrading).toEqual(colorGrading);
+  });
+
+  it("leaves colorGrading undefined when the composition has none", () => {
+    const shape = Shape({ id: "ungraded-shape" });
+    const composition = createComposition({
+      id: "comp-ungraded",
+      name: "Ungraded",
+      fps: 30,
+      durationInFrames: 30,
+      width: 100,
+      height: 100,
+      tracks: [
+        {
+          id: "track-content",
+          clips: [Sequence({ id: "clip-content", from: 0, durationInFrames: 30, content: shape })],
+        },
+      ],
+    });
+    const project = createProject({ id: "p-ungraded", name: "Project", compositions: [composition] });
+
+    const state = resolveSceneAtFrame(project, "comp-ungraded", 5);
+    expect(state.colorGrading).toBeUndefined();
+  });
+});
