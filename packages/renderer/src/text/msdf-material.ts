@@ -11,6 +11,8 @@ import { MeshBasicNodeMaterial, type Node } from "three/webgpu";
 export interface MsdfTextMaterialHandle {
   material: THREE.Material;
   setColor(r: number, g: number, b: number, a: number): void;
+  /** Updates only this material's own opacity uniform, leaving its color uniform untouched - `apply-text-stagger.ts`'s own per-glyph reveal needs this independent of `setColor`, since a caller staggering opacity has no reason to already know (and so redundantly re-supply) a glyph's current resolved color. */
+  setOpacity(a: number): void;
 }
 
 /**
@@ -53,6 +55,9 @@ export function createMsdfTextMaterial(atlasTexture: THREE.Texture): MsdfTextMat
     material,
     setColor(r: number, g: number, b: number, a: number): void {
       colorUniform.value.setRGB(r, g, b);
+      opacityUniform.value = a;
+    },
+    setOpacity(a: number): void {
       opacityUniform.value = a;
     },
   };

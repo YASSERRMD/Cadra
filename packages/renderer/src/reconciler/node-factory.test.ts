@@ -1,4 +1,4 @@
-import { createIdentityTransform, type SatoriNode, type SceneNode } from "@cadra/core";
+import { createIdentityTransform, type SatoriNode, type SceneNode, type TextStaggerConfig } from "@cadra/core";
 import type { RasterizedSvg } from "@cadra/svg-raster";
 import type { TextRenderData } from "@cadra/text";
 import * as THREE from "three";
@@ -500,5 +500,122 @@ describe("node-factory: satori", () => {
     // optimization, not just that it happens to still look correct.
     applyNodeProperties(node, built.object3D, ctx, 1, built.owned);
     expect(mesh.material).toBe(firstMaterial);
+  });
+});
+
+describe("node-factory: text stagger", () => {
+  /** Two distinct glyphs (clusters 0 and 1, on one line/word), so a per-character stagger has two genuinely different units to reveal at different times. */
+  const TWO_GLYPH_TEXT_RENDER_DATA: TextRenderData = {
+    lineCount: 1,
+    atlasPages: [{ width: 4, height: 4, pixels: new Uint8Array(4 * 4 * 4).fill(255), png: new Uint8Array() }],
+    glyphs: [
+      {
+        glyphId: 1,
+        cluster: 0,
+        lineIndex: 0,
+        wordIndex: 0,
+        origin: { x: 0, y: 0 },
+        quad: { left: 0, right: 1, bottom: 0, top: 1 },
+        page: 0,
+        uv: { u0: 0, v0: 0, u1: 1, v1: 1 },
+      },
+      {
+        glyphId: 2,
+        cluster: 1,
+        lineIndex: 0,
+        wordIndex: 0,
+        origin: { x: 1, y: 0 },
+        quad: { left: 1, right: 2, bottom: 0, top: 1 },
+        page: 0,
+        uv: { u0: 0, v0: 0, u1: 1, v1: 1 },
+      },
+    ],
+  };
+
+  function makeCtxWithTwoGlyphText(content: string): NodeFactoryContext {
+    const textRenderRegistry = createInMemoryTextRenderRegistry();
+    textRenderRegistry.register(`default::${content}`, {
+      data: TWO_GLYPH_TEXT_RENDER_DATA,
+      fontBytes: new Uint8Array(),
+      fontContentHash: "fake-font",
+    });
+    return { ...makeCtx(), textRenderRegistry };
+  }
+
+  const TYPEWRITER: TextStaggerConfig = {
+    preset: "typewriter",
+    grouping: "character",
+    startFrame: 0,
+    delayFrames: 10,
+    durationFrames: 1,
+  };
+
+  function staggeredTextNode(content: string, stagger: TextStaggerConfig): SceneNode {
+    return {
+      id: "t",
+      kind: "text",
+      transform: createIdentityTransform(),
+      visible: true,
+      children: [],
+      content,
+      fontSize: 12,
+      color: [1, 1, 1, 1],
+      stagger,
+    };
+  }
+
+  it("gives every glyph its own material for a staggered node (not shared across glyphs)", () => {
+    const ctx = makeCtxWithTwoGlyphText("ab");
+    const node = staggeredTextNode("ab", TYPEWRITER);
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+
+    const wordGroup = (built.object3D.children[0] as THREE.Group).children[0] as THREE.Group;
+    const meshes = wordGroup.children as THREE.Mesh[];
+    expect(meshes).toHaveLength(2);
+    expect(meshes[0]?.material).not.toBe(meshes[1]?.material);
+  });
+
+  it("drives each glyph's own setOpacity independently, per frame, matching its own stagger rank", () => {
+    const ctx = makeCtxWithTwoGlyphText("ab");
+    const node = staggeredTextNode("ab", TYPEWRITER);
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+
+    const wordGroup = (built.object3D.children[0] as THREE.Group).children[0] as THREE.Group;
+    const [firstMesh, secondMesh] = wordGroup.children as THREE.Mesh[];
+    const firstSetOpacity = vi.spyOn(firstMesh?.userData as Record<string, (a: number) => void>, "setOpacity");
+    const secondSetOpacity = vi.spyOn(secondMesh?.userData as Record<string, (a: number) => void>, "setOpacity");
+
+    // Frame 1: rank 0 (cluster 0, window [0,1]) has finished revealing;
+    // rank 1 (cluster 1, window [10,11]) has not started.
+    applyNodeProperties(node, built.object3D, ctx, 1, built.owned);
+    expect(firstSetOpacity).toHaveBeenLastCalledWith(1);
+    expect(secondSetOpacity).toHaveBeenLastCalledWith(0);
+
+    // Frame 11: rank 1 has now finished too.
+    applyNodeProperties(node, built.object3D, ctx, 11, built.owned);
+    expect(firstSetOpacity).toHaveBeenLastCalledWith(1);
+    expect(secondSetOpacity).toHaveBeenLastCalledWith(1);
+  });
+
+  it("shares one material per glyph across the whole node when stagger is not set (unaffected by Phase 50)", () => {
+    const ctx = makeCtxWithTwoGlyphText("ab");
+    const node: SceneNode = {
+      id: "t",
+      kind: "text",
+      transform: createIdentityTransform(),
+      visible: true,
+      children: [],
+      content: "ab",
+      fontSize: 12,
+      color: [1, 1, 1, 1],
+    };
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+
+    const wordGroup = (built.object3D.children[0] as THREE.Group).children[0] as THREE.Group;
+    const meshes = wordGroup.children as THREE.Mesh[];
+    expect(meshes[0]?.material).toBe(meshes[1]?.material);
   });
 });

@@ -100,6 +100,61 @@ describe("buildTextGroup: flat MSDF path", () => {
     expect(materialsUsed.size).toBe(1);
     expect(resources.materials).toHaveLength(1);
   });
+
+  it("tags every glyph mesh with its own basePosition, matching where it was actually placed", async () => {
+    const data = await prepareTextRenderData(ROBOTO_FLEX, "Vo");
+    const resources = buildTextGroup(data, { color: [1, 1, 1, 1] });
+
+    const lineGroup = resources.group.children[0] as THREE.Group;
+    const wordGroup = lineGroup.children[0] as THREE.Group;
+    for (const mesh of wordGroup.children as THREE.Mesh[]) {
+      const basePosition = mesh.userData["basePosition"] as THREE.Vector3;
+      expect(basePosition).toBeInstanceOf(THREE.Vector3);
+      expect(basePosition.equals(mesh.position)).toBe(true);
+      // A clone, not the same live reference this mesh keeps mutating.
+      expect(basePosition).not.toBe(mesh.position);
+    }
+  });
+
+  it("tags every glyph mesh with a working setOpacity callback", async () => {
+    const data = await prepareTextRenderData(ROBOTO_FLEX, "V");
+    const resources = buildTextGroup(data, { color: [1, 1, 1, 1] });
+
+    const lineGroup = resources.group.children[0] as THREE.Group;
+    const wordGroup = lineGroup.children[0] as THREE.Group;
+    const mesh = wordGroup.children[0] as THREE.Mesh;
+    const setOpacity = mesh.userData["setOpacity"] as (a: number) => void;
+
+    expect(typeof setOpacity).toBe("function");
+    expect(() => setOpacity(0.3)).not.toThrow();
+  });
+
+  it("perGlyphMaterial: true gives every glyph its own material even when they resolve to the same page and color", async () => {
+    const data = await prepareParagraphRenderData([{ text: "AAB" }], {
+      font: ROBOTO_FLEX,
+      maxWidth: 1000,
+    });
+    const resources = buildTextGroup(data, { color: [1, 1, 1, 1], perGlyphMaterial: true });
+
+    const lineGroup = resources.group.children[0] as THREE.Group;
+    const wordGroup = lineGroup.children[0] as THREE.Group;
+    const meshes = wordGroup.children as THREE.Mesh[];
+    const materialsUsed = new Set(meshes.map((mesh) => mesh.material));
+
+    expect(meshes).toHaveLength(3);
+    expect(materialsUsed.size).toBe(3);
+    expect(resources.materials).toHaveLength(3);
+  });
+
+  it("perGlyphMaterial: true still lets setColor update every base-color material uniformly", async () => {
+    const data = await prepareParagraphRenderData([{ text: "AA" }], {
+      font: ROBOTO_FLEX,
+      maxWidth: 1000,
+    });
+    const resources = buildTextGroup(data, { color: [1, 1, 1, 1], perGlyphMaterial: true });
+
+    expect(() => resources.setColor(0, 1, 0, 0.5)).not.toThrow();
+  });
 });
 
 describe("buildTextGroup: extruded path", () => {
@@ -205,5 +260,46 @@ describe("buildTextGroup: extruded path", () => {
     expect(baseMaterial.color.g).toBeCloseTo(1, 5);
     expect(overrideMaterial.color.b).toBeCloseTo(1, 5);
     expect(overrideMaterial.color.g).toBeCloseTo(0, 5);
+  });
+
+  it("tags every extruded glyph mesh with a setOpacity callback that really updates the classic material property", async () => {
+    const data = await prepareTextRenderData(ROBOTO_FLEX, "V");
+    const resources = buildTextGroup(data, {
+      color: [1, 1, 1, 1],
+      extrudeDepth: 0.2,
+      font: { bytes: ROBOTO_FLEX_BYTES, contentHash: hashAssetBytes(ROBOTO_FLEX_BYTES) },
+    });
+
+    const lineGroup = resources.group.children[0] as THREE.Group;
+    const wordGroup = lineGroup.children[0] as THREE.Group;
+    const mesh = wordGroup.children[0] as THREE.Mesh;
+    const material = mesh.material as THREE.MeshStandardMaterial;
+    const setOpacity = mesh.userData["setOpacity"] as (a: number) => void;
+
+    setOpacity(0.3);
+
+    expect(material.opacity).toBeCloseTo(0.3, 5);
+    expect(material.transparent).toBe(true);
+  });
+
+  it("perGlyphMaterial: true gives every extruded glyph its own material even when they resolve to the same color", async () => {
+    const data = await prepareParagraphRenderData([{ text: "AA" }], {
+      font: ROBOTO_FLEX,
+      maxWidth: 1000,
+    });
+    const resources = buildTextGroup(data, {
+      color: [1, 1, 1, 1],
+      extrudeDepth: 0.2,
+      font: { bytes: ROBOTO_FLEX_BYTES, contentHash: hashAssetBytes(ROBOTO_FLEX_BYTES) },
+      perGlyphMaterial: true,
+    });
+
+    const lineGroup = resources.group.children[0] as THREE.Group;
+    const wordGroup = lineGroup.children[0] as THREE.Group;
+    const meshes = wordGroup.children as THREE.Mesh[];
+    const materialsUsed = new Set(meshes.map((mesh) => mesh.material));
+
+    expect(materialsUsed.size).toBe(meshes.length);
+    expect(resources.materials).toHaveLength(meshes.length);
   });
 });

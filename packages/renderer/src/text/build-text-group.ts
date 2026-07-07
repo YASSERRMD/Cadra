@@ -37,6 +37,19 @@ export interface BuildTextGroupOptions {
   /** Extrusion depth in em units (the same units `TextRenderData`'s glyph positions are already in). `0`, `undefined`, or no `font` renders flat MSDF quads instead. */
   extrudeDepth?: number;
   font?: ExtrusionFontSource;
+  /**
+   * Gives every glyph its own material instance instead of sharing one per
+   * `(atlas page, resolved color)` (flat path) or per resolved color
+   * (extrusion path). A `TextNode` with a `stagger` config needs this: a
+   * per-unit staggered opacity fade (`apply-text-stagger.ts`) sets
+   * `material.opacity` directly, which would otherwise bleed across every
+   * other glyph sharing that same material regardless of which stagger
+   * unit it belongs to. `setColor` still updates every base-color material
+   * uniformly either way, just across more distinct instances. Defaults to
+   * `false` (the shared-material optimization), since most `TextNode`s
+   * never stagger and gain nothing from paying this cost.
+   */
+  perGlyphMaterial?: boolean;
 }
 
 /**
@@ -103,14 +116,16 @@ export function buildTextGroup(
 
     function getExtrusionMaterial(color: ColorRGBA, isBaseColor: boolean): THREE.MeshStandardMaterial {
       const key = colorKey(color);
-      let material = materialsByColorKey.get(key);
+      let material = options.perGlyphMaterial === true ? undefined : materialsByColorKey.get(key);
       if (material === undefined) {
         material = new THREE.MeshStandardMaterial({
           color: new THREE.Color(color[0], color[1], color[2]),
           transparent: color[3] < 1,
           opacity: color[3],
         });
-        materialsByColorKey.set(key, material);
+        if (options.perGlyphMaterial !== true) {
+          materialsByColorKey.set(key, material);
+        }
         materials.push(material);
       }
       if (isBaseColor) {
@@ -131,6 +146,14 @@ export function buildTextGroup(
       const mesh = new THREE.Mesh(geometry, material);
       mesh.name = `glyph-${glyph.cluster}-${glyph.glyphId}`;
       mesh.position.set(glyph.origin.x, glyph.origin.y, -extrudeDepth / 2);
+      mesh.userData["basePosition"] = mesh.position.clone();
+      // A classic (non-TSL) material: unlike the flat MSDF path's
+      // `MeshBasicNodeMaterial`, `.opacity` is a plain property here, so
+      // this closure needs no TSL uniform indirection.
+      mesh.userData["setOpacity"] = (a: number) => {
+        material.opacity = a;
+        material.transparent = a < 1;
+      };
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       getWordGroup(glyph.lineIndex, glyph.wordIndex).add(mesh);
@@ -167,12 +190,14 @@ export function buildTextGroup(
       return undefined;
     }
     const key = `${page}:${colorKey(color)}`;
-    let handle = materialHandlesByKey.get(key);
+    let handle = options.perGlyphMaterial === true ? undefined : materialHandlesByKey.get(key);
     if (handle === undefined) {
       handle = createMsdfTextMaterial(texture);
       handle.setColor(color[0], color[1], color[2], color[3]);
       materials.push(handle.material);
-      materialHandlesByKey.set(key, handle);
+      if (options.perGlyphMaterial !== true) {
+        materialHandlesByKey.set(key, handle);
+      }
     }
     if (isBaseColor) {
       baseMaterialHandles.add(handle);
@@ -198,6 +223,14 @@ export function buildTextGroup(
       (glyph.quad.bottom + glyph.quad.top) / 2,
       0,
     );
+    mesh.userData["basePosition"] = mesh.position.clone();
+    // The flat path's material holds opacity in a TSL uniform (see
+    // `msdf-material.ts`), not the classic `.opacity` property, hence
+    // routing through the handle's own `setOpacity` rather than touching
+    // `mesh.material` directly.
+    mesh.userData["setOpacity"] = (a: number) => {
+      handle.setOpacity(a);
+    };
     getWordGroup(glyph.lineIndex, glyph.wordIndex).add(mesh);
   }
 

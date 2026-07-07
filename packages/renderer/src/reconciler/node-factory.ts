@@ -11,6 +11,7 @@ import {
   type SceneNode,
   type TextNode,
 } from "@cadra/core";
+import type { PositionedGlyph } from "@cadra/text/browser";
 import * as THREE from "three";
 
 import { createSvgTexture } from "../svg-layer/create-svg-texture.js";
@@ -18,6 +19,7 @@ import {
   computeSatoriLayerRenderKey,
   type SatoriLayerRenderRegistry,
 } from "../svg-layer/satori-layer-render-registry.js";
+import { applyTextStagger } from "../text/apply-text-stagger.js";
 import { buildTextGroup, type TextGroupResources } from "../text/build-text-group.js";
 import { computeTextNodeRenderKey, type TextRenderRegistry } from "../text/text-render-registry.js";
 import type { GeometryRegistry, MaterialRegistry } from "./registries.js";
@@ -122,6 +124,13 @@ export interface OwnedResources {
    * geometry.
    */
   text?: TextGroupResources;
+  /**
+   * The exact glyph array `text` above was built from, kept around only so
+   * a later `applyNodeProperties` call can drive `node.stagger` (Phase 50):
+   * that registry-resolved data is only ever on hand inside
+   * `buildTextObject` itself, not on every subsequent per-frame call.
+   */
+  textGlyphs?: readonly PositionedGlyph[];
   /** A `satori` node's own owned resources; see `SatoriLayerResources`'s own doc. */
   satori?: SatoriLayerResources;
 }
@@ -245,9 +254,13 @@ function buildTextObject(node: TextNode, ctx: NodeFactoryContext): BuiltObject {
     color: resolveColorProperty(node.color, 0),
     extrudeDepth,
     font: { bytes: entry.fontBytes, contentHash: entry.fontContentHash },
+    // A staggered node needs every glyph's own opacity/position independently
+    // settable each frame (apply-text-stagger.ts), which the default shared-
+    // by-(page,color) materials do not allow; see buildTextGroup's own doc.
+    perGlyphMaterial: node.stagger !== undefined,
   });
 
-  return { object3D: resources.group, owned: { text: resources } };
+  return { object3D: resources.group, owned: { text: resources, textGlyphs: entry.data.glyphs } };
 }
 
 /**
@@ -319,6 +332,10 @@ export function applyNodeProperties(
       // render-key/extrusion state changes; see buildTextObject).
       object3D.scale.multiplyScalar(fontSize);
       owned?.text?.setColor(color[0], color[1], color[2], color[3]);
+      if (node.stagger !== undefined && owned?.textGlyphs !== undefined) {
+        const lineTexts = node.stagger.grouping === "grapheme" ? node.content.split("\n") : undefined;
+        applyTextStagger(object3D as THREE.Group, owned.textGlyphs, node.stagger, frame, lineTexts);
+      }
       return;
     }
 
