@@ -109,3 +109,29 @@ export function segmentParagraphWords(
   }
   return words;
 }
+
+/** A contiguous word range, matching `LineBreak`'s own shape (`line-break-greedy.ts`/`line-break-knuth-plass.ts`) without importing either (both instead depend on this module). */
+export interface WordRange {
+  wordStart: number;
+  wordEnd: number;
+}
+
+/**
+ * The natural (unjustified) width of `words.slice(line.wordStart, line.wordEnd)`:
+ * every word's own advance, plus the interior gaps between them, excluding
+ * the trailing whitespace after the line's last word (a line never renders
+ * the whitespace it broke on). Shared by both line breakers' own tests and
+ * the paragraph layout engine, which needs this same width to compute
+ * alignment offsets and justification spacing.
+ */
+export function computeLineWidth(words: readonly ParagraphWord[], line: WordRange): number {
+  let width = 0;
+  for (let i = line.wordStart; i < line.wordEnd; i += 1) {
+    const word = words[i] as ParagraphWord;
+    width += word.advance;
+    if (i < line.wordEnd - 1) {
+      width += word.trailingWhitespace;
+    }
+  }
+  return width;
+}
