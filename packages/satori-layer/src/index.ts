@@ -34,3 +34,4 @@ export { computeRenderLayerCacheKey } from "./render-layer-cache-key.js";
 export type { LayerDimensions, RenderLayerToSvgOptions, SatoriLayerFont } from "./render-layer-to-svg.js";
 export { renderLayerToSvg } from "./render-layer-to-svg.js";
 export { instanceFontForSatori, resolveFullVariationPin } from "./satori-font-instancing.js";
+export { sharedRenderLayerCache } from "./shared-render-layer-cache.js";
