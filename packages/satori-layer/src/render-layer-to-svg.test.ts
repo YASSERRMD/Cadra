@@ -146,4 +146,65 @@ describe("renderLayerToSvg", () => {
     );
     expect(svg).toContain('height="100"');
   });
+
+  it("resolves an icon element to an embedded image, the same as a plain img element", async () => {
+    const layer: LayerElement = {
+      type: "div",
+      style: { display: "flex", width: "100%", height: "100%" },
+      children: [{ type: "icon", icon: "arrow-right", style: { color: "#ff0000" } }],
+    };
+    const svg = await renderLayerToSvg(layer, { width: 100, height: 100, fonts: [] });
+    expect(svg).toContain("<image");
+  });
+
+  it("resolves an emoji in ordinary text to an embedded image via Satori's own grapheme handling", async () => {
+    const layer: LayerElement = {
+      type: "div",
+      style: { fontSize: 32 },
+      children: ["Hi \u{1F600}"],
+    };
+    const svg = await renderLayerToSvg(layer, { width: 200, height: 100, fonts: [REGULAR_FONT] });
+    expect(svg).toContain("<image");
+  });
+
+  it("renders a string mixing plain text, an emoji ZWJ sequence, and an icon, deterministically across runs", async () => {
+    const family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}";
+    const layer: LayerElement = {
+      type: "div",
+      style: { display: "flex", flexDirection: "row", alignItems: "center", gap: 8, fontSize: 24 },
+      children: [
+        { type: "span", children: [`Family trip ${family}`] },
+        { type: "icon", icon: "arrow-right" },
+      ],
+    };
+    const options = { width: 400, height: 100, fonts: [REGULAR_FONT] };
+
+    const first = await renderLayerToSvg(layer, options);
+    const second = await renderLayerToSvg(layer, options);
+
+    expect(first).toBe(second);
+    // Two embedded images: one for the ZWJ emoji sequence, one for the icon.
+    expect(first.match(/<image/g)).toHaveLength(2);
+  });
+
+  it("uses a fallback font to cover text the primary fonts do not, only when actually needed", async () => {
+    const tamilFont: SatoriLayerFont = {
+      family: "Noto Sans Tamil",
+      font: parseFontWithFontkit(loadFixtureFont("NotoSansTamil-Variable")),
+    };
+    const layer: LayerElement = { type: "div", style: { fontSize: 32 }, children: ["தமிழ்"] };
+
+    const withoutFallback = await renderLayerToSvg(layer, { width: 200, height: 100, fonts: [REGULAR_FONT] });
+    const withFallback = await renderLayerToSvg(layer, {
+      width: 200,
+      height: 100,
+      fonts: [REGULAR_FONT],
+      fallbackFonts: [tamilFont],
+    });
+
+    // Covering previously-missing glyphs changes the rendered (embedded
+    // font subset) output; an uncovered run renders nothing recognizable
+    // for it at all, so the two must differ.
+    expect(withFallback).not.toBe(withoutFallback);
+  });
 });

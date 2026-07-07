@@ -1,7 +1,7 @@
 import { type ContentHash, hashAssetBytes } from "@cadra/core";
 
 import type { LayerElement } from "./layer-element.js";
-import type { RenderLayerToSvgOptions } from "./render-layer-to-svg.js";
+import type { RenderLayerToSvgOptions, SatoriLayerFont } from "./render-layer-to-svg.js";
 
 /**
  * Recursively re-serializes `value` with every plain object's own keys
@@ -27,17 +27,9 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(value);
 }
 
-/**
- * Deterministic cache key for one `renderLayerToSvg` request: the layer
- * tree and dimensions (order-independent, see `stableStringify`) plus every
- * font's own content hash and resolved weight/style/variation coordinates
- * (not the font's full bytes, already content-addressed by `contentHash`).
- */
-export function computeRenderLayerCacheKey(
-  layer: LayerElement,
-  options: RenderLayerToSvgOptions,
-): ContentHash {
-  const fontsKey = options.fonts
+/** Same shape `computeRenderLayerCacheKey` uses for `options.fonts`, reused for `options.fallbackFonts` too since a fallback font actually used to cover otherwise-missing text changes the rendered output exactly as much as a primary one would. */
+function fontListKey(fonts: readonly SatoriLayerFont[]): string {
+  return fonts
     .map((layerFont) =>
       stableStringify({
         family: layerFont.family,
@@ -48,12 +40,33 @@ export function computeRenderLayerCacheKey(
       }),
     )
     .join(",");
+}
+
+/**
+ * Deterministic cache key for one `renderLayerToSvg` request: the layer
+ * tree and dimensions (order-independent, see `stableStringify`) plus every
+ * primary and fallback font's own content hash and resolved weight/style/
+ * variation coordinates (not the font's full bytes, already content-
+ * addressed by `contentHash`). `fallbackFonts` is included despite being
+ * "on demand" (most of a render's fallback pool typically resolves to
+ * nothing): two requests differing only in which fallback fonts are
+ * available can still render different pixels for text neither request's
+ * primary fonts cover, so they must not collide to the same cache entry.
+ */
+export function computeRenderLayerCacheKey(
+  layer: LayerElement,
+  options: RenderLayerToSvgOptions,
+): ContentHash {
+  const fontsKey = fontListKey(options.fonts);
+  const fallbackFontsKey = fontListKey(options.fallbackFonts ?? []);
   const dimensionsKey = stableStringify({
     width: "width" in options ? options.width : undefined,
     height: "height" in options ? options.height : undefined,
   });
 
   return hashAssetBytes(
-    new TextEncoder().encode(`${stableStringify(layer)}:${dimensionsKey}:${fontsKey}`),
+    new TextEncoder().encode(
+      `${stableStringify(layer)}:${dimensionsKey}:${fontsKey}:${fallbackFontsKey}`,
+    ),
   );
 }

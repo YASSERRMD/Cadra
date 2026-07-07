@@ -3,8 +3,10 @@ import type { ReactNode } from "react";
 import type { FontStyle, FontWeight, SatoriOptions } from "satori";
 import satori from "satori";
 
+import { createLoadAdditionalAsset } from "./fallback-font-resolver.js";
 import type { LayerElement } from "./layer-element.js";
 import { layerElementToSatoriNode, type SatoriElement } from "./layer-to-satori-node.js";
+import { resolveIconElements } from "./resolve-icon-elements.js";
 import { instanceFontForSatori } from "./satori-font-instancing.js";
 
 /**
@@ -50,6 +52,17 @@ export type LayerDimensions = { width: number; height: number } | { width: numbe
 
 export type RenderLayerToSvgOptions = LayerDimensions & {
   fonts: readonly SatoriLayerFont[];
+  /**
+   * Extra fonts available on demand for text `fonts` does not cover (see
+   * `createLoadAdditionalAsset`): each is only actually subset and added to
+   * Satori's own font pool if some missing text turns out to need it, so a
+   * caller can pass a broad fallback pool (e.g. "every font this project
+   * has ever registered") at no cost for documents that never trigger it.
+   * Omitted or empty means Satori gets no fallback at all for text `fonts`
+   * does not cover (it still renders, just without real glyphs for that
+   * text - the same "no worse than before this option existed" default).
+   */
+  fallbackFonts?: readonly SatoriLayerFont[];
 };
 
 /** Recursively concatenates every string leaf under `element`, in document order: every font is subset against this same shared text rather than a per-font-selector-matched subset (simpler, and safe - a wider subset than strictly needed for one particular font is never a correctness problem, only a (minor) output-size one). */
@@ -62,6 +75,24 @@ function collectAllText(element: LayerElement): string {
 }
 
 /**
+ * A plain space (U+0020), present in essentially every real font. Always
+ * included in what gets subset out of each primary font, in addition to
+ * the layer's own real text: a font subset down to only code points it has
+ * zero glyph coverage for at all (e.g. a Latin-only brand font subset
+ * against an all-Tamil layer with no Latin text anywhere) still parses
+ * fine with HarfBuzz's own subsetter, but Satori's own font parser then
+ * rejects the result outright ("No valid cmap sub-tables found", verified
+ * empirically), and Satori separately refuses to lay out any text at all
+ * with a completely empty `fonts` array. Including this one always-covered
+ * character guarantees every primary font's own subset stays valid and
+ * non-empty regardless of how much of the real text it actually covers,
+ * while contributing nothing visible of its own (a bare space paints
+ * nothing) - the real glyphs for text no primary font covers still come
+ * entirely from `fallbackFonts` via `createLoadAdditionalAsset`.
+ */
+const SUBSET_SAFETY_CHARACTER = " ";
+
+/**
  * Renders a `LayerElement` tree to an SVG string via Satori, Vercel's
  * from-scratch HTML/CSS-to-SVG layout and rendering engine (real flexbox
  * layout via Yoga, no browser or Chromium involved at all).
@@ -69,19 +100,28 @@ function collectAllText(element: LayerElement): string {
  * Each of `options.fonts` is prepared via `instanceFontForSatori` first:
  * Satori's own font parser cannot read a variable font at all (see that
  * function's own doc), so every font is pinned to a fully static instance
- * and subset down to the layer's own text before Satori ever sees it.
+ * and subset down to the layer's own text (plus one guaranteed-present
+ * character, see `SUBSET_SAFETY_CHARACTER`) before Satori ever sees it.
+ *
+ * `layer`'s own `"icon"` elements (see `LayerElementType`'s own doc) are
+ * resolved to plain `"img"` elements (`resolveIconElements`) before any of
+ * the above, so everything downstream only ever deals with the three
+ * element kinds Satori itself understands.
  *
  * Deterministic for the same `layer` plus the same `options`: Satori
  * itself is a pure function of its inputs (verified empirically: identical
  * repeated calls with the same element tree and fonts produce byte-
  * identical SVG output), and so is HarfBuzz's own font subsetting/
- * instancing this relies on to prepare each font.
+ * instancing this relies on to prepare each font, and so is icon/emoji
+ * resolution (both read fixed, already-installed local package assets, no
+ * network fetch at render time).
  */
 export async function renderLayerToSvg(
   layer: LayerElement,
   options: RenderLayerToSvgOptions,
 ): Promise<string> {
-  const text = collectAllText(layer);
+  const resolvedLayer = resolveIconElements(layer);
+  const text = collectAllText(resolvedLayer) + SUBSET_SAFETY_CHARACTER;
 
   const instancedFonts = await Promise.all(
     options.fonts.map(async (layerFont) => ({
@@ -91,8 +131,9 @@ export async function renderLayerToSvg(
       style: layerFont.style ?? "normal",
     })),
   );
+  const loadAdditionalAsset = createLoadAdditionalAsset(options.fallbackFonts ?? []);
 
-  const node = layerElementToSatoriNode(layer);
+  const node = layerElementToSatoriNode(resolvedLayer);
   const dimensions: LayerDimensions =
     "width" in options && "height" in options
       ? { width: options.width, height: options.height }
@@ -100,5 +141,5 @@ export async function renderLayerToSvg(
         ? { width: options.width }
         : { height: options.height };
 
-  return callSatori(node, { ...dimensions, fonts: instancedFonts });
+  return callSatori(node, { ...dimensions, fonts: instancedFonts, loadAdditionalAsset });
 }
