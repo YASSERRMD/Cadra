@@ -78,6 +78,8 @@ export {
   sceneNodeKindSchema,
   sceneNodeSchema,
   textNodeSchema,
+  textPhysicsConfigSchema,
+  textPhysicsEffectSchema,
   textStaggerConfigSchema,
   textStaggerDirectionSchema,
   textStaggerGroupingSchema,

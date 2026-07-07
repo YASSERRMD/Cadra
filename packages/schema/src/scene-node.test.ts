@@ -427,6 +427,121 @@ describe("sceneNodeSchema: text", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("accepts a text node with a minimal physics config (only effect and grouping)", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      physics: { effect: "jitter", grouping: "character" },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts every known physics effect", () => {
+    for (const effect of ["spring", "jitter", "wave", "scramble", "countUp"]) {
+      const result = sceneNodeSchema.safeParse({
+        ...baseFields(),
+        kind: "text",
+        content: "Hello",
+        fontSize: 24,
+        color: [1, 1, 1, 1],
+        physics: { effect, grouping: "word" },
+      });
+      expect(result.success).toBe(true);
+    }
+  });
+
+  it("accepts a full spring physics config with every optional field set", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      physics: {
+        effect: "spring",
+        grouping: "character",
+        seed: 1,
+        startFrame: 0,
+        delayFrames: 2,
+        direction: "centerOut",
+        fps: 30,
+        stiffness: 120,
+        damping: 14,
+        mass: 1,
+        distance: 0.5,
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a full countUp physics config with every optional field set", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "0",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      physics: {
+        effect: "countUp",
+        grouping: "line",
+        startFrame: 0,
+        durationFrames: 60,
+        fromValue: 0,
+        toValue: 1000,
+        decimalPlaces: 2,
+        useGrouping: true,
+        easing: "easeOutCubic",
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts both stagger and physics configured together on the same node", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      stagger: {
+        preset: "fadeInUp",
+        grouping: "word",
+        startFrame: 0,
+        delayFrames: 3,
+        durationFrames: 15,
+      },
+      physics: { effect: "jitter", grouping: "character", positionAmplitude: 0.02 },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects an unknown physics effect", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      physics: { effect: "bounce", grouping: "character" },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a stray, unrecognized field on the physics config (strict object)", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      physics: { effect: "jitter", grouping: "character", unknownField: true },
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 describe("sceneNodeSchema: transform and visible are Property<T> for every node kind (Phase 26)", () => {

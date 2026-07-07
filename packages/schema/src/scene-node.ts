@@ -13,6 +13,8 @@ import type {
   SceneNode,
   SceneNodeKind,
   TextNode,
+  TextPhysicsConfig,
+  TextPhysicsEffect,
   TextStaggerConfig,
   TextStaggerDirection,
   TextStaggerGrouping,
@@ -328,6 +330,94 @@ export const textStaggerConfigSchema = z.strictObject({
 
 type _CheckTextStaggerConfig = AssertTrue<AssertEqual<z.infer<typeof textStaggerConfigSchema>, TextStaggerConfig>>;
 
+/** Mirrors `TextPhysicsEffect`. */
+export const textPhysicsEffectSchema = z
+  .enum(["spring", "jitter", "wave", "scramble", "countUp"])
+  .describe("Which per-glyph animation a TextPhysicsConfig drives.");
+
+type _CheckTextPhysicsEffect = AssertTrue<AssertEqual<z.infer<typeof textPhysicsEffectSchema>, TextPhysicsEffect>>;
+
+/** Mirrors `TextPhysicsConfig`. */
+export const textPhysicsConfigSchema = z.strictObject({
+  effect: textPhysicsEffectSchema,
+  grouping: textStaggerGroupingSchema,
+  seed: z
+    .number()
+    .optional()
+    .describe('Seeds this effect\'s own deterministic randomness ("jitter"\'s noise, "scramble"\'s character choices). Defaults to 0.'),
+  startFrame: z
+    .number()
+    .optional()
+    .describe('"spring"/"scramble" only: the frame the very first unit (in rank order) begins animating at. Defaults to 0.'),
+  delayFrames: z
+    .number()
+    .optional()
+    .describe(
+      '"spring"/"scramble" only: frames between each consecutive unit\'s own start, in rank order. Defaults to 0 (every unit starts together).',
+    ),
+  durationFrames: z
+    .number()
+    .optional()
+    .describe('"spring"/"scramble"/"countUp" only: how many frames one unit\'s own animation takes, once it starts. Defaults to 30.'),
+  direction: textStaggerDirectionSchema.optional().describe("Defaults to \"forward\"."),
+  fps: z
+    .number()
+    .optional()
+    .describe(
+      '"spring" only: the composition\'s own frame rate, needed to convert frame counts into physical time for the mass-spring-damper simulation. Defaults to 30.',
+    ),
+  stiffness: z.number().optional().describe('"spring" only. Defaults to 100.'),
+  damping: z.number().optional().describe('"spring" only. Defaults to 10.'),
+  mass: z.number().optional().describe('"spring" only. Defaults to 1.'),
+  distance: z
+    .number()
+    .optional()
+    .describe(
+      '"spring" only: how far (in fontSize-relative em units) a unit starts offset from its natural position. Defaults to 1.',
+    ),
+  positionAmplitude: z
+    .number()
+    .optional()
+    .describe(
+      '"jitter"/"wave" only: peak offset, in fontSize-relative em units. Defaults to 0.05 for "jitter", 0.1 for "wave".',
+    ),
+  rotationAmplitude: z
+    .number()
+    .optional()
+    .describe(
+      '"jitter" only: peak rotation around the glyph\'s own local Z axis, in radians. Defaults to 0 (no rotation jitter).',
+    ),
+  periodFrames: z
+    .number()
+    .optional()
+    .describe(
+      '"jitter"\'s own noise checkpoint spacing, or "wave"\'s own oscillation period, in frames. Defaults to 20 for "jitter", 30 for "wave".',
+    ),
+  charset: z
+    .string()
+    .optional()
+    .describe(
+      '"scramble" only: which characters a not-yet-locked-in unit is randomly drawn from. Defaults to uppercase Latin letters and digits.',
+    ),
+  fromValue: z.number().optional().describe('"countUp" only: the value displayed at frame <= startFrame. Defaults to 0.'),
+  toValue: z
+    .number()
+    .optional()
+    .describe('"countUp" only: the value displayed at frame >= startFrame + durationFrames. Defaults to 0.'),
+  decimalPlaces: z.number().optional().describe('"countUp" only: fixed decimal places in the formatted number. Defaults to 0.'),
+  useGrouping: z
+    .boolean()
+    .optional()
+    .describe(
+      '"countUp" only: whether to group digits with a thousands separator (always a fixed en-US-equivalent format regardless of runtime locale). Defaults to false.',
+    ),
+  easing: easingNameSchema.optional().describe('"countUp" only: eases the count\'s own progress. Defaults to "linear".'),
+});
+
+type _CheckTextPhysicsConfig = AssertTrue<
+  AssertEqual<z.infer<typeof textPhysicsConfigSchema>, TextPhysicsConfig>
+>;
+
 /**
  * A block of rendered text.
  *
@@ -368,6 +458,11 @@ export const textNodeSchema = z.strictObject({
     .optional()
     .describe(
       "A deterministic per-unit staggered reveal animation across this node's own content. Omitted means no staggering.",
+    ),
+  physics: textPhysicsConfigSchema
+    .optional()
+    .describe(
+      "Expressive per-glyph animation (springs, jitter, wave, scramble, count-up), composable with stagger. Omitted means no physics effect.",
     ),
   get children(): z.ZodArray<typeof sceneNodeSchema> {
     return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
