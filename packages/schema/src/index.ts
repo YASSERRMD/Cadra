@@ -62,6 +62,7 @@ export { DIAGNOSTIC_CODES, parseScene } from "./parse.js";
 export type { PathSegment } from "./patch-path.js";
 export { applyPatchAtPath, InvalidPathError, parsePath, PathTraversalError } from "./patch-path.js";
 export { colorRgbaSchema, transformSchema, vector2Schema, vector3Schema } from "./primitives.js";
+export { layerElementSchema, layerElementTypeSchema, layerStyleSchema } from "./layer-element.js";
 export {
   cameraNodeSchema,
   compositionRefNodeSchema,
@@ -70,6 +71,9 @@ export {
   lightNodeSchema,
   lightTypeSchema,
   meshNodeSchema,
+  satoriElementKeyframesSchema,
+  satoriLayerFontRefSchema,
+  satoriNodeSchema,
   sceneNodeKindSchema,
   sceneNodeSchema,
   textNodeSchema,
