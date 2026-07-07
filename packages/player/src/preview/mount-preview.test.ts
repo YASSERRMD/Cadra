@@ -619,6 +619,163 @@ describe("mountPreview: responsive resizing preserves aspect ratio", () => {
   });
 });
 
+describe("mountPreview: onFrameChanged subscription", () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    container.remove();
+  });
+
+  it("calls the handler when seek() changes the resolved frame", async () => {
+    const project = buildProject();
+    const renderer = createFakeRenderer();
+    const { observeResize } = createFakeResizeObserver();
+    const handle = mountPreview(container, { project, compositionId: "comp-1", renderer, observeResize });
+    await flushMicrotasks();
+
+    const handler = vi.fn();
+    handle.onFrameChanged(handler);
+    handle.seek(42);
+
+    expect(handler).toHaveBeenCalledWith(42);
+  });
+
+  it("calls the handler for a scrub against the preview's own built-in scrubber", async () => {
+    const project = buildProject();
+    const renderer = createFakeRenderer();
+    const { observeResize } = createFakeResizeObserver();
+    const handle = mountPreview(container, {
+      project,
+      compositionId: "comp-1",
+      renderer,
+      observeResize,
+    });
+    await flushMicrotasks();
+
+    const scrubberTrack = container.querySelector('[role="slider"]') as HTMLElement;
+    vi.spyOn(scrubberTrack, "getBoundingClientRect").mockReturnValue({
+      left: 100,
+      right: 300,
+      width: 200,
+      top: 0,
+      bottom: 20,
+      height: 20,
+      x: 100,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    const handler = vi.fn();
+    handle.onFrameChanged(handler);
+    scrubberTrack.dispatchEvent(
+      new MouseEvent("mousedown", { clientX: 300, bubbles: true, cancelable: true }),
+    );
+
+    expect(handler).toHaveBeenCalledWith(DURATION_IN_FRAMES - 1);
+  });
+
+  it("a subscription made before renderer.init() resolves still receives frameChanged once it does", async () => {
+    const project = buildProject();
+    const renderer = createFakeRenderer();
+    const { observeResize } = createFakeResizeObserver();
+
+    const handle = mountPreview(container, { project, compositionId: "comp-1", renderer, observeResize });
+    const handler = vi.fn();
+    handle.onFrameChanged(handler);
+    handle.seek(30); // queued before renderer.init() resolves
+
+    await flushMicrotasks();
+
+    expect(handler).toHaveBeenCalledWith(30);
+  });
+
+  it("unsubscribing stops further calls", async () => {
+    const project = buildProject();
+    const renderer = createFakeRenderer();
+    const { observeResize } = createFakeResizeObserver();
+    const handle = mountPreview(container, { project, compositionId: "comp-1", renderer, observeResize });
+    await flushMicrotasks();
+
+    const handler = vi.fn();
+    const unsubscribe = handle.onFrameChanged(handler);
+    handle.seek(10);
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+    handle.seek(20);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not call the handler again for a seek to the same frame already showing", async () => {
+    const project = buildProject();
+    const renderer = createFakeRenderer();
+    const { observeResize } = createFakeResizeObserver();
+    const handle = mountPreview(container, { project, compositionId: "comp-1", renderer, observeResize });
+    await flushMicrotasks();
+    handle.seek(10);
+
+    const handler = vi.fn();
+    handle.onFrameChanged(handler);
+    handle.seek(10); // same frame: Transport.seek does not emit frameChanged again
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("supports multiple independent subscribers", async () => {
+    const project = buildProject();
+    const renderer = createFakeRenderer();
+    const { observeResize } = createFakeResizeObserver();
+    const handle = mountPreview(container, { project, compositionId: "comp-1", renderer, observeResize });
+    await flushMicrotasks();
+
+    const first = vi.fn();
+    const second = vi.fn();
+    handle.onFrameChanged(first);
+    handle.onFrameChanged(second);
+    handle.seek(5);
+
+    expect(first).toHaveBeenCalledWith(5);
+    expect(second).toHaveBeenCalledWith(5);
+  });
+
+  it("onFrameChanged after dispose() returns a harmless no-op unsubscribe", async () => {
+    const project = buildProject();
+    const renderer = createFakeRenderer();
+    const { observeResize } = createFakeResizeObserver();
+    const handle = mountPreview(container, { project, compositionId: "comp-1", renderer, observeResize });
+    await flushMicrotasks();
+
+    handle.dispose();
+
+    const handler = vi.fn();
+    expect(() => {
+      const unsubscribe = handle.onFrameChanged(handler);
+      unsubscribe();
+    }).not.toThrow();
+  });
+
+  it("stops calling subscribers once dispose() runs", async () => {
+    const project = buildProject();
+    const renderer = createFakeRenderer();
+    const { observeResize } = createFakeResizeObserver();
+    const handle = mountPreview(container, { project, compositionId: "comp-1", renderer, observeResize });
+    await flushMicrotasks();
+
+    const handler = vi.fn();
+    handle.onFrameChanged(handler);
+    handle.dispose();
+
+    expect(() => handle.seek(15)).not.toThrow();
+    expect(handler).not.toHaveBeenCalled();
+  });
+});
+
 describe("mountPreview: pre-ready action queuing", () => {
   let container: HTMLElement;
 

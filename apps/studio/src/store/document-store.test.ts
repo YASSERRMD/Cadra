@@ -29,6 +29,28 @@ function buildAlternateValidDocument(): unknown {
   };
 }
 
+/** A third structurally valid document, distinct from both the store's fresh default and `buildAlternateValidDocument`, for multi-step undo/redo tests. */
+function buildThirdValidDocument(): unknown {
+  return {
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    project: {
+      id: "project-third",
+      name: "Third Project",
+      compositions: [
+        {
+          id: "comp-third",
+          name: "Third Composition",
+          fps: 60,
+          durationInFrames: 120,
+          width: 3840,
+          height: 2160,
+          tracks: [],
+        },
+      ],
+    },
+  };
+}
+
 describe("createDocumentStore", () => {
   let persistence: FakeDocumentPersistence;
   let store: ReturnType<typeof createDocumentStore>;
@@ -274,6 +296,177 @@ describe("createDocumentStore", () => {
       expect(persistence.savedFiles).toHaveLength(1);
       const savedParsed = JSON.parse(persistence.savedFiles[0]?.contents as string);
       expect(parseScene(savedParsed).success).toBe(true);
+    });
+  });
+
+  describe("undo/redo (Task 5: undo history)", () => {
+    it("starts with a single history entry (the initial document) and historyIndex 0", () => {
+      const state = store.getState();
+      expect(state.history).toHaveLength(1);
+      expect(state.history[0]).toEqual(state.document);
+      expect(state.historyIndex).toBe(0);
+    });
+
+    it("undo is a no-op when there is nothing to undo yet", () => {
+      const before = store.getState().document;
+
+      store.getState().undo();
+
+      expect(store.getState().document).toBe(before);
+      expect(store.getState().historyIndex).toBe(0);
+    });
+
+    it("redo is a no-op when there is nothing to redo yet", () => {
+      const before = store.getState().document;
+
+      store.getState().redo();
+
+      expect(store.getState().document).toBe(before);
+    });
+
+    it("a successful commitDocument appends to history and advances historyIndex", () => {
+      const initial = store.getState().document;
+      const candidate = buildAlternateValidDocument();
+
+      store.getState().commitDocument(candidate);
+
+      const state = store.getState();
+      expect(state.history).toEqual([initial, candidate]);
+      expect(state.historyIndex).toBe(1);
+    });
+
+    it("undo after a commit restores the previous document", () => {
+      const initial = store.getState().document;
+      store.getState().commitDocument(buildAlternateValidDocument());
+
+      store.getState().undo();
+
+      expect(store.getState().document).toEqual(initial);
+      expect(store.getState().historyIndex).toBe(0);
+    });
+
+    it("redo after an undo restores the document that was undone", () => {
+      const alternate = buildAlternateValidDocument();
+      store.getState().commitDocument(alternate);
+      store.getState().undo();
+
+      store.getState().redo();
+
+      expect(store.getState().document).toEqual(alternate);
+      expect(store.getState().historyIndex).toBe(1);
+    });
+
+    it("undo does not remove the entry from history (it can be redone again)", () => {
+      const alternate = buildAlternateValidDocument();
+      store.getState().commitDocument(alternate);
+
+      store.getState().undo();
+
+      expect(store.getState().history).toHaveLength(2);
+    });
+
+    it("supports multiple sequential undos back through several commits", () => {
+      const initial = store.getState().document;
+      const alternate = buildAlternateValidDocument();
+      const third = buildThirdValidDocument();
+      store.getState().commitDocument(alternate);
+      store.getState().commitDocument(third);
+
+      store.getState().undo();
+      expect(store.getState().document).toEqual(alternate);
+
+      store.getState().undo();
+      expect(store.getState().document).toEqual(initial);
+
+      // Fully exhausted: a further undo is a no-op.
+      store.getState().undo();
+      expect(store.getState().document).toEqual(initial);
+      expect(store.getState().historyIndex).toBe(0);
+    });
+
+    it("supports multiple sequential redos back up through several commits", () => {
+      const alternate = buildAlternateValidDocument();
+      const third = buildThirdValidDocument();
+      store.getState().commitDocument(alternate);
+      store.getState().commitDocument(third);
+      store.getState().undo();
+      store.getState().undo();
+
+      store.getState().redo();
+      expect(store.getState().document).toEqual(alternate);
+
+      store.getState().redo();
+      expect(store.getState().document).toEqual(third);
+
+      // Fully exhausted: a further redo is a no-op.
+      store.getState().redo();
+      expect(store.getState().document).toEqual(third);
+    });
+
+    it("a new commit after an undo truncates the redo stack (the conventional 'new edit clears redo' behavior)", () => {
+      const initial = store.getState().document;
+      const alternate = buildAlternateValidDocument();
+      const third = buildThirdValidDocument();
+      store.getState().commitDocument(alternate);
+      store.getState().undo(); // back to initial; "alternate" is now a pending redo
+
+      store.getState().commitDocument(third); // a fresh edit from here
+
+      const state = store.getState();
+      expect(state.history).toEqual([initial, third]);
+      expect(state.historyIndex).toBe(1);
+      // The truncated "alternate" entry is gone: redo has nothing to reach it with.
+      store.getState().redo();
+      expect(store.getState().document).toEqual(third);
+    });
+
+    it("a rejected commitDocument does not touch history", () => {
+      const historyBefore = store.getState().history;
+      const invalidCandidate = { schemaVersion: CURRENT_SCHEMA_VERSION, project: { id: "no-name" } };
+
+      store.getState().commitDocument(invalidCandidate);
+
+      expect(store.getState().history).toBe(historyBefore);
+      expect(store.getState().historyIndex).toBe(0);
+    });
+
+    it("newDocument (which funnels through commitDocument) is itself undoable", () => {
+      store.getState().commitDocument(buildAlternateValidDocument());
+      store.getState().newDocument();
+      expect(store.getState().history).toHaveLength(3); // initial, alternate, fresh
+
+      store.getState().undo();
+
+      expect(store.getState().document).toEqual(buildAlternateValidDocument());
+    });
+
+    it("undo re-selects the first composition when the restored document no longer has the currently selected one", () => {
+      store.getState().commitDocument(buildAlternateValidDocument());
+      expect(store.getState().selectedCompositionId).toBe("comp-alt");
+
+      store.getState().undo();
+
+      // Back to the initial document, whose only composition is not "comp-alt".
+      expect(store.getState().selectedCompositionId).not.toBe("comp-alt");
+      expect(store.getState().selectedCompositionId).toBe(
+        store.getState().document.project.compositions[0]?.id,
+      );
+    });
+
+    it("every document undo/redo lands on still passes parseScene", () => {
+      const alternate = buildAlternateValidDocument();
+      const third = buildThirdValidDocument();
+      store.getState().commitDocument(alternate);
+      store.getState().commitDocument(third);
+
+      store.getState().undo();
+      expect(parseScene(store.getState().document).success).toBe(true);
+      store.getState().undo();
+      expect(parseScene(store.getState().document).success).toBe(true);
+      store.getState().redo();
+      expect(parseScene(store.getState().document).success).toBe(true);
+      store.getState().redo();
+      expect(parseScene(store.getState().document).success).toBe(true);
     });
   });
 });

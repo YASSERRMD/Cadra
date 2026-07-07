@@ -1,4 +1,4 @@
-import type { ObserveResizeFn } from "@cadra/player";
+import type { ObserveResizeFn, PreviewHandle } from "@cadra/player";
 import { mountPreview } from "@cadra/player";
 import type { Renderer } from "@cadra/renderer";
 import { createRenderer as createRealRenderer } from "@cadra/renderer";
@@ -35,6 +35,19 @@ export interface ViewportProps {
    * touches one.
    */
   observeResize?: ObserveResizeFn;
+  /**
+   * Called with the live `PreviewHandle` right after `Viewport` constructs
+   * it, and again with `undefined` during that same effect's cleanup (before
+   * `handle.dispose()` runs, so a consumer never sees a handle it has
+   * already been told is gone).
+   *
+   * This is how `Viewport` (the only component with a mounted DOM container
+   * to construct `mountPreview` against) shares its one real `PreviewHandle`
+   * upward, so a sibling (`TimelinePanel`, via `App.tsx`) can drive/observe
+   * the *same* live transport instead of each owning an independent one.
+   * See `App.tsx` for how the two are wired together through this callback.
+   */
+  onHandleChange?: (handle: PreviewHandle | undefined) => void;
 }
 
 /**
@@ -89,12 +102,26 @@ export interface ViewportProps {
  * into the still-mounted `Transport`/`Renderer` some more targeted way. That
  * is an explicit non-goal of this phase, deferred to whichever future phase
  * first adds a genuinely interactive, high-frequency property editor.
+ *
+ * Shared-handle wiring (Phase 38): `Viewport` remains the sole owner of
+ * *constructing and disposing* the `PreviewHandle` (it is the only component
+ * with a mounted DOM container to call `mountPreview` against), but it no
+ * longer keeps that handle entirely private. `onHandleChange` (if supplied)
+ * is called with the freshly constructed handle immediately after
+ * `mountPreview` returns, and again with `undefined` in this same effect's
+ * cleanup, before `handle.dispose()` runs. `App.tsx` uses this to lift the
+ * handle into state shared with `TimelinePanel`, so scrubbing the timeline
+ * calls `seek` on the exact same live transport this viewport is showing,
+ * and the timeline's own playhead stays in sync via that handle's
+ * `onFrameChanged` subscription, rather than each component managing an
+ * independent, disconnected preview.
  */
 export function Viewport({
   document,
   selectedCompositionId,
   createRenderer = createRealRenderer,
   observeResize,
+  onHandleChange,
 }: ViewportProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -120,15 +147,17 @@ export function Viewport({
       renderer,
       ...(observeResize !== undefined && { observeResize }),
     });
+    onHandleChange?.(handle);
 
     return () => {
+      onHandleChange?.(undefined);
       handle.dispose();
     };
-    // Deliberately not depending on `createRenderer`/`observeResize`
-    // themselves: this effect's remount trigger is exactly
+    // Deliberately not depending on `createRenderer`/`observeResize`/
+    // `onHandleChange` themselves: this effect's remount trigger is exactly
     // `[document, selectedCompositionId]` per this component's own doc
-    // above, and both are fixed construction dependencies (the real
-    // implementations in production, fixed fakes in tests), never
+    // above, and all three are fixed construction dependencies (the real
+    // implementations in production, fixed fakes/setters in tests), never
     // something that changes across a component's own lifetime the way
     // `document`/`selectedCompositionId` do. (eslint-plugin-react-hooks is
     // not part of this workspace's lint config, so no exhaustive-deps

@@ -4,15 +4,21 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { AssetPanel } from "./AssetPanel.js";
 import { InspectorPanel } from "./InspectorPanel.js";
-import { TimelinePanel } from "./TimelinePanel.js";
 
 /**
- * A single shared suite for this phase's three stub panels
- * (asset/inspector/timeline): each is a labeled placeholder box this phase,
- * with real contents landing in Phases 38/39/40 respectively (see each
- * component's own doc). Kept in one file since there is exactly one
- * behavior to prove per panel this phase: it renders, with its expected
- * `data-testid`.
+ * A shared suite for the two panels still stubs as of this phase
+ * (asset/inspector): each is a labeled placeholder box, with real contents
+ * landing in Phases 40/39 respectively (see each component's own doc). Kept
+ * in one file since there is exactly one behavior to prove per panel: it
+ * renders, with its expected `data-testid`.
+ *
+ * `TimelinePanel` (this phase's own real, non-stub component) is no longer
+ * covered here: it now requires real props (`document`,
+ * `selectedCompositionId`, `commitDocument`, `previewHandle`, `onUndo`,
+ * `onRedo`), so a bare `<TimelinePanel />` no longer typechecks the way the
+ * other two stubs still do. Its own behavior has a dedicated
+ * `TimelinePanel.test.tsx`; `App.test.tsx` also continues to prove it
+ * renders correctly within the full shell.
  */
 describe("stub panels", () => {
   let container: HTMLDivElement;
@@ -43,12 +49,5 @@ describe("stub panels", () => {
       root.render(<InspectorPanel />);
     });
     expect(container.querySelector('[data-testid="studio-inspector-panel"]')).not.toBeNull();
-  });
-
-  it("TimelinePanel renders its placeholder", async () => {
-    await act(async () => {
-      root.render(<TimelinePanel />);
-    });
-    expect(container.querySelector('[data-testid="studio-timeline-panel"]')).not.toBeNull();
   });
 });
