@@ -544,6 +544,212 @@ describe("sceneNodeSchema: text", () => {
   });
 });
 
+describe("sceneNodeSchema: text path (Phase 52)", () => {
+  it("accepts a text node with a minimal path config (a single line segment)", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      path: { start: [0, 0, 0], segments: [{ type: "line", to: [10, 0, 0] }] },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts every segment type in one path, plus every optional path field", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      path: {
+        start: [0, 0, 0],
+        segments: [
+          { type: "line", to: [10, 0, 0] },
+          { type: "quadratic", control: [15, 10, 0], to: [20, 0, 0] },
+          { type: "cubic", control1: [23, 10, 0], control2: [27, -10, 0], to: [30, 0, 0] },
+        ],
+        progress: 0.5,
+        startOffset: 0.1,
+        orientation: "upright",
+        spacing: "even",
+        alignment: "center",
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a keyframe track for a segment's own control/end points and for progress/startOffset", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      path: {
+        start: [0, 0, 0],
+        segments: [
+          {
+            type: "quadratic",
+            control: [5, 10, 0],
+            to: {
+              type: "keyframeTrack",
+              keyframes: [
+                { frame: 0, value: [10, 0, 0] },
+                { frame: 10, value: [10, 5, 0] },
+              ],
+            },
+          },
+        ],
+        progress: {
+          type: "keyframeTrack",
+          keyframes: [
+            { frame: 0, value: 0 },
+            { frame: 30, value: 1 },
+          ],
+        },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects an unknown segment type, orientation, spacing, or alignment", () => {
+    const withSegmentType = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      path: { start: [0, 0, 0], segments: [{ type: "arc", to: [10, 0, 0] }] },
+    });
+    expect(withSegmentType.success).toBe(false);
+
+    for (const field of ["orientation", "spacing", "alignment"]) {
+      const result = sceneNodeSchema.safeParse({
+        ...baseFields(),
+        kind: "text",
+        content: "Hello",
+        fontSize: 24,
+        color: [1, 1, 1, 1],
+        path: {
+          start: [0, 0, 0],
+          segments: [{ type: "line", to: [10, 0, 0] }],
+          [field]: "not-a-real-value",
+        },
+      });
+      expect(result.success).toBe(false);
+    }
+  });
+
+  it("rejects a stray, unrecognized field on the path config or one of its segments (strict object)", () => {
+    const onConfig = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      path: { start: [0, 0, 0], segments: [{ type: "line", to: [10, 0, 0] }], unknownField: true },
+    });
+    expect(onConfig.success).toBe(false);
+
+    const onSegment = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      path: {
+        start: [0, 0, 0],
+        segments: [{ type: "line", to: [10, 0, 0], unknownField: true }],
+      },
+    });
+    expect(onSegment.success).toBe(false);
+  });
+});
+
+describe("sceneNodeSchema: text morph (Phase 52)", () => {
+  it("accepts a minimal morph config", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "World",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      morph: { from: "Hello", grouping: "character", progress: 0.5 },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a keyframe track for progress", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "World",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      morph: {
+        from: "Hello",
+        grouping: "word",
+        progress: {
+          type: "keyframeTrack",
+          keyframes: [
+            { frame: 0, value: 0 },
+            { frame: 20, value: 1 },
+          ],
+        },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a morph config missing a required field", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "World",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      morph: { from: "Hello", grouping: "word" },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a stray, unrecognized field on the morph config (strict object)", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "World",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      morph: { from: "Hello", grouping: "word", progress: 0.5, unknownField: true },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts stagger, physics, path, and morph all configured together on the same node", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "World",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      stagger: {
+        preset: "fadeInUp",
+        grouping: "word",
+        startFrame: 0,
+        delayFrames: 3,
+        durationFrames: 15,
+      },
+      physics: { effect: "jitter", grouping: "character" },
+      path: { start: [0, 0, 0], segments: [{ type: "line", to: [10, 0, 0] }] },
+      morph: { from: "Hello", grouping: "word", progress: 0.5 },
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
 describe("sceneNodeSchema: transform and visible are Property<T> for every node kind (Phase 26)", () => {
   it("accepts a keyframe track for transform.position, transform.rotation, and transform.scale independently", () => {
     const result = sceneNodeSchema.safeParse({

@@ -12,7 +12,13 @@ import type {
   SatoriNode,
   SceneNode,
   SceneNodeKind,
+  TextMorphConfig,
   TextNode,
+  TextPathAlignment,
+  TextPathConfig,
+  TextPathOrientation,
+  TextPathSegment,
+  TextPathSpacing,
   TextPhysicsConfig,
   TextPhysicsEffect,
   TextStaggerConfig,
@@ -418,6 +424,99 @@ type _CheckTextPhysicsConfig = AssertTrue<
   AssertEqual<z.infer<typeof textPhysicsConfigSchema>, TextPhysicsConfig>
 >;
 
+/** Mirrors `TextPathSegment`. */
+export const textPathSegmentSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.literal("line"),
+    to: propertySchema(vector3Schema).describe("The end point of this straight segment."),
+  }),
+  z.strictObject({
+    type: z.literal("quadratic"),
+    control: propertySchema(vector3Schema).describe(
+      "The single control point of this quadratic Bezier segment.",
+    ),
+    to: propertySchema(vector3Schema).describe("The end point of this segment."),
+  }),
+  z.strictObject({
+    type: z.literal("cubic"),
+    control1: propertySchema(vector3Schema).describe(
+      "The first control point of this cubic Bezier segment.",
+    ),
+    control2: propertySchema(vector3Schema).describe(
+      "The second control point of this cubic Bezier segment.",
+    ),
+    to: propertySchema(vector3Schema).describe("The end point of this segment."),
+  }),
+]);
+
+type _CheckTextPathSegment = AssertTrue<AssertEqual<z.infer<typeof textPathSegmentSchema>, TextPathSegment>>;
+
+/** Mirrors `TextPathOrientation`. */
+export const textPathOrientationSchema = z
+  .enum(["upright", "tangent"])
+  .describe(
+    "Whether a TextPathConfig's glyphs rotate to follow the curve's own tangent at each point (\"tangent\") or stay upright, only translating (\"upright\").",
+  );
+
+type _CheckTextPathOrientation = AssertTrue<
+  AssertEqual<z.infer<typeof textPathOrientationSchema>, TextPathOrientation>
+>;
+
+/** Mirrors `TextPathSpacing`. */
+export const textPathSpacingSchema = z
+  .enum(["advance", "even"])
+  .describe(
+    "How a TextPathConfig spaces glyphs along its own curve: \"advance\" preserves each glyph's own natural advance-width proportions, \"even\" distributes them at equal arc-length intervals instead.",
+  );
+
+type _CheckTextPathSpacing = AssertTrue<AssertEqual<z.infer<typeof textPathSpacingSchema>, TextPathSpacing>>;
+
+/** Mirrors `TextPathAlignment`. */
+export const textPathAlignmentSchema = z
+  .enum(["start", "center", "end"])
+  .describe(
+    "Which part of the text (its first unit, its own midpoint, or its last unit) a TextPathConfig positions exactly at startOffset.",
+  );
+
+type _CheckTextPathAlignment = AssertTrue<
+  AssertEqual<z.infer<typeof textPathAlignmentSchema>, TextPathAlignment>
+>;
+
+/** Mirrors `TextPathConfig`. */
+export const textPathConfigSchema = z.strictObject({
+  start: propertySchema(vector3Schema).describe("The curve's own starting point."),
+  segments: z
+    .array(textPathSegmentSchema)
+    .readonly()
+    .describe("The curve's own sequence of segments, each continuing from where the previous one left off."),
+  progress: propertySchema(z.number())
+    .optional()
+    .describe(
+      "How much of the curve's own remaining length (from startOffset to the curve's own end) the text's full span is stretched across. 1 (the default) uses all of it; less compresses the whole text into a shorter leading portion.",
+    ),
+  startOffset: propertySchema(z.number())
+    .optional()
+    .describe(
+      "Where along the curve's own arc length (0 to 1) the text's own alignment-anchored point sits. Defaults to 0.",
+    ),
+  orientation: textPathOrientationSchema.optional().describe("Defaults to \"tangent\"."),
+  spacing: textPathSpacingSchema.optional().describe("Defaults to \"advance\"."),
+  alignment: textPathAlignmentSchema.optional().describe("Defaults to \"start\"."),
+});
+
+type _CheckTextPathConfig = AssertTrue<AssertEqual<z.infer<typeof textPathConfigSchema>, TextPathConfig>>;
+
+/** Mirrors `TextMorphConfig`. */
+export const textMorphConfigSchema = z.strictObject({
+  from: z.string().describe("The text this node's own content crossfade-morphs from."),
+  grouping: textStaggerGroupingSchema,
+  progress: propertySchema(z.number()).describe(
+    "0 shows from exactly as laid out; 1 shows content exactly as laid out.",
+  ),
+});
+
+type _CheckTextMorphConfig = AssertTrue<AssertEqual<z.infer<typeof textMorphConfigSchema>, TextMorphConfig>>;
+
 /**
  * A block of rendered text.
  *
@@ -464,6 +563,12 @@ export const textNodeSchema = z.strictObject({
     .describe(
       "Expressive per-glyph animation (springs, jitter, wave, scramble, count-up), composable with stagger. Omitted means no physics effect.",
     ),
+  path: textPathConfigSchema
+    .optional()
+    .describe("Places this node's own glyphs along a curve instead of a flat line. Omitted means a normal flat layout."),
+  morph: textMorphConfigSchema
+    .optional()
+    .describe("Crossfade-morphs this node's own content from another string. Omitted means no morphing: content renders as-is."),
   get children(): z.ZodArray<typeof sceneNodeSchema> {
     return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
   },

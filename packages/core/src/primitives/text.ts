@@ -4,7 +4,13 @@ import {
   type ColorRGBA,
   createIdentityTransform,
 } from "../scene-graph/primitives.js";
-import type { TextNode, TextPhysicsConfig, TextStaggerConfig } from "../scene-graph/scene-node.js";
+import type {
+  TextMorphConfig,
+  TextNode,
+  TextPathConfig,
+  TextPhysicsConfig,
+  TextStaggerConfig,
+} from "../scene-graph/scene-node.js";
 
 /**
  * Props for `Text`. Only `id` is required; everything else defaults.
@@ -26,6 +32,8 @@ export interface TextProps {
   extrudeDepth?: Property<number>;
   stagger?: TextStaggerConfig;
   physics?: TextPhysicsConfig;
+  path?: TextPathConfig;
+  morph?: TextMorphConfig;
 }
 
 /**
@@ -36,9 +44,9 @@ export interface TextProps {
  * `undefined` unless supplied, matching `TextNode`'s "omitted means the
  * renderer's default" convention; `extrudeDepth` is likewise left
  * `undefined` unless supplied, matching its own "omitted means flat" default;
- * `stagger`/`physics` are likewise left `undefined` unless supplied,
- * matching their own "omitted means no staggering"/"no physics effect"
- * defaults.
+ * `stagger`/`physics`/`path`/`morph` are likewise left `undefined` unless
+ * supplied, matching their own "omitted means no staggering"/"no physics
+ * effect"/"a normal flat layout"/"no morphing" defaults.
  */
 export function Text(props: TextProps): TextNode {
   return {
@@ -55,5 +63,7 @@ export function Text(props: TextProps): TextNode {
     ...(props.extrudeDepth !== undefined && { extrudeDepth: props.extrudeDepth }),
     ...(props.stagger !== undefined && { stagger: props.stagger }),
     ...(props.physics !== undefined && { physics: props.physics }),
+    ...(props.path !== undefined && { path: props.path }),
+    ...(props.morph !== undefined && { morph: props.morph }),
   };
 }

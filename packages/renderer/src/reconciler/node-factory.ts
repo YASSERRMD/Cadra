@@ -127,9 +127,9 @@ export interface OwnedResources {
   /**
    * The exact glyph array `text` above was built from, kept around only so
    * a later `applyNodeProperties` call can drive `node.stagger`/
-   * `node.physics` (Phase 50/51): that registry-resolved data is only ever
-   * on hand inside `buildTextObject` itself, not on every subsequent
-   * per-frame call.
+   * `node.physics` (Phase 50/51) or `node.path` (Phase 52): that
+   * registry-resolved data is only ever on hand inside `buildTextObject`
+   * itself, not on every subsequent per-frame call.
    */
   textGlyphs?: readonly PositionedGlyph[];
   /** A `satori` node's own owned resources; see `SatoriLayerResources`'s own doc. */
@@ -334,13 +334,16 @@ export function applyNodeProperties(
       // render-key/extrusion state changes; see buildTextObject).
       object3D.scale.multiplyScalar(fontSize);
       owned?.text?.setColor(color[0], color[1], color[2], color[3]);
-      if ((node.stagger !== undefined || node.physics !== undefined) && owned?.textGlyphs !== undefined) {
+      if (
+        (node.stagger !== undefined || node.physics !== undefined || node.path !== undefined) &&
+        owned?.textGlyphs !== undefined
+      ) {
         const needsLineTexts = node.stagger?.grouping === "grapheme" || node.physics?.grouping === "grapheme";
         const lineTexts = needsLineTexts ? node.content.split("\n") : undefined;
         applyTextEffects(
           object3D as THREE.Group,
           owned.textGlyphs,
-          { stagger: node.stagger, physics: node.physics },
+          { stagger: node.stagger, physics: node.physics, path: node.path },
           frame,
           lineTexts,
         );
