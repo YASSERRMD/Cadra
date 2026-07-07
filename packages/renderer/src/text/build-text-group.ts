@@ -1,14 +1,14 @@
-import type { ColorRGBA } from "@cadra/core";
+import type { ColorRGBA, ResolvedTextFill, ResolvedTextGlow, ResolvedTextOutline, ResolvedTextShadow } from "@cadra/core";
 // From the browser-safe entry, not the bare "@cadra/text" barrel: this
 // module is part of packages/renderer's own code path that
 // packages/headless bundles into the browser-executed render page (via
 // esbuild); the main "." entry pulls in fontkit/harfbuzzjs/msdfgen-wasm/
 // subset-font, none of which resolve for a browser target. See
 // @cadra/text's own browser.ts module doc for the full explanation.
-import { getGlyphPathCommands, type GlyphPathCommand, type TextRenderData } from "@cadra/text/browser";
+import { getGlyphPathCommands, type GlyphPathCommand, type PositionedGlyph, type TextRenderData } from "@cadra/text/browser";
 import * as THREE from "three";
 
-import { createMsdfTextMaterial, type MsdfTextMaterialHandle } from "./msdf-material.js";
+import { createMsdfTextMaterial, type MsdfMaterialConfig, type MsdfTextMaterialHandle } from "./msdf-material.js";
 
 /** Everything `buildTextGroup` allocated, so the reconciler can dispose exactly these resources (and no shared/pooled ones) when a text node's content changes or is removed. */
 export interface TextGroupResources {
@@ -21,9 +21,20 @@ export interface TextGroupResources {
    * rendering path built them: the flat path's `MeshBasicNodeMaterial`s
    * hold their color in a TSL uniform node (see `msdf-material.ts`), not
    * the classic `.color` property, so a caller must go through this rather
-   * than mutating `materials` directly.
+   * than mutating `materials` directly. For a gradient `fill` specifically,
+   * this sets the *solid* base color that a texture/video fill still falls
+   * back to (see `TextFill`'s own doc); use `setFill` for the gradient
+   * itself.
    */
   setColor: (r: number, g: number, b: number, a: number) => void;
+  /** Present only when `BuildTextGroupOptions.fill` was a gradient at build time (a structural, build-time-only choice - see `msdf-material.ts`). */
+  setFill?: (fill: ResolvedTextFill) => void;
+  /** Present only when `BuildTextGroupOptions.outline` was set at build time. */
+  setOutline?: (outline: ResolvedTextOutline) => void;
+  /** Present only when `BuildTextGroupOptions.glow` was set at build time. */
+  setGlow?: (glow: ResolvedTextGlow) => void;
+  /** Present only when `BuildTextGroupOptions.shadow` was set at build time. Cannot change `steps` (how many duplicate shadow meshes exist is fixed at build time); updates every other field on the already-built set. */
+  setShadow?: (shadow: ResolvedTextShadow) => void;
 }
 
 /** A font's raw bytes plus its own content hash, the minimum `buildTextGroup` needs to extrude real glyph outlines. */
@@ -50,6 +61,19 @@ export interface BuildTextGroupOptions {
    * never stagger and gain nothing from paying this cost.
    */
   perGlyphMaterial?: boolean;
+  /**
+   * A richer fill than a flat `color`, for the flat MSDF rendering path
+   * only (the extruded path always uses a plain `THREE.MeshStandardMaterial`
+   * lit by scene lights, which has no analogous notion of a 2D gradient
+   * fill). A `"texture"`/`"video"` fill (real per-pixel sampling not yet
+   * wired anywhere in this renderer - see `TextFill`'s own doc) falls back
+   * to plain `color`, matching `ImageNode`/`VideoNode`'s own existing
+   * placeholder precedent. Omitted means a plain solid fill using `color`.
+   */
+  fill?: ResolvedTextFill;
+  outline?: ResolvedTextOutline;
+  glow?: ResolvedTextGlow;
+  shadow?: ResolvedTextShadow;
 }
 
 /**
@@ -181,8 +205,38 @@ export function buildTextGroup(
     return texture;
   });
 
+  const blockBounds = computeBlockBounds(data.glyphs);
+  const msdfMaterialConfig = resolveMsdfMaterialConfig(options);
+
   const materialHandlesByKey = new Map<string, MsdfTextMaterialHandle>();
   const baseMaterialHandles = new Set<MsdfTextMaterialHandle>();
+
+  function initializeMaterialHandle(handle: MsdfTextMaterialHandle, color: ColorRGBA): void {
+    const fill = options.fill;
+    if (fill !== undefined && (fill.type === "linearGradient" || fill.type === "radialGradient")) {
+      handle.setGradient(
+        fill.type === "linearGradient" ? fill.angle : 0,
+        fill.stops.map((stop) => stop.color),
+      );
+    } else {
+      handle.setColor(color[0], color[1], color[2], color[3]);
+    }
+    if (options.outline !== undefined) {
+      const outlineColor = options.outline.color;
+      handle.setOutline(options.outline.width, outlineColor[0], outlineColor[1], outlineColor[2], outlineColor[3]);
+    }
+    if (options.glow !== undefined) {
+      const glowColor = options.glow.color;
+      handle.setGlow(
+        options.glow.radius,
+        glowColor[0],
+        glowColor[1],
+        glowColor[2],
+        glowColor[3],
+        options.glow.intensity,
+      );
+    }
+  }
 
   function getMsdfMaterialHandle(page: number, color: ColorRGBA, isBaseColor: boolean): MsdfTextMaterialHandle | undefined {
     const texture = texturesByPage[page];
@@ -192,8 +246,8 @@ export function buildTextGroup(
     const key = `${page}:${colorKey(color)}`;
     let handle = options.perGlyphMaterial === true ? undefined : materialHandlesByKey.get(key);
     if (handle === undefined) {
-      handle = createMsdfTextMaterial(texture);
-      handle.setColor(color[0], color[1], color[2], color[3]);
+      handle = createMsdfTextMaterial(texture, msdfMaterialConfig);
+      initializeMaterialHandle(handle, color);
       materials.push(handle.material);
       if (options.perGlyphMaterial !== true) {
         materialHandlesByKey.set(key, handle);
@@ -201,6 +255,26 @@ export function buildTextGroup(
     }
     if (isBaseColor) {
       baseMaterialHandles.add(handle);
+    }
+    return handle;
+  }
+
+  const shadowMaterialsByPage = new Map<number, MsdfTextMaterialHandle>();
+  const shadowMeshes: { mesh: THREE.Mesh; step: number }[] = [];
+
+  function getShadowMaterialHandle(page: number): MsdfTextMaterialHandle | undefined {
+    const texture = texturesByPage[page];
+    const shadow = options.shadow;
+    if (texture === undefined || shadow === undefined) {
+      return undefined;
+    }
+    let handle = shadowMaterialsByPage.get(page);
+    if (handle === undefined) {
+      handle = createMsdfTextMaterial(texture);
+      handle.setColor(shadow.color[0], shadow.color[1], shadow.color[2], shadow.color[3]);
+      handle.setBlur(shadow.blur);
+      materials.push(handle.material);
+      shadowMaterialsByPage.set(page, handle);
     }
     return handle;
   }
@@ -214,6 +288,7 @@ export function buildTextGroup(
     const height = glyph.quad.top - glyph.quad.bottom;
     const geometry = new THREE.PlaneGeometry(width, height);
     applyGlyphUv(geometry, glyph.uv);
+    applyGlyphMsdfAttributes(geometry, glyph, blockBounds);
     geometries.push(geometry);
 
     const mesh = new THREE.Mesh(geometry, handle.material);
@@ -232,6 +307,31 @@ export function buildTextGroup(
       handle.setOpacity(a);
     };
     getWordGroup(glyph.lineIndex, glyph.wordIndex).add(mesh);
+
+    if (options.shadow !== undefined) {
+      const shadowHandle = getShadowMaterialHandle(glyph.page);
+      if (shadowHandle !== undefined) {
+        for (let step = 1; step <= options.shadow.steps; step += 1) {
+          // Reuses this same glyph's own geometry (same UV rect, same
+          // msdfRange attribute) rather than sampling the atlas at an
+          // offset UV within one mesh: offsetting the *position* of a
+          // whole duplicate mesh can never bleed into a neighboring
+          // glyph's own packed atlas rect the way offsetting a sample
+          // coordinate within a single tight quad could.
+          const shadowMesh = new THREE.Mesh(geometry, shadowHandle.material);
+          shadowMesh.name = `glyph-shadow-${glyph.cluster}-${glyph.glyphId}-${step}`;
+          shadowMesh.renderOrder = -1;
+          shadowMesh.position.set(
+            mesh.position.x + options.shadow.offsetX * step,
+            mesh.position.y + options.shadow.offsetY * step,
+            mesh.position.z,
+          );
+          shadowMesh.userData["basePosition"] = mesh.userData["basePosition"];
+          getWordGroup(glyph.lineIndex, glyph.wordIndex).add(shadowMesh);
+          shadowMeshes.push({ mesh: shadowMesh, step });
+        }
+      }
+    }
   }
 
   return {
@@ -244,6 +344,64 @@ export function buildTextGroup(
         handle.setColor(r, g, b, a);
       }
     },
+    ...(msdfMaterialConfig.fillType !== "solid" && {
+      setFill: (fill: ResolvedTextFill) => {
+        if (fill.type !== "linearGradient" && fill.type !== "radialGradient") {
+          return;
+        }
+        for (const handle of baseMaterialHandles) {
+          handle.setGradient(fill.type === "linearGradient" ? fill.angle : 0, fill.stops.map((stop) => stop.color));
+        }
+      },
+    }),
+    ...(options.outline !== undefined && {
+      setOutline: (outline: ResolvedTextOutline) => {
+        for (const handle of baseMaterialHandles) {
+          handle.setOutline(outline.width, outline.color[0], outline.color[1], outline.color[2], outline.color[3]);
+        }
+      },
+    }),
+    ...(options.glow !== undefined && {
+      setGlow: (glow: ResolvedTextGlow) => {
+        for (const handle of baseMaterialHandles) {
+          handle.setGlow(glow.radius, glow.color[0], glow.color[1], glow.color[2], glow.color[3], glow.intensity);
+        }
+      },
+    }),
+    ...(options.shadow !== undefined && {
+      setShadow: (shadow: ResolvedTextShadow) => {
+        for (const handle of shadowMaterialsByPage.values()) {
+          handle.setColor(shadow.color[0], shadow.color[1], shadow.color[2], shadow.color[3]);
+          handle.setBlur(shadow.blur);
+        }
+        for (const entry of shadowMeshes) {
+          const basePosition = entry.mesh.userData["basePosition"] as THREE.Vector3;
+          entry.mesh.position.set(
+            basePosition.x + shadow.offsetX * entry.step,
+            basePosition.y + shadow.offsetY * entry.step,
+            basePosition.z,
+          );
+        }
+      },
+    }),
+  };
+}
+
+/** Resolves `options.fill`/`options.outline`/`options.glow` into the structural, build-time-only shape `createMsdfTextMaterial` needs. `"texture"`/`"video"` fills (and no fill at all) map to `"solid"` - see `BuildTextGroupOptions.fill`'s own doc on why. */
+function resolveMsdfMaterialConfig(options: BuildTextGroupOptions): MsdfMaterialConfig {
+  const fill = options.fill;
+  if (fill !== undefined && (fill.type === "linearGradient" || fill.type === "radialGradient")) {
+    return {
+      fillType: fill.type,
+      gradientStopOffsets: fill.stops.map((stop) => stop.offset),
+      outline: options.outline !== undefined,
+      glow: options.glow?.direction,
+    };
+  }
+  return {
+    fillType: "solid",
+    outline: options.outline !== undefined,
+    glow: options.glow?.direction,
   };
 }
 
@@ -270,6 +428,67 @@ function applyGlyphUv(
     uvRect.v0,
   ]);
   geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+}
+
+/** The whole rendered text block's own bounding box (every glyph's own `quad` together), used only to give a gradient fill continuous, cross-glyph coordinates (`blockUV` below) rather than each glyph independently re-starting its own 0-1 gradient. */
+interface BlockBounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+function computeBlockBounds(glyphs: readonly PositionedGlyph[]): BlockBounds {
+  if (glyphs.length === 0) {
+    return { minX: 0, minY: 0, maxX: 1, maxY: 1 };
+  }
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const glyph of glyphs) {
+    if (glyph.quad.left < minX) minX = glyph.quad.left;
+    if (glyph.quad.bottom < minY) minY = glyph.quad.bottom;
+    if (glyph.quad.right > maxX) maxX = glyph.quad.right;
+    if (glyph.quad.top > maxY) maxY = glyph.quad.top;
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+/**
+ * Bakes two custom per-vertex attributes `msdf-material.ts` reads:
+ * `msdfRange` (this glyph's own MSDF distance-field range, in em units -
+ * see `PositionedGlyph.range`'s own doc on why a shader needs this at all)
+ * and `blockUV` (this vertex's own fraction of the *whole text block's*
+ * bounding box, `blockBounds` - only actually sampled by the shader for a
+ * gradient fill, but harmless to always bake: a handful of extra floats
+ * per glyph, never read otherwise).
+ */
+function applyGlyphMsdfAttributes(
+  geometry: THREE.PlaneGeometry,
+  glyph: PositionedGlyph,
+  blockBounds: BlockBounds,
+): void {
+  const range = new Float32Array([glyph.range, glyph.range, glyph.range, glyph.range]);
+  geometry.setAttribute("msdfRange", new THREE.BufferAttribute(range, 1));
+
+  const blockWidth = blockBounds.maxX - blockBounds.minX;
+  const blockHeight = blockBounds.maxY - blockBounds.minY;
+  const fractionX = (x: number) => (blockWidth === 0 ? 0 : (x - blockBounds.minX) / blockWidth);
+  const fractionY = (y: number) => (blockHeight === 0 ? 0 : (y - blockBounds.minY) / blockHeight);
+
+  // Same 4-vertex order as applyGlyphUv: bottom-left, bottom-right, top-left, top-right.
+  const blockUv = new Float32Array([
+    fractionX(glyph.quad.left),
+    fractionY(glyph.quad.bottom),
+    fractionX(glyph.quad.right),
+    fractionY(glyph.quad.bottom),
+    fractionX(glyph.quad.left),
+    fractionY(glyph.quad.top),
+    fractionX(glyph.quad.right),
+    fractionY(glyph.quad.top),
+  ]);
+  geometry.setAttribute("blockUV", new THREE.BufferAttribute(blockUv, 2));
 }
 
 /** Replays one contour's commands onto any `THREE.Path`-shaped target (both `THREE.Path` and `THREE.Shape` support the same drawing calls, `Shape` being a `Path` subclass). */
