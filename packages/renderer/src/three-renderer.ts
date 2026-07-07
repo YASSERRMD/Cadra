@@ -6,6 +6,9 @@ import {
   type SceneState,
 } from "@cadra/core";
 import * as THREE from "three";
+import { RectAreaLightTexturesLib } from "three/addons/lights/RectAreaLightTexturesLib.js";
+import { RectAreaLightUniformsLib } from "three/addons/lights/RectAreaLightUniformsLib.js";
+import * as ThreeWebGPUInternals from "three/webgpu";
 import { WebGPURenderer, type WebGPURendererParameters } from "three/webgpu";
 
 import { detectWebGpuSupport, type WebGpuDetector } from "./capability-detection.js";
@@ -66,14 +69,71 @@ export interface ThreeRendererDependencies {
  * `toneMappingExposure` is left at its own default (`1`, a no-op) here:
  * `renderFrame` sets it fresh every call, from the composition's own
  * resolved `colorGrading`.
+ *
+ * `shadowMap.enabled`/`.type` are Phase 55's own addition: without them, a
+ * `LightNode`/`MeshNode`'s own `castShadow`/`receiveShadow` flags (see
+ * `node-factory.ts`) have literally nothing to draw into, a silent no-op
+ * rather than a visible shadow. `PCFSoftShadowMap` (Three.js's own built-in
+ * percentage-closer-filtered soft shadow type) matches this phase's "soft
+ * shadows" task without needing the cascaded/contact/SSAO machinery Phase 57
+ * owns.
  */
 function applyColorWorkflowDefaults(renderer: THREE.WebGLRenderer | WebGPURenderer): void {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+}
+
+/** Guards `ensureWebGl2AreaLightSupport`/`ensureWebGpuAreaLightSupport` so each backend's own one-time area-light setup runs at most once per process. */
+let webGl2AreaLightSupportReady = false;
+let webGpuAreaLightSupportReady = false;
+
+/**
+ * Enables `RectAreaLight` support for the classic `WebGLRenderer` backend.
+ * Required, not optional: `RectAreaLight`'s own `@types/three` doc states
+ * plainly that without this call, an area light produces no visible light at
+ * all on this backend. Populates module-level static state inside Three.js
+ * itself (not anything per-renderer-instance), so this only ever needs to
+ * run once per process, however many `ThreeRenderer`s get constructed.
+ */
+function ensureWebGl2AreaLightSupport(): void {
+  if (webGl2AreaLightSupportReady) {
+    return;
+  }
+  webGl2AreaLightSupportReady = true;
+  RectAreaLightUniformsLib.init();
+}
+
+/**
+ * The `three/webgpu`-backend equivalent of `ensureWebGl2AreaLightSupport`
+ * above, mirroring its own doc for why this is required and safe to call
+ * once per process. `three/webgpu`'s own type declarations (`@types/three`
+ * 0.185.0, verified directly against this project's installed version) do
+ * not surface `RectAreaLightNode` as a named export, even though the
+ * runtime bundle genuinely exports it (verified directly against
+ * `three`'s own built `build/three.webgpu.js`, which contains it in its own
+ * top-level export list) and `RectAreaLight`'s own doc names exactly this
+ * call as WebGPURenderer's required setup step. This narrow, structurally
+ * typed cast reaches only the one static method needed to close that
+ * declaration gap; the optional-chained call is a defensive no-op (not a
+ * throw) if a future Three.js version ever removes or renames this
+ * undocumented-in-types export.
+ */
+function ensureWebGpuAreaLightSupport(): void {
+  if (webGpuAreaLightSupportReady) {
+    return;
+  }
+  webGpuAreaLightSupportReady = true;
+  const webGpuInternals = ThreeWebGPUInternals as unknown as {
+    RectAreaLightNode?: { setLTC(ltc: unknown): void };
+  };
+  webGpuInternals.RectAreaLightNode?.setLTC(RectAreaLightTexturesLib.init());
 }
 
 /** The real WebGPU constructor path: `three/webgpu`'s `WebGPURenderer`, canvas passed via `canvas`. */
 function createRealWebGpuRenderer(target: RenderTarget, _size: RenderSize): ThreeRendererLike {
+  ensureWebGpuAreaLightSupport();
   const parameters: WebGPURendererParameters = { canvas: target };
   const renderer = new WebGPURenderer(parameters);
   applyColorWorkflowDefaults(renderer);
@@ -82,6 +142,7 @@ function createRealWebGpuRenderer(target: RenderTarget, _size: RenderSize): Thre
 
 /** The real WebGL2 fallback path: the classic `THREE.WebGLRenderer`, also driven off `canvas`. */
 function createRealWebGl2Renderer(target: RenderTarget, _size: RenderSize): ThreeRendererLike {
+  ensureWebGl2AreaLightSupport();
   const renderer = new THREE.WebGLRenderer({ canvas: target });
   applyColorWorkflowDefaults(renderer);
   return renderer;
