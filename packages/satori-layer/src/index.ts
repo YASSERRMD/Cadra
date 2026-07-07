@@ -23,8 +23,7 @@ export const VERSION = "0.0.0";
 /** Identifies this package at runtime, useful for diagnostics. */
 export const PACKAGE_NAME = "@cadra/satori-layer";
 
-export type { LayerElement, LayerElementType } from "./layer-element.js";
-export type { LayerStyle } from "./layer-style.js";
+export type { LayerElement, LayerElementType, LayerStyle } from "./layer-element.js";
 export type { SatoriElement } from "./layer-to-satori-node.js";
 export { layerElementToSatoriNode } from "./layer-to-satori-node.js";
 export { computeRenderLayerCacheKey } from "./render-layer-cache-key.js";
