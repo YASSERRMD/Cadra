@@ -193,3 +193,64 @@ describe("Text builder exposes stagger (Phase 50)", () => {
     expect(result.success).toBe(true);
   });
 });
+
+describe("Text builder exposes physics (Phase 51)", () => {
+  it("passes physics through to the built node", () => {
+    const builder = Text({
+      id: "text-1",
+      content: "Hello",
+      physics: { effect: "jitter", grouping: "character", positionAmplitude: 0.05 },
+    });
+    expect(builder.node.kind).toBe("text");
+    expect(builder.node.kind === "text" && builder.node.physics).toEqual({
+      effect: "jitter",
+      grouping: "character",
+      positionAmplitude: 0.05,
+    });
+  });
+
+  it("a built document with both stagger and physics passes parseScene", () => {
+    const document = buildWithOnePlacement(
+      Text({
+        id: "text-1",
+        content: "Hello",
+        stagger: {
+          preset: "fadeInUp",
+          grouping: "word",
+          startFrame: 0,
+          delayFrames: 3,
+          durationFrames: 15,
+        },
+        physics: {
+          effect: "spring",
+          grouping: "character",
+          fps: 30,
+          stiffness: 120,
+          damping: 14,
+        },
+      }).at(0, 30),
+    );
+    const result = parseScene(document);
+    expect(result.success).toBe(true);
+  });
+
+  it("a built document with a countUp physics effect passes parseScene", () => {
+    const document = buildWithOnePlacement(
+      Text({
+        id: "text-1",
+        content: "0",
+        physics: {
+          effect: "countUp",
+          grouping: "line",
+          startFrame: 0,
+          durationFrames: 60,
+          fromValue: 0,
+          toValue: 1000,
+          useGrouping: true,
+        },
+      }).at(0, 60),
+    );
+    const result = parseScene(document);
+    expect(result.success).toBe(true);
+  });
+});

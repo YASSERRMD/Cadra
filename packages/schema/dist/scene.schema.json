@@ -3099,6 +3099,134 @@
               ],
               "additionalProperties": false
             },
+            "physics": {
+              "description": "Expressive per-glyph animation (springs, jitter, wave, scramble, count-up), composable with stagger. Omitted means no physics effect.",
+              "type": "object",
+              "properties": {
+                "effect": {
+                  "type": "string",
+                  "enum": [
+                    "spring",
+                    "jitter",
+                    "wave",
+                    "scramble",
+                    "countUp"
+                  ],
+                  "description": "Which per-glyph animation a TextPhysicsConfig drives."
+                },
+                "grouping": {
+                  "type": "string",
+                  "enum": [
+                    "grapheme",
+                    "character",
+                    "word",
+                    "line"
+                  ],
+                  "description": "Which unit a TextStaggerConfig splits the node's own content into."
+                },
+                "seed": {
+                  "description": "Seeds this effect's own deterministic randomness (\"jitter\"'s noise, \"scramble\"'s character choices). Defaults to 0.",
+                  "type": "number"
+                },
+                "startFrame": {
+                  "description": "\"spring\"/\"scramble\" only: the frame the very first unit (in rank order) begins animating at. Defaults to 0.",
+                  "type": "number"
+                },
+                "delayFrames": {
+                  "description": "\"spring\"/\"scramble\" only: frames between each consecutive unit's own start, in rank order. Defaults to 0 (every unit starts together).",
+                  "type": "number"
+                },
+                "durationFrames": {
+                  "description": "\"spring\"/\"scramble\"/\"countUp\" only: how many frames one unit's own animation takes, once it starts. Defaults to 30.",
+                  "type": "number"
+                },
+                "direction": {
+                  "description": "Defaults to \"forward\".",
+                  "type": "string",
+                  "enum": [
+                    "forward",
+                    "backward",
+                    "centerOut"
+                  ]
+                },
+                "fps": {
+                  "description": "\"spring\" only: the composition's own frame rate, needed to convert frame counts into physical time for the mass-spring-damper simulation. Defaults to 30.",
+                  "type": "number"
+                },
+                "stiffness": {
+                  "description": "\"spring\" only. Defaults to 100.",
+                  "type": "number"
+                },
+                "damping": {
+                  "description": "\"spring\" only. Defaults to 10.",
+                  "type": "number"
+                },
+                "mass": {
+                  "description": "\"spring\" only. Defaults to 1.",
+                  "type": "number"
+                },
+                "distance": {
+                  "description": "\"spring\" only: how far (in fontSize-relative em units) a unit starts offset from its natural position. Defaults to 1.",
+                  "type": "number"
+                },
+                "positionAmplitude": {
+                  "description": "\"jitter\"/\"wave\" only: peak offset, in fontSize-relative em units. Defaults to 0.05 for \"jitter\", 0.1 for \"wave\".",
+                  "type": "number"
+                },
+                "rotationAmplitude": {
+                  "description": "\"jitter\" only: peak rotation around the glyph's own local Z axis, in radians. Defaults to 0 (no rotation jitter).",
+                  "type": "number"
+                },
+                "periodFrames": {
+                  "description": "\"jitter\"'s own noise checkpoint spacing, or \"wave\"'s own oscillation period, in frames. Defaults to 20 for \"jitter\", 30 for \"wave\".",
+                  "type": "number"
+                },
+                "charset": {
+                  "description": "\"scramble\" only: which characters a not-yet-locked-in unit is randomly drawn from. Defaults to uppercase Latin letters and digits.",
+                  "type": "string"
+                },
+                "fromValue": {
+                  "description": "\"countUp\" only: the value displayed at frame <= startFrame. Defaults to 0.",
+                  "type": "number"
+                },
+                "toValue": {
+                  "description": "\"countUp\" only: the value displayed at frame >= startFrame + durationFrames. Defaults to 0.",
+                  "type": "number"
+                },
+                "decimalPlaces": {
+                  "description": "\"countUp\" only: fixed decimal places in the formatted number. Defaults to 0.",
+                  "type": "number"
+                },
+                "useGrouping": {
+                  "description": "\"countUp\" only: whether to group digits with a thousands separator (always a fixed en-US-equivalent format regardless of runtime locale). Defaults to false.",
+                  "type": "boolean"
+                },
+                "easing": {
+                  "description": "\"countUp\" only: eases the count's own progress. Defaults to \"linear\".",
+                  "type": "string",
+                  "enum": [
+                    "linear",
+                    "easeInCubic",
+                    "easeOutCubic",
+                    "easeInOutCubic",
+                    "easeInExpo",
+                    "easeOutExpo",
+                    "easeInOutExpo",
+                    "easeInBack",
+                    "easeOutBack",
+                    "easeInOutBack",
+                    "easeInElastic",
+                    "easeOutElastic",
+                    "easeInOutElastic"
+                  ]
+                }
+              },
+              "required": [
+                "effect",
+                "grouping"
+              ],
+              "additionalProperties": false
+            },
             "children": {
               "type": "array",
               "items": {

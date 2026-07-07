@@ -123,6 +123,8 @@ export type { ShapeTextOptions } from "./shape-text.js";
 export { shapeLogicalRuns, shapeText } from "./shape-text.js";
 export type { ShapedGlyph, ShapedTextRun } from "./shaped-run.js";
 export { sharedAtlasCache } from "./shared-atlas-cache.js";
+export type { GlyphPhysicsState } from "./text-physics-glyphs.js";
+export { resolveGlyphPhysicsStates } from "./text-physics-glyphs.js";
 export type { PrepareTextRenderDataOptions, TextRenderData } from "./text-render-data.js";
 export { computeTextRenderCacheKey, prepareTextRenderData } from "./text-render-data.js";
 export type { GlyphStaggerState } from "./text-stagger-glyphs.js";

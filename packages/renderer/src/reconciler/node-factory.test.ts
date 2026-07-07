@@ -1,4 +1,10 @@
-import { createIdentityTransform, type SatoriNode, type SceneNode, type TextStaggerConfig } from "@cadra/core";
+import {
+  createIdentityTransform,
+  type SatoriNode,
+  type SceneNode,
+  type TextPhysicsConfig,
+  type TextStaggerConfig,
+} from "@cadra/core";
 import type { RasterizedSvg } from "@cadra/svg-raster";
 import type { TextRenderData } from "@cadra/text";
 import * as THREE from "three";
@@ -617,5 +623,120 @@ describe("node-factory: text stagger", () => {
     const wordGroup = (built.object3D.children[0] as THREE.Group).children[0] as THREE.Group;
     const meshes = wordGroup.children as THREE.Mesh[];
     expect(meshes[0]?.material).toBe(meshes[1]?.material);
+  });
+});
+
+describe("node-factory: text physics", () => {
+  const TWO_GLYPH_TEXT_RENDER_DATA: TextRenderData = {
+    lineCount: 1,
+    atlasPages: [{ width: 4, height: 4, pixels: new Uint8Array(4 * 4 * 4).fill(255), png: new Uint8Array() }],
+    glyphs: [
+      {
+        glyphId: 1,
+        cluster: 0,
+        lineIndex: 0,
+        wordIndex: 0,
+        origin: { x: 0, y: 0 },
+        quad: { left: 0, right: 1, bottom: 0, top: 1 },
+        page: 0,
+        uv: { u0: 0, v0: 0, u1: 1, v1: 1 },
+      },
+      {
+        glyphId: 2,
+        cluster: 1,
+        lineIndex: 0,
+        wordIndex: 0,
+        origin: { x: 1, y: 0 },
+        quad: { left: 1, right: 2, bottom: 0, top: 1 },
+        page: 0,
+        uv: { u0: 0, v0: 0, u1: 1, v1: 1 },
+      },
+    ],
+  };
+
+  function makeCtxWithTwoGlyphText(content: string): NodeFactoryContext {
+    const textRenderRegistry = createInMemoryTextRenderRegistry();
+    textRenderRegistry.register(`default::${content}`, {
+      data: TWO_GLYPH_TEXT_RENDER_DATA,
+      fontBytes: new Uint8Array(),
+      fontContentHash: "fake-font",
+    });
+    return { ...makeCtx(), textRenderRegistry };
+  }
+
+  const JITTER: TextPhysicsConfig = {
+    effect: "jitter",
+    grouping: "character",
+    seed: 1,
+    positionAmplitude: 0.4,
+    periodFrames: 10,
+  };
+
+  function physicsTextNode(content: string, physics: TextPhysicsConfig, stagger?: TextStaggerConfig): SceneNode {
+    return {
+      id: "t",
+      kind: "text",
+      transform: createIdentityTransform(),
+      visible: true,
+      children: [],
+      content,
+      fontSize: 12,
+      color: [1, 1, 1, 1],
+      physics,
+      ...(stagger !== undefined && { stagger }),
+    };
+  }
+
+  it("gives every glyph its own material for a physics-animated node (not shared across glyphs)", () => {
+    const ctx = makeCtxWithTwoGlyphText("ab");
+    const node = physicsTextNode("ab", JITTER);
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+
+    const wordGroup = (built.object3D.children[0] as THREE.Group).children[0] as THREE.Group;
+    const meshes = wordGroup.children as THREE.Mesh[];
+    expect(meshes[0]?.material).not.toBe(meshes[1]?.material);
+  });
+
+  it("drives each glyph's own position from the resolved jitter, independently per glyph", () => {
+    const ctx = makeCtxWithTwoGlyphText("ab");
+    const node = physicsTextNode("ab", JITTER);
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 5, built.owned);
+
+    const wordGroup = (built.object3D.children[0] as THREE.Group).children[0] as THREE.Group;
+    const [firstMesh, secondMesh] = wordGroup.children as THREE.Mesh[];
+    const firstBase = firstMesh?.userData["basePosition"] as THREE.Vector3;
+    const secondBase = secondMesh?.userData["basePosition"] as THREE.Vector3;
+
+    expect(firstMesh?.position.x).not.toBeCloseTo(firstBase.x, 5);
+    expect(secondMesh?.position.x).not.toBeCloseTo(secondBase.x, 5);
+    // Different glyphs (different ranks) get independent, uncorrelated jitter.
+    expect(firstMesh?.position.x).not.toBeCloseTo(secondMesh?.position.x as number, 5);
+  });
+
+  it("composes stagger and physics together on the same node", () => {
+    const ctx = makeCtxWithTwoGlyphText("ab");
+    const stagger: TextStaggerConfig = {
+      preset: "fadeInUp",
+      grouping: "character",
+      startFrame: 0,
+      delayFrames: 0,
+      durationFrames: 10,
+      distance: 1,
+    };
+    const node = physicsTextNode("ab", JITTER, stagger);
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 5, built.owned);
+
+    const wordGroup = (built.object3D.children[0] as THREE.Group).children[0] as THREE.Group;
+    const firstMesh = wordGroup.children[0] as THREE.Mesh;
+    const firstBase = firstMesh.userData["basePosition"] as THREE.Vector3;
+
+    // Neither effect alone would leave the glyph exactly at its own
+    // fadeInUp-only offset (-0.5) nor exactly at its base position - the
+    // jitter's own contribution must also be present.
+    expect(firstMesh.position.y).not.toBeCloseTo(firstBase.y - 0.5, 3);
+    expect(firstMesh.position.y).not.toBeCloseTo(firstBase.y, 3);
   });
 });

@@ -21,6 +21,8 @@ export type {
   SceneNode,
   SceneNodeKind,
   TextNode,
+  TextPhysicsConfig,
+  TextPhysicsEffect,
   TextStaggerConfig,
   TextStaggerDirection,
   TextStaggerGrouping,
