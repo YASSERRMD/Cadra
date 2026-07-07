@@ -27,6 +27,8 @@
     "bidi-js": "^1.0.3",
     "fontkit": "^2.0.4",
     "harfbuzzjs": "^1.4.0",
+    "maxrects-packer": "^2.7.3",
+    "msdfgen-wasm": "^1.0.0",
     "opentype.js": "^2.0.0",
     "subset-font": "^2.5.0",
     "unicode-properties": "^1.4.1"
