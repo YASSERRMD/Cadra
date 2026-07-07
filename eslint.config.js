@@ -113,6 +113,7 @@ export default tseslint.config(
       "packages/encode/src/**/*.ts",
       "packages/text/src/**/*.ts",
       "packages/satori-layer/src/**/*.ts",
+      "packages/svg-raster/src/**/*.ts",
     ],
     ignores: ["**/*.test.ts"],
     rules: {

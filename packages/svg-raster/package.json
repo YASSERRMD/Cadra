@@ -1,8 +1,8 @@
 {
-  "name": "@cadra/renderer",
+  "name": "@cadra/svg-raster",
   "version": "0.0.0",
   "private": false,
-  "description": "Cadra renderer package",
+  "description": "Cadra deterministic SVG to RGBA rasterization package",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -11,6 +11,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "default": "./dist/browser.js"
     }
   },
   "files": [
@@ -24,13 +28,14 @@
   },
   "dependencies": {
     "@cadra/core": "workspace:*",
-    "@cadra/svg-raster": "workspace:*",
-    "@cadra/text": "workspace:*",
-    "three": "^0.185.1"
+    "@resvg/resvg-js": "^2.6.2"
   },
   "devDependencies": {
-    "@types/three": "^0.185.0",
-    "jsdom": "^25.0.1",
+    "@cadra/satori-layer": "workspace:*",
+    "@cadra/text": "workspace:*",
+    "@types/node": "^26.1.0",
+    "@types/react": "^19.2.17",
+    "react": "^19.2.7",
     "typescript": "^5.7.3",
     "vitest": "^2.1.8"
   }
