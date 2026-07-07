@@ -278,6 +278,11 @@ export const textNodeSchema = z.strictObject({
   color: propertySchema(colorRgbaSchema).describe(
     "The color to render the text in. A plain ColorRGBA or a keyframe track.",
   ),
+  extrudeDepth: propertySchema(z.number())
+    .optional()
+    .describe(
+      "How far to extrude each glyph along its own local Z axis, in fontSize units. Omitted or 0 renders flat MSDF quads; a positive value builds solid 3D glyph geometry instead. A plain number or a keyframe track.",
+    ),
   get children(): z.ZodArray<typeof sceneNodeSchema> {
     return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
   },
