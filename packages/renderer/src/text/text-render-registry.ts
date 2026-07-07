@@ -1,4 +1,4 @@
-import type { TextNode } from "@cadra/core";
+import { resolveVariationAxesProperty, type TextNode } from "@cadra/core";
 // From the browser-safe entry for consistency with build-text-group.ts;
 // this is a type-only import either way (fully erased at build time), but
 // see that module's own comment for why the value-importing half of this
@@ -34,15 +34,37 @@ export interface MutableTextRenderRegistry extends TextRenderRegistry {
 }
 
 /**
- * The cache key a `TextRenderRegistry` is keyed by for a given `TextNode`:
- * just its `fontRef` (or `"default"` when omitted) and `content`, since
- * `fontSize` never affects which glyphs are shaped/atlased (glyph layout is
- * computed in font-size-independent em units; see `computeGlyphLayout`).
- * Whatever prepares and registers a node's `TextRenderEntry` ahead of time
- * must derive its registration key with this exact function too.
+ * The cache key a `TextRenderRegistry` is keyed by for a given `TextNode`
+ * at a given `frame`: `fontRef` (or `"default"` when omitted), `content`,
+ * and `node.variationAxes` resolved at that frame. `fontSize` never
+ * contributes (glyph layout is computed in font-size-independent em units;
+ * see `computeGlyphLayout`), and neither does anything else `frame`-varying
+ * on a `TextNode` (`stagger`/`physics`/`path` are all applied to
+ * already-shaped glyphs per frame, not something shaping itself needs to
+ * redo - see `apply-text-effects.ts`) - `variationAxes` is the one
+ * exception, and the only reason this key needs `frame` at all now: unlike
+ * every other keyframeable `TextNode` field, animating it smoothly means a
+ * genuinely different resolved instance (different glyph *outlines*, not
+ * just a different advance width - see `variationAxes`'s own doc in
+ * `@cadra/core`) at each distinct sampled frame, so whatever prepares and
+ * registers a node's `TextRenderEntry` ahead of time must derive one entry
+ * per distinct resolved value, the same "ahead of a `reconcile` call, not
+ * during one" cost `content` itself would already pay if it were keyframed.
+ *
+ * A plain `JSON.stringify` (not a content hash): all three fields are
+ * already small, directly-comparable data, so there is nothing a hash
+ * would buy over a direct string encoding - mirroring
+ * `computeSatoriLayerRenderKey`'s own identical reasoning.
  */
-export function computeTextNodeRenderKey(node: Pick<TextNode, "fontRef" | "content">): string {
-  return `${node.fontRef ?? "default"}::${node.content}`;
+export function computeTextNodeRenderKey(
+  node: Pick<TextNode, "fontRef" | "content" | "variationAxes">,
+  frame: number,
+): string {
+  return JSON.stringify({
+    fontRef: node.fontRef ?? "default",
+    content: node.content,
+    variationAxes: node.variationAxes !== undefined ? resolveVariationAxesProperty(node.variationAxes, frame) : null,
+  });
 }
 
 /** A simple in-memory `MutableTextRenderRegistry`, backed by a `Map`. */
