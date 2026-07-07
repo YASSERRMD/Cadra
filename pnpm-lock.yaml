@@ -158,6 +158,9 @@ importers:
 
   packages/mcp-server:
     dependencies:
+      '@cadra/agent-sdk':
+        specifier: workspace:*
+        version: link:../agent-sdk
       '@cadra/core':
         specifier: workspace:*
         version: link:../core

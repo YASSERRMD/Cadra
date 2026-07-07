@@ -1,22 +1,36 @@
 /**
  * Typed runtime configuration for the Cadra MCP server: where an agent's
  * scene/asset files live, where rendered output should be written, and a
- * forward-looking bag of generative-video provider keys.
+ * bag of provider API keys (LLM and, eventually, generative-video).
  *
  * This phase (28) only needs a clean, typed place for this configuration to
  * live; `workspaceRoot` and `outputDirectory` are not yet read by any
  * scene-authoring or render tool (those land in Phase 29 and Phase 30), and
- * `providerKeys` is not wired up to any actual provider (Veo, Runway, Kling,
- * Luma, Pika are Phase 34's job). Nothing here validates that a path exists
- * or a key is well-formed; that is deferred to whichever later phase first
- * needs to act on a given field.
+ * `providerKeys` is not wired up to any actual provider yet. Nothing here
+ * validates that a path exists or a key is well-formed; that is deferred to
+ * whichever later phase first needs to act on a given field.
+ *
+ * Phase 32 is `providerKeys`' first real consumer: `providerKeys.anthropic`,
+ * if set, is passed as the API key for `generate_scene_from_text`'s default
+ * `@anthropic-ai/sdk`-backed text-to-scene adapter (see
+ * `./text-to-scene-tools.ts`). Populate it either via an explicit
+ * `config.providerKeys.anthropic` option or the
+ * `CADRA_PROVIDER_KEY_ANTHROPIC` environment variable (see
+ * `PROVIDER_KEY_ENV_VAR_PREFIX` below). If unset, the underlying
+ * `@anthropic-ai/sdk` client itself falls back to reading
+ * `process.env.ANTHROPIC_API_KEY` directly (that SDK's own documented
+ * constructor default), so an operator relying on that variable already
+ * being set in the server's process environment needs no Cadra-specific
+ * configuration at all. Every other provider key (Veo, Runway, Kling, Luma,
+ * Pika) remains Phase 34's job, unwired to any tool in this phase.
  */
 
 /**
- * Provider API keys, keyed by an arbitrary provider identifier (e.g. `"veo"`,
- * `"runway"`). Deliberately generic: this phase does not know the final set
- * of providers or their key-naming convention, so it accepts any string key
- * rather than a closed union.
+ * Provider API keys, keyed by an arbitrary provider identifier (e.g.
+ * `"anthropic"`, `"veo"`, `"runway"`). Deliberately generic: this bag covers
+ * both LLM providers (Phase 32's `"anthropic"`) and generative-video
+ * providers (Phase 34's, still unwired), so it accepts any string key rather
+ * than a closed union.
  */
 export type ProviderKeys = Record<string, string>;
 
@@ -41,10 +55,12 @@ export const OUTPUT_DIRECTORY_ENV_VAR = "CADRA_OUTPUT_DIRECTORY";
 
 /**
  * Environment variable prefix scanned for {@link CadraMcpServerConfig.providerKeys}
- * entries when no explicit option is passed: `CADRA_PROVIDER_KEY_VEO=...` becomes
- * `providerKeys.veo`, `CADRA_PROVIDER_KEY_RUNWAY=...` becomes `providerKeys.runway`,
- * and so on. The provider identifier is lowercased from the remainder of the
- * variable name.
+ * entries when no explicit option is passed: `CADRA_PROVIDER_KEY_ANTHROPIC=...`
+ * becomes `providerKeys.anthropic` (read by `generate_scene_from_text`; see
+ * this module's own doc), `CADRA_PROVIDER_KEY_VEO=...` becomes
+ * `providerKeys.veo`, `CADRA_PROVIDER_KEY_RUNWAY=...` becomes
+ * `providerKeys.runway`, and so on. The provider identifier is lowercased
+ * from the remainder of the variable name.
  */
 export const PROVIDER_KEY_ENV_VAR_PREFIX = "CADRA_PROVIDER_KEY_";
 
