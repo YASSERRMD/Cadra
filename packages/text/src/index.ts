@@ -39,6 +39,18 @@
  * (world-independent - a renderer multiplies by its own `fontSize` to get
  * world units, so geometry never needs rebuilding just because `fontSize`
  * animates), atlas UV rectangle, and line/word grouping.
+ *
+ * Phase 45: the paragraph layout engine. `layoutParagraphLines` turns
+ * inline-styled spans plus a box width into positioned lines: greedy or
+ * Knuth-Plass line breaking, direction-aware alignment and justification
+ * (a right-to-left paragraph's `"start"` is its right edge), per-span
+ * font/size/color/tracking/features, and font-metrics-derived line height
+ * and paragraph spacing - synchronous and atlas-free, so it is directly
+ * testable without the async MSDF pipeline. `prepareParagraphRenderData`
+ * resolves the one remaining atlas-dependent step, merging one atlas per
+ * distinct font any span used into the same renderer-facing shape
+ * `prepareTextRenderData` already produces (plus each glyph's resolved
+ * style and per-line metrics), so both entry points feed the same renderer.
  */
 
 export const VERSION = "0.0.0";
@@ -59,12 +71,24 @@ export type { FontRegistration, FontRegistry, FontRegistryOptions } from "./font
 export { createFontRegistry } from "./font-registry.js";
 export type { FontSubsetOptions } from "./font-subset.js";
 export { codePointSetKey, subsetFontToCodePoints } from "./font-subset.js";
-export type { GlyphLayoutOptions, GlyphLayoutResult, PositionedGlyph } from "./glyph-layout.js";
-export { computeGlyphLayout } from "./glyph-layout.js";
+export type {
+  GlyphAtlasLookup,
+  GlyphLayoutOptions,
+  GlyphLayoutResult,
+  GlyphQuadPlacement,
+  PositionedGlyph,
+} from "./glyph-layout.js";
+export { buildGlyphAtlasLookup, charAtClusterStart, computeGlyphLayout, placeGlyphQuad } from "./glyph-layout.js";
 export type { GlyphPathCommand } from "./glyph-path.js";
 export { getGlyphPathCommands } from "./glyph-path.js";
 export type { ShapeRunOptions } from "./harfbuzz-shaping.js";
 export { shapeRun } from "./harfbuzz-shaping.js";
+export type { CombinedSpans, StyledItemizedRun } from "./inline-style-runs.js";
+export { combineSpans, splitRunsByStyle } from "./inline-style-runs.js";
+export type { InlineTextStyle, ParagraphSpan } from "./inline-text-style.js";
+export type { LineBreak } from "./line-break-greedy.js";
+export { computeGreedyLineBreaks } from "./line-break-greedy.js";
+export { computeKnuthPlassLineBreaks } from "./line-break-knuth-plass.js";
 export type {
   MsdfAtlas,
   MsdfAtlasOptions,
@@ -75,6 +99,18 @@ export type {
 export { generateMsdfAtlas } from "./msdf-atlas.js";
 export type { MsdfAtlasCache } from "./msdf-atlas-cache.js";
 export { computeMsdfAtlasCacheKey, createMsdfAtlasCache } from "./msdf-atlas-cache.js";
+export type {
+  ParagraphAlign,
+  ParagraphLayoutOptions,
+  ParagraphLineMetrics,
+  ParagraphLinesLayout,
+  PrePlacedGlyph,
+} from "./paragraph-layout.js";
+export { layoutParagraphLines } from "./paragraph-layout.js";
+export type { ParagraphRenderData, PrepareParagraphRenderDataOptions } from "./paragraph-render-data.js";
+export { prepareParagraphRenderData } from "./paragraph-render-data.js";
+export type { ParagraphWord, WordRange } from "./paragraph-words.js";
+export { computeLineWidth, segmentParagraphWords } from "./paragraph-words.js";
 export type { FontParseBackend, ParsedFont } from "./parsed-font.js";
 export type { ItemizedRun } from "./script-runs.js";
 export { computeItemizedRuns } from "./script-runs.js";
@@ -84,10 +120,12 @@ export {
   unicodeScriptToIso15924,
 } from "./script-tags.js";
 export type { ShapeTextOptions } from "./shape-text.js";
-export { shapeText } from "./shape-text.js";
+export { shapeLogicalRuns, shapeText } from "./shape-text.js";
 export type { ShapedGlyph, ShapedTextRun } from "./shaped-run.js";
+export { sharedAtlasCache } from "./shared-atlas-cache.js";
 export type { PrepareTextRenderDataOptions, TextRenderData } from "./text-render-data.js";
 export { computeTextRenderCacheKey, prepareTextRenderData } from "./text-render-data.js";
 export type { NamedInstance, VariationAxis } from "./variable-font.js";
 export { clampToAxisRange, findNamedInstance } from "./variable-font.js";
 export { reorderRunsToVisualOrder } from "./visual-run-order.js";
+export { isWhitespaceChar } from "./whitespace.js";

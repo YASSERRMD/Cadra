@@ -30,6 +30,17 @@ export interface ShapedTextRun {
   text: string;
   script: string;
   direction: TextDirection;
+  /**
+   * The bidi embedding level this run's `direction` was derived from
+   * (`isRtlLevel(level) === (direction === "rtl")`). `shapeText` reorders
+   * runs to visual order using this and then discards it; the paragraph
+   * layout engine (Phase 45) needs it kept, since after it slices a
+   * paragraph's logically-ordered runs into lines, each line's own runs
+   * must be independently re-reordered to visual order (`shapeText`'s
+   * paragraph-wide reordering does not know about line breaks it never
+   * computed).
+   */
+  level: number;
   language?: string;
   glyphs: readonly ShapedGlyph[];
 }
