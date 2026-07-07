@@ -184,18 +184,34 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
   }
 
   /**
-   * Reassigns `parent.children` to `orderedChildren` directly rather than
-   * through repeated `remove`/`add` calls: every element is already a member
-   * of `parent.children` with `.parent` already correctly set, so this is a
-   * pure order fix with no add/remove side effects, and a no-op when the
-   * order already matches.
+   * Reassigns `parent.children` to `orderedChildren` (prefixed by any
+   * "foreign" children in their existing relative order) directly rather
+   * than through repeated `remove`/`add` calls: every element is already a
+   * member of `parent.children` with `.parent` already correctly set, so
+   * this is a pure order fix with no add/remove side effects, and a no-op
+   * when the order already matches.
+   *
+   * "Foreign" means not present in `orderedChildren` at all: a node
+   * factory can build internal Object3D structure of its own beneath a
+   * node's own top-level object (e.g. `text`'s per-line/per-word/per-glyph
+   * groups, see `node-factory.ts`'s `buildTextObject`) that has no
+   * corresponding `SceneNode` child and so would never appear in
+   * `orderedChildren`; without preserving it here, this function would
+   * silently discard it the moment it ever disagreed with
+   * `parent.children`'s current length, since a plain length/content
+   * comparison against only the scene-graph-tracked children cannot tell
+   * "genuinely reordered" apart from "something else is also parented here".
    */
   function reorderChildren(parent: THREE.Object3D, orderedChildren: THREE.Object3D[]): void {
     const currentOrder = parent.children;
-    if (currentOrder.length === orderedChildren.length) {
+    const orderedSet = new Set(orderedChildren);
+    const foreignChildren = currentOrder.filter((child) => !orderedSet.has(child));
+    const desiredOrder = [...foreignChildren, ...orderedChildren];
+
+    if (currentOrder.length === desiredOrder.length) {
       let matches = true;
-      for (let i = 0; i < orderedChildren.length; i += 1) {
-        if (currentOrder[i] !== orderedChildren[i]) {
+      for (let i = 0; i < desiredOrder.length; i += 1) {
+        if (currentOrder[i] !== desiredOrder[i]) {
           matches = false;
           break;
         }
@@ -204,15 +220,13 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
         return;
       }
     }
-    parent.children = orderedChildren;
+    parent.children = desiredOrder;
   }
 
   /** Detaches `entry.object3D` from its parent and disposes exactly the resources it owns. */
   function disposeEntry(entry: ReconciledEntry): void {
     entry.object3D.removeFromParent();
-    if (entry.owned !== undefined) {
-      entry.owned.material.dispose();
-    }
+    entry.owned?.material?.dispose();
   }
 
   /** Tears down the entire current tree: every entry is disposed and `entries` is cleared. */
