@@ -74,4 +74,28 @@ describe("computeRenderLayerCacheKey", () => {
     });
     expect(a).not.toBe(b);
   });
+
+  it("is stable when fallbackFonts is simply omitted vs explicitly empty", () => {
+    const layer: LayerElement = { type: "div" };
+    const a = computeRenderLayerCacheKey(layer, { width: 100, height: 100, fonts: [FONT] });
+    const b = computeRenderLayerCacheKey(layer, { width: 100, height: 100, fonts: [FONT], fallbackFonts: [] });
+    expect(a).toBe(b);
+  });
+
+  it("differs when the fallbackFonts pool differs, even though fonts/layer/dimensions are identical", () => {
+    const layer: LayerElement = { type: "div" };
+    const a = computeRenderLayerCacheKey(layer, {
+      width: 100,
+      height: 100,
+      fonts: [FONT],
+      fallbackFonts: [],
+    });
+    const b = computeRenderLayerCacheKey(layer, {
+      width: 100,
+      height: 100,
+      fonts: [FONT],
+      fallbackFonts: [{ family: "Fallback", font: INTER_VARIABLE }],
+    });
+    expect(a).not.toBe(b);
+  });
 });

@@ -25,6 +25,8 @@
   "dependencies": {
     "@cadra/core": "workspace:*",
     "@cadra/text": "workspace:*",
+    "@discordapp/twemoji": "^16.0.1",
+    "lucide-static": "^1.23.0",
     "satori": "^0.26.0"
   },
   "devDependencies": {

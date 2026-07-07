@@ -5209,9 +5209,10 @@
           "enum": [
             "div",
             "span",
-            "img"
+            "img",
+            "icon"
           ],
-          "description": "Which of the three supported element kinds this layer element is."
+          "description": "Which of the four supported element kinds this layer element is."
         },
         "style": {
           "type": "object",
@@ -5769,12 +5770,16 @@
           "description": "img only: the image source, a data: URI (recommended) or an http(s):// URL.",
           "type": "string"
         },
+        "icon": {
+          "description": "icon only: a bundled icon's name (Lucide's own kebab-case names, e.g. \"arrow-right\"), resolved to an image ahead of Satori ever seeing it. Recolored from style.color when set.",
+          "type": "string"
+        },
         "width": {
-          "description": "img only, in layer units.",
+          "description": "img/icon only, in layer units.",
           "type": "number"
         },
         "height": {
-          "description": "img only, in layer units.",
+          "description": "img/icon only, in layer units.",
           "type": "number"
         },
         "lang": {

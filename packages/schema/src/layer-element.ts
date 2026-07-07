@@ -30,10 +30,10 @@ type AssertTrue<T extends true> = T;
 
 const cssLength = z.union([z.number(), z.string()]);
 
-/** The three element kinds `LayerElement` supports, mirroring `LayerElementType`. */
+/** The four element kinds `LayerElement` supports, mirroring `LayerElementType`. */
 export const layerElementTypeSchema = z
-  .enum(["div", "span", "img"])
-  .describe("Which of the three supported element kinds this layer element is.");
+  .enum(["div", "span", "img", "icon"])
+  .describe("Which of the four supported element kinds this layer element is.");
 
 type _CheckLayerElementType = AssertTrue<
   AssertEqual<z.infer<typeof layerElementTypeSchema>, LayerElementType>
@@ -161,8 +161,15 @@ export const layerElementSchema: z.ZodType<LayerElement> = z.lazy(() =>
       .string()
       .optional()
       .describe("img only: the image source, a data: URI (recommended) or an http(s):// URL."),
-    width: z.number().optional().describe("img only, in layer units."),
-    height: z.number().optional().describe("img only, in layer units."),
+    icon: z
+      .string()
+      .optional()
+      .describe(
+        "icon only: a bundled icon's name (Lucide's own kebab-case names, e.g. \"arrow-right\"), " +
+          "resolved to an image ahead of Satori ever seeing it. Recolored from style.color when set.",
+      ),
+    width: z.number().optional().describe("img/icon only, in layer units."),
+    height: z.number().optional().describe("img/icon only, in layer units."),
     lang: z
       .string()
       .optional()

@@ -11,18 +11,23 @@
  */
 
 /**
- * The three element kinds this layer spec supports: `"div"` (a flexbox
+ * The four element kinds this layer spec supports: `"div"` (a flexbox
  * container, the workhorse of any layout), `"span"` (an inline text run,
- * for styling part of a line differently from its surroundings), and
- * `"img"` (an embedded raster or vector image). This is Satori's own
- * "constrained HTML subset" (its README's phrase), narrowed to exactly the
- * three tags every layout, typography, and image-embedding need in
- * practice actually requires - not the full HTML tag set Satori happens to
- * recognize, which also includes heading/paragraph tags whose only
- * practical difference from `div`/`span` here is a preset default style
- * this spec does not rely on (every style is authored explicitly).
+ * for styling part of a line differently from its surroundings), `"img"`
+ * (an embedded raster or vector image), and `"icon"` (a named icon from a
+ * bundled icon set, resolved to an image ahead of Satori ever seeing it;
+ * see `@cadra/satori-layer`'s `resolveIconElements`). This is Satori's own
+ * "constrained HTML subset" (its README's phrase) for the first three,
+ * narrowed to exactly the tags every layout, typography, and
+ * image-embedding need in practice actually requires - not the full HTML
+ * tag set Satori happens to recognize, which also includes heading/
+ * paragraph tags whose only practical difference from `div`/`span` here is
+ * a preset default style this spec does not rely on (every style is
+ * authored explicitly). `"icon"` is not a real HTML tag at all: it is this
+ * spec's own first-class ergonomic layer over `"img"`, so an author names
+ * an icon rather than having to already have a raw SVG/data URI in hand.
  */
-export type LayerElementType = "div" | "span" | "img";
+export type LayerElementType = "div" | "span" | "img" | "icon";
 
 /**
  * A curated, typed subset of CSS a `LayerElement` can carry, restricted to
@@ -145,11 +150,13 @@ export interface LayerElement {
   id?: string;
   type: LayerElementType;
   style?: LayerStyle;
-  /** Text content and/or nested elements, in document order (Satori paints later siblings on top of earlier ones; there is no `z-index` in SVG). */
+  /** Text content and/or nested elements, in document order (Satori paints later siblings on top of earlier ones; there is no `z-index` in SVG). `icon` elements never have children. */
   children?: ReadonlyArray<LayerElement | string>;
   /** `img` only: the image source, a `data:` URI (recommended - no I/O needed) or an `http(s)://` URL. */
   src?: string;
-  /** `img` only, in layer units (recommended: Satori stretches an unsized image to fill its element). */
+  /** `icon` only: a bundled icon's name (Lucide's own kebab-case names, e.g. `"arrow-right"`), resolved to an `img` ahead of Satori ever seeing it. Recolored from `style.color` when set (via `stroke`/`fill: currentColor`, every bundled icon's own convention), otherwise rendered in the icon's own default color. */
+  icon?: string;
+  /** `img`/`icon` only, in layer units (recommended for `img`: Satori stretches an unsized image to fill its element; `icon` defaults to its bundled icon set's own native size, currently 24 for Lucide, when omitted). */
   width?: number;
   height?: number;
   /** BCP-47-ish language tag, e.g. `"ja-JP"`, forcing which locale-specific font/shaping Satori uses for this element's own text (see Satori's own `Locale` support). */
