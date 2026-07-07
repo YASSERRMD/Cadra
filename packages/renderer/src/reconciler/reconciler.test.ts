@@ -3,6 +3,7 @@ import {
   createIdentityTransform,
   type KeyframeTrack,
   type LayerElement,
+  type MeshMaterialConfig,
   type SceneNode,
   type Transform,
 } from "@cadra/core";
@@ -69,7 +70,12 @@ function mesh(
   id: string,
   geometryRef = "box",
   materialRef = "default",
-  overrides: Partial<{ visible: boolean; transform: Transform; children: SceneNode[] }> = {},
+  overrides: Partial<{
+    visible: boolean;
+    transform: Transform;
+    children: SceneNode[];
+    material: MeshMaterialConfig;
+  }> = {},
 ): SceneNode {
   return {
     id,
@@ -861,3 +867,92 @@ function structuralSnapshot(object3D: THREE.Object3D): unknown {
     children: object3D.children.map(structuralSnapshot),
   };
 }
+
+const SPHERE_ARRAY_METALNESS_STEPS = [0, 0.25, 0.5, 0.75, 1];
+const SPHERE_ARRAY_ROUGHNESS_STEPS = [0, 0.25, 0.5, 0.75, 1];
+
+/**
+ * A reference PBR sphere array: one sphere per (metalness, roughness) pair,
+ * the classic material-preview grid real-time PBR renderers ship as a sanity
+ * check, laid out row by row (metalness) and column by column (roughness).
+ * Every sphere shares the same neutral baseColor, so only metalness/roughness
+ * vary cell to cell.
+ */
+function pbrSphereArray(): SceneNode {
+  return group(
+    "sphere-array",
+    SPHERE_ARRAY_METALNESS_STEPS.flatMap((metalness, row) =>
+      SPHERE_ARRAY_ROUGHNESS_STEPS.map((roughness, col) =>
+        mesh("sphere", "sphere", "default", {
+          transform: transformAt([col * 1.2, row * 1.2, 0]),
+          material: { baseColor: [0.8, 0.8, 0.8, 1], metalness, roughness },
+        }),
+      ),
+    ).map((node, index) => ({ ...node, id: `sphere-${index}` })),
+  );
+}
+
+/** A plain-data snapshot of an Object3D subtree, extended with resolved PBR material params for every mesh - the same shape `structuralSnapshot` gives, plus what a reference sphere array's own render correctness actually hinges on. */
+function pbrSnapshot(object3D: THREE.Object3D): unknown {
+  return {
+    type: object3D.type,
+    position: object3D.position.toArray(),
+    material:
+      object3D instanceof THREE.Mesh && object3D.material instanceof THREE.MeshPhysicalMaterial
+        ? {
+            color: object3D.material.color.toArray(),
+            metalness: object3D.material.metalness,
+            roughness: object3D.material.roughness,
+          }
+        : undefined,
+    children: object3D.children.map(pbrSnapshot),
+  };
+}
+
+describe("createReconciler: reference PBR sphere array across roughness and metalness (Phase 55)", () => {
+  it("resolves every cell to its own requested metalness/roughness as a real MeshPhysicalMaterial", () => {
+    const result = createReconciler().reconcile(pbrSphereArray(), 0) as THREE.Group;
+
+    expect(result.children).toHaveLength(
+      SPHERE_ARRAY_METALNESS_STEPS.length * SPHERE_ARRAY_ROUGHNESS_STEPS.length,
+    );
+
+    SPHERE_ARRAY_METALNESS_STEPS.forEach((metalness, row) => {
+      SPHERE_ARRAY_ROUGHNESS_STEPS.forEach((roughness, col) => {
+        const index = row * SPHERE_ARRAY_ROUGHNESS_STEPS.length + col;
+        const sphere = result.children[index] as THREE.Mesh;
+        expect(sphere).toBeInstanceOf(THREE.Mesh);
+        expect(sphere.geometry).toBeInstanceOf(THREE.SphereGeometry);
+        const material = sphere.material as THREE.MeshPhysicalMaterial;
+        expect(material).toBeInstanceOf(THREE.MeshPhysicalMaterial);
+        expect(material.metalness).toBe(metalness);
+        expect(material.roughness).toBe(roughness);
+        // Every cell resolves a physically valid, finite, non-negative
+        // channel value - "plausible" in the acceptance-criteria sense: no
+        // NaN, no out-of-[0,1]-range value ever reaches Three.js.
+        expect(material.metalness).toBeGreaterThanOrEqual(0);
+        expect(material.metalness).toBeLessThanOrEqual(1);
+        expect(material.roughness).toBeGreaterThanOrEqual(0);
+        expect(material.roughness).toBeLessThanOrEqual(1);
+      });
+    });
+  });
+
+  it("renders deterministically: two fresh reconciles of the same array produce an identical structural snapshot", () => {
+    const first = createReconciler().reconcile(pbrSphereArray(), 0) as THREE.Group;
+    const second = createReconciler().reconcile(pbrSphereArray(), 0) as THREE.Group;
+
+    expect(pbrSnapshot(first)).toEqual(pbrSnapshot(second));
+  });
+
+  it("renders deterministically out of order: reconciling frames 0 and 5 in reverse order matches in-order results", () => {
+    const tree = pbrSphereArray();
+    const inOrder = [0, 5].map((frame) => pbrSnapshot(createReconciler().reconcile(tree, frame) as THREE.Group));
+    const outOfOrder = [5, 0].map((frame) =>
+      pbrSnapshot(createReconciler().reconcile(tree, frame) as THREE.Group),
+    );
+
+    expect(outOfOrder[1]).toEqual(inOrder[0]);
+    expect(outOfOrder[0]).toEqual(inOrder[1]);
+  });
+});

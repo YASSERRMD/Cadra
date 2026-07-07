@@ -1,9 +1,13 @@
 import {
   type AnimatableTransform,
   type LightNode,
+  type LightShadowConfig,
   type LightType,
+  type MeshNode,
   resolveBooleanProperty,
   resolveColorProperty,
+  type ResolvedMeshMaterial,
+  resolveMeshMaterial,
   resolveNumberProperty,
   resolveTextFill,
   resolveTextGlow,
@@ -28,7 +32,7 @@ import {
 import { applyTextEffects } from "../text/apply-text-effects.js";
 import { buildTextGroup, type TextGroupResources } from "../text/build-text-group.js";
 import { computeTextNodeRenderKey, type TextRenderRegistry } from "../text/text-render-registry.js";
-import type { GeometryRegistry, MaterialRegistry } from "./registries.js";
+import type { GeometryRegistry, MaterialRegistry, TextureRegistry } from "./registries.js";
 
 /**
  * Geometry shared by every `text`, `image`, and `video` placeholder node,
@@ -85,6 +89,14 @@ export interface NodeFactoryContext {
   materialRegistry: MaterialRegistry;
   textRenderRegistry?: TextRenderRegistry;
   satoriLayerRenderRegistry?: SatoriLayerRenderRegistry;
+  /**
+   * Resolves a `MeshMaterialConfig.normalMapRef`/`.aoMapRef` to a real
+   * texture. Optional, mirroring `textRenderRegistry`/
+   * `satoriLayerRenderRegistry`'s own optionality: omitted means every
+   * `normalMapRef`/`aoMapRef` resolves to nothing (a mesh's `normalMap`/
+   * `aoMap` simply stay unset), not an error.
+   */
+  textureRegistry?: TextureRegistry;
   /**
    * The current composition's own white-balance correction gain (see
    * `resolveSceneColor`), mutated in place by `reconciler.ts`'s own
@@ -192,8 +204,11 @@ function buildThreeObject(node: SceneNode, ctx: NodeFactoryContext): BuiltObject
 
     case "mesh": {
       const geometry = resolveMeshGeometry(node.geometryRef, ctx.geometryRegistry);
-      const material = resolveMeshMaterial(node.materialRef, ctx.materialRegistry);
-      return { object3D: new THREE.Mesh(geometry, material), owned: undefined };
+      const { material, owned } = resolveMeshNodeMaterial(node, ctx);
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.castShadow = node.castShadow ?? false;
+      mesh.receiveShadow = node.receiveShadow ?? false;
+      return { object3D: mesh, owned };
     }
 
     case "camera": {
@@ -333,7 +348,18 @@ export function applyNodeProperties(
     case "mesh": {
       const mesh = object3D as THREE.Mesh;
       mesh.geometry = resolveMeshGeometry(node.geometryRef, ctx.geometryRegistry);
-      mesh.material = resolveMeshMaterial(node.materialRef, ctx.materialRegistry);
+      if (node.material !== undefined && owned?.material instanceof THREE.MeshPhysicalMaterial) {
+        // Mutates the same owned material in place rather than reconstructing
+        // it, so its identity (and any GPU-side compiled shader variant)
+        // stays stable frame to frame; see resolveMeshNodeMaterial/
+        // applyPbrMaterial's own doc.
+        applyPbrMaterial(owned.material, resolveMeshMaterial(node.material, frame), ctx);
+        mesh.material = owned.material;
+      } else {
+        mesh.material = resolveMeshMaterialRef(node.materialRef, ctx.materialRegistry);
+      }
+      mesh.castShadow = node.castShadow ?? false;
+      mesh.receiveShadow = node.receiveShadow ?? false;
       return;
     }
 
@@ -445,8 +471,84 @@ function resolveMeshGeometry(ref: string, registry: GeometryRegistry): THREE.Buf
   return registry.resolve(ref) ?? DEFAULT_MESH_GEOMETRY;
 }
 
-function resolveMeshMaterial(ref: string, registry: MaterialRegistry): THREE.Material {
+function resolveMeshMaterialRef(ref: string, registry: MaterialRegistry): THREE.Material {
   return registry.resolve(ref) ?? DEFAULT_MESH_MATERIAL;
+}
+
+/**
+ * Decides what `THREE.Material` a `mesh` node's own geometry mounts on, and
+ * what (if anything) the reconciler comes to own as a result: `node.material`
+ * (a `MeshMaterialConfig`), when present, takes over entirely from
+ * `materialRef` and gets a freshly constructed, per-node `MeshPhysicalMaterial`
+ * that only this node's own entry owns (tracked so `disposeEntry` in
+ * `reconciler.ts` disposes it, exactly like `image`/`video`'s own per-node
+ * placeholder material already is - never a shared/pooled registry instance).
+ * Otherwise, falls back to `materialRef`'s registry-resolved (possibly
+ * shared/pooled) material, owning nothing, the exact pre-Phase-55 behavior.
+ */
+function resolveMeshNodeMaterial(
+  node: MeshNode,
+  ctx: NodeFactoryContext,
+): { material: THREE.Material; owned: OwnedResources | undefined } {
+  if (node.material === undefined) {
+    return { material: resolveMeshMaterialRef(node.materialRef, ctx.materialRegistry), owned: undefined };
+  }
+  const material = buildPbrMaterial(resolveMeshMaterial(node.material, 0), ctx);
+  return { material, owned: { material } };
+}
+
+/** Constructs a fresh `MeshPhysicalMaterial` from a frame-0 resolved `MeshMaterialConfig`; see `resolveMeshNodeMaterial`. */
+function buildPbrMaterial(resolved: ResolvedMeshMaterial, ctx: NodeFactoryContext): THREE.MeshPhysicalMaterial {
+  const material = new THREE.MeshPhysicalMaterial();
+  applyPbrMaterial(material, resolved, ctx);
+  return material;
+}
+
+/**
+ * Applies a resolved `MeshMaterialConfig` onto an existing `MeshPhysicalMaterial`
+ * in place (never reconstructs it), mirroring how `applyLightProperties`
+ * mutates an existing `THREE.Light` every frame rather than rebuilding it.
+ * `baseColor`/`emissive` route through `resolveSceneColor` (this renderer's
+ * one designated sRGB-to-linear conversion point), exactly like a light's own
+ * `color` already does.
+ */
+function applyPbrMaterial(
+  material: THREE.MeshPhysicalMaterial,
+  resolved: ResolvedMeshMaterial,
+  ctx: NodeFactoryContext,
+): void {
+  const [r, g, b, a] = resolveSceneColor(resolved.baseColor, ctx.whiteBalanceGain);
+  material.color.setRGB(r, g, b);
+  const opacity = resolved.opacity * a;
+  const wasTransparent = material.transparent;
+  material.opacity = opacity;
+  material.transparent = opacity < 1;
+
+  material.metalness = resolved.metalness;
+  material.roughness = resolved.roughness;
+
+  const [er, eg, eb] = resolveSceneColor(resolved.emissive, ctx.whiteBalanceGain);
+  material.emissive.setRGB(er, eg, eb);
+  material.emissiveIntensity = resolved.emissiveIntensity;
+
+  material.clearcoat = resolved.clearcoat;
+  material.clearcoatRoughness = resolved.clearcoatRoughness;
+
+  const normalMap =
+    resolved.normalMapRef !== undefined ? (ctx.textureRegistry?.resolve(resolved.normalMapRef) ?? null) : null;
+  const aoMap = resolved.aoMapRef !== undefined ? (ctx.textureRegistry?.resolve(resolved.aoMapRef) ?? null) : null;
+  // Assigning a new map reference (even the same one again) needs
+  // material.needsUpdate for Three.js to recompile the right shader defines;
+  // gated on an actual identity change (or the transparent flag flipping) so
+  // an unrelated per-frame update (color, metalness, ...) never pays for a
+  // shader recompile it does not need.
+  const structuralChange =
+    material.normalMap !== normalMap || material.aoMap !== aoMap || wasTransparent !== material.transparent;
+  material.normalMap = normalMap;
+  material.aoMap = aoMap;
+  if (structuralChange) {
+    material.needsUpdate = true;
+  }
 }
 
 function createLight(lightType: LightType): THREE.Light {
@@ -459,6 +561,8 @@ function createLight(lightType: LightType): THREE.Light {
       return new THREE.PointLight();
     case "spot":
       return new THREE.SpotLight();
+    case "area":
+      return new THREE.RectAreaLight();
   }
 }
 
@@ -474,6 +578,66 @@ function applyLightProperties(
   // this renderer's linear working space, not sRGB-encoded.
   light.color.setRGB(r, g, b);
   light.intensity = resolveNumberProperty(node.intensity, frame);
+
+  // Harmless no-op for lightType "area": Three.js's RectAreaLight has no
+  // shadow support at all (see LightNode.castShadow's own doc).
+  light.castShadow = node.castShadow ?? false;
+  if (light.castShadow) {
+    applyLightShadowConfig(light, node.shadow);
+  }
+
+  if (light instanceof THREE.PointLight || light instanceof THREE.SpotLight) {
+    if (node.distance !== undefined) {
+      light.distance = node.distance;
+    }
+    if (node.decay !== undefined) {
+      light.decay = node.decay;
+    }
+  }
+  if (light instanceof THREE.SpotLight) {
+    if (node.angle !== undefined) {
+      light.angle = node.angle;
+    }
+    if (node.penumbra !== undefined) {
+      light.penumbra = node.penumbra;
+    }
+  }
+  if (light instanceof THREE.RectAreaLight) {
+    if (node.width !== undefined) {
+      light.width = node.width;
+    }
+    if (node.height !== undefined) {
+      light.height = node.height;
+    }
+  }
+}
+
+/**
+ * Applies `LightShadowConfig` tuning onto whichever `THREE.Light` subclass
+ * actually owns a `.shadow` object (`DirectionalLight`/`PointLight`/
+ * `SpotLight`; `AmbientLight`/`RectAreaLight` have none at all - see each
+ * one's own `@types/three` declaration). A no-op for those two, matching
+ * `castShadow`'s own harmless-no-op precedent for `RectAreaLight` above.
+ */
+function applyLightShadowConfig(light: THREE.Light, shadow: LightShadowConfig | undefined): void {
+  if (
+    !(
+      light instanceof THREE.DirectionalLight ||
+      light instanceof THREE.PointLight ||
+      light instanceof THREE.SpotLight
+    )
+  ) {
+    return;
+  }
+  if (shadow?.mapSize !== undefined) {
+    light.shadow.mapSize.set(shadow.mapSize, shadow.mapSize);
+  }
+  if (shadow?.bias !== undefined) {
+    light.shadow.bias = shadow.bias;
+  }
+  if (shadow?.radius !== undefined) {
+    light.shadow.radius = shadow.radius;
+  }
 }
 
 /**
