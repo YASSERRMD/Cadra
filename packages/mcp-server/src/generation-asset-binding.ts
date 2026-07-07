@@ -38,7 +38,7 @@
  * already doing.
  */
 import type { Project, SceneNode, VideoNode } from "@cadra/core";
-import type { GenerationStore } from "@cadra/providers";
+import { type GenerationStore, UnknownSlotError } from "@cadra/providers";
 import { parseScene, type SceneDocument } from "@cadra/schema";
 
 import { ingestAssetFromUrl } from "./asset-store.js";
@@ -116,7 +116,8 @@ export type GenerationBindingOutcome =
   | { nodeId: string; slotId: string; outcome: "bound"; assetRef: string }
   | { nodeId: string; slotId: string; outcome: "stillPending" }
   | { nodeId: string; slotId: string; outcome: "failed"; error: string }
-  | { nodeId: string; slotId: string; outcome: "ingestError"; error: string };
+  | { nodeId: string; slotId: string; outcome: "ingestError"; error: string }
+  | { nodeId: string; slotId: string; outcome: "unknownSlot" };
 
 /**
  * Checks every `VideoNode` in `pendingNodes` against `store`'s *current*
@@ -144,7 +145,16 @@ export type GenerationBindingOutcome =
  * can surface it - deciding what an agent should do next, e.g. regenerate
  * or give up, is that caller's call, not this function's); a node whose
  * slot is `"ready"` but whose ingest itself throws (e.g. the vendor's
- * `outputUrl` is no longer fetchable) is reported as `"ingestError"`.
+ * `outputUrl` is no longer fetchable) is reported as `"ingestError"`. A node
+ * whose `slotId` this `store` has never seen a `submitGeneration` call for
+ * (`GenerationStore.getSlotStatus` throwing `UnknownSlotError`, e.g. a scene
+ * hand-authored with a raw `cadra-generation://` ref, or one whose slot was
+ * submitted against a different server process/store instance) is reported
+ * as `"unknownSlot"` and left untouched, treated the same as
+ * `"stillPending"` for any caller deciding whether it is safe to proceed
+ * (e.g. `render_scene`'s own pre-flight check): this store genuinely has no
+ * way to know whether that ref will ever resolve, so it must not be treated
+ * as ready.
  */
 export async function bindReadyGenerations(
   project: Project,
@@ -156,7 +166,16 @@ export async function bindReadyGenerations(
   const outcomes: GenerationBindingOutcome[] = [];
 
   for (const pending of pendingNodes) {
-    const resolution = store.getSlotStatus(pending.slotId);
+    let resolution;
+    try {
+      resolution = store.getSlotStatus(pending.slotId);
+    } catch (error) {
+      if (error instanceof UnknownSlotError) {
+        outcomes.push({ nodeId: pending.node.id, slotId: pending.slotId, outcome: "unknownSlot" });
+        continue;
+      }
+      throw error;
+    }
 
     // Checked as "is this ready" first (rather than excluding pending/failed
     // via `!==`/`||`), since TypeScript's discriminated-union narrowing does
@@ -184,7 +203,12 @@ export async function bindReadyGenerations(
       assetRef = summary.assetRef;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      outcomes.push({ nodeId: pending.node.id, slotId: pending.slotId, outcome: "ingestError", error: message });
+      outcomes.push({
+        nodeId: pending.node.id,
+        slotId: pending.slotId,
+        outcome: "ingestError",
+        error: message,
+      });
       continue;
     }
 
@@ -270,19 +294,25 @@ export async function bindReadyGenerationsForScene(
     // should be unreachable in practice; guarded rather than asserted so a
     // future change to that invariant fails loudly here instead of silently
     // persisting an invalid document.
-    logger?.error("bindReadyGenerationsForScene produced an invalid document; leaving the scene unchanged", {
-      sceneId,
-      diagnosticCount: revalidated.diagnostics.length,
-    });
+    logger?.error(
+      "bindReadyGenerationsForScene produced an invalid document; leaving the scene unchanged",
+      {
+        sceneId,
+        diagnosticCount: revalidated.diagnostics.length,
+      },
+    );
     return { document: parsed.document, outcomes };
   }
 
   await writeSceneDocument(workspaceRoot, sceneId, revalidated.document);
-  logger?.info("bindReadyGenerationsForScene bound one or more generation slots to real asset refs", {
-    sceneId,
-    boundCount,
-    totalPending: pendingNodes.length,
-  });
+  logger?.info(
+    "bindReadyGenerationsForScene bound one or more generation slots to real asset refs",
+    {
+      sceneId,
+      boundCount,
+      totalPending: pendingNodes.length,
+    },
+  );
 
   return { document: revalidated.document, outcomes };
 }

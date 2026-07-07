@@ -60,10 +60,7 @@ const BASE_REQUEST: VideoGenerationRequest = {
 };
 
 /** Builds a single-clip, single-track, single-composition project whose one clip's node is `videoNode`, mirroring `scene-patch.test.ts`'s own fixture shape. */
-function projectWithVideoNode(
-  videoNodeId: string,
-  assetRef: string,
-): Project {
+function projectWithVideoNode(videoNodeId: string, assetRef: string): Project {
   return {
     id: "proj-1",
     name: "Project",
@@ -161,7 +158,9 @@ describe("findPendingGenerationNodes", () => {
     };
 
     const found = findPendingGenerationNodes(project);
-    expect(found).toEqual([{ node: project.compositions[0]!.tracks[0]!.clips[0]!.node.children[0], slotId: "slot-a" }]);
+    expect(found).toEqual([
+      { node: project.compositions[0]!.tracks[0]!.clips[0]!.node.children[0], slotId: "slot-a" },
+    ]);
   });
 
   it("ignores a VideoNode whose assetRef is already a real cadra-asset:// ref", () => {
@@ -210,10 +209,30 @@ describe("bindReadyGenerations", () => {
 
     const result = await bindReadyGenerations(project, pendingNodes, store, workspaceRoot);
 
-    expect(result.outcomes).toEqual([{ nodeId: "video-1", slotId: "hero-clip", outcome: "stillPending" }]);
+    expect(result.outcomes).toEqual([
+      { nodeId: "video-1", slotId: "hero-clip", outcome: "stillPending" },
+    ]);
     expect(result.project).toBe(project);
     const node = result.project.compositions[0]!.tracks[0]!.clips[0]!.node;
     expect(node.kind === "video" ? node.assetRef : undefined).toBe(buildGenerationRef("hero-clip"));
+  });
+
+  it("leaves an unknown-to-this-store slot's node untouched and reports unknownSlot", async () => {
+    const store = createGenerationStore({ providers: {} });
+
+    const project = projectWithVideoNode("video-1", buildGenerationRef("never-submitted-slot"));
+    const pendingNodes = findPendingGenerationNodes(project);
+
+    const result = await bindReadyGenerations(project, pendingNodes, store, workspaceRoot);
+
+    expect(result.outcomes).toEqual([
+      { nodeId: "video-1", slotId: "never-submitted-slot", outcome: "unknownSlot" },
+    ]);
+    expect(result.project).toBe(project);
+    const node = result.project.compositions[0]!.tracks[0]!.clips[0]!.node;
+    expect(node.kind === "video" ? node.assetRef : undefined).toBe(
+      buildGenerationRef("never-submitted-slot"),
+    );
   });
 
   it("reports failed (without touching assetRef) for a slot whose generation terminally failed", async () => {
@@ -229,7 +248,12 @@ describe("bindReadyGenerations", () => {
     const result = await bindReadyGenerations(project, pendingNodes, store, workspaceRoot);
 
     expect(result.outcomes).toEqual([
-      { nodeId: "video-1", slotId: "hero-clip", outcome: "failed", error: "vendor rejected the prompt" },
+      {
+        nodeId: "video-1",
+        slotId: "hero-clip",
+        outcome: "failed",
+        error: "vendor rejected the prompt",
+      },
     ]);
     const node = result.project.compositions[0]!.tracks[0]!.clips[0]!.node;
     expect(node.kind === "video" ? node.assetRef : undefined).toBe(buildGenerationRef("hero-clip"));
@@ -329,7 +353,10 @@ describe("bindReadyGenerationsForScene", () => {
 
   it("is a no-op (empty outcomes) for a scene with no generation-backed nodes", async () => {
     const project = projectWithVideoNode("video-1", `${ASSET_REF_SCHEME}deadbeef`);
-    await writeSceneDocument(workspaceRoot, "scene-1", { schemaVersion: CURRENT_SCHEMA_VERSION, project });
+    await writeSceneDocument(workspaceRoot, "scene-1", {
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      project,
+    });
 
     const result = await bindReadyGenerationsForScene(workspaceRoot, "scene-1", store);
 
@@ -340,11 +367,17 @@ describe("bindReadyGenerationsForScene", () => {
   it("persists the rewritten document once a slot resolves ready, and leaves it untouched while still pending", async () => {
     await store.submitGeneration("hero-clip", "veo", BASE_REQUEST);
     const project = projectWithVideoNode("video-1", buildGenerationRef("hero-clip"));
-    await writeSceneDocument(workspaceRoot, "scene-1", { schemaVersion: CURRENT_SCHEMA_VERSION, project });
+    await writeSceneDocument(workspaceRoot, "scene-1", {
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      project,
+    });
 
     const stillPending = await bindReadyGenerationsForScene(workspaceRoot, "scene-1", store);
-    expect(stillPending!.outcomes).toEqual([{ nodeId: "video-1", slotId: "hero-clip", outcome: "stillPending" }]);
-    const nodeStillPending = stillPending!.document.project.compositions[0]!.tracks[0]!.clips[0]!.node;
+    expect(stillPending!.outcomes).toEqual([
+      { nodeId: "video-1", slotId: "hero-clip", outcome: "stillPending" },
+    ]);
+    const nodeStillPending =
+      stillPending!.document.project.compositions[0]!.tracks[0]!.clips[0]!.node;
     expect(nodeStillPending.kind === "video" ? nodeStillPending.assetRef : undefined).toBe(
       buildGenerationRef("hero-clip"),
     );
@@ -365,7 +398,8 @@ describe("bindReadyGenerationsForScene", () => {
     // The persisted document on disk reflects the rewrite too, and still validates.
     const rewrittenScene = await bindReadyGenerationsForScene(workspaceRoot, "scene-1", store);
     expect(rewrittenScene!.outcomes).toEqual([]);
-    const persistedNode = rewrittenScene!.document.project.compositions[0]!.tracks[0]!.clips[0]!.node;
+    const persistedNode =
+      rewrittenScene!.document.project.compositions[0]!.tracks[0]!.clips[0]!.node;
     expect(persistedNode.kind === "video" ? persistedNode.assetRef : undefined).toBe(boundRef);
     expect(parseScene(rewrittenScene!.document).success).toBe(true);
   });
