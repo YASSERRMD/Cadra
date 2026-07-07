@@ -5,6 +5,7 @@ import { parseFontWithFontkit } from "@cadra/text";
 import satori from "satori";
 import { describe, expect, it } from "vitest";
 
+import { layerElementToSatoriNode } from "./layer-to-satori-node.js";
 import { instanceFontForSatori, resolveFullVariationPin } from "./satori-font-instancing.js";
 
 function loadFixtureFont(name: string): Uint8Array {
@@ -66,16 +67,18 @@ describe("instanceFontForSatori", () => {
     // the *un*-instanced source bytes to Satori directly is exactly the
     // failure this guards against.
     const instanced = await instanceFontForSatori(INTER_VARIABLE, "Hi", { wght: 700 });
+    const node = layerElementToSatoriNode({
+      type: "div",
+      style: { fontSize: 20, color: "black" },
+      children: ["Hi"],
+    });
 
     await expect(
-      satori(
-        { type: "div", props: { style: { fontSize: 20, color: "black" }, children: "Hi" } },
-        {
-          width: 100,
-          height: 50,
-          fonts: [{ name: "Inter", data: Buffer.from(instanced), weight: 700, style: "normal" }],
-        },
-      ),
+      satori(node as unknown as Parameters<typeof satori>[0], {
+        width: 100,
+        height: 50,
+        fonts: [{ name: "Inter", data: Buffer.from(instanced), weight: 700, style: "normal" }],
+      }),
     ).resolves.toContain("<svg");
   });
 });
