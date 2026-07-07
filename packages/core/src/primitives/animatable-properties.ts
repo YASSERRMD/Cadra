@@ -25,11 +25,12 @@ const TRANSFORM_ANIMATABLE_PROPERTIES = [
 /** `Shape` (`MeshNode`) animatable props: transform plus visibility toggling. */
 export const SHAPE_ANIMATABLE_PROPERTIES = [...TRANSFORM_ANIMATABLE_PROPERTIES, "visible"] as const;
 
-/** `Text` (`TextNode`) animatable props: transform, color, and font size. */
+/** `Text` (`TextNode`) animatable props: transform, color, font size, and extrusion depth. */
 export const TEXT_ANIMATABLE_PROPERTIES = [
   ...TRANSFORM_ANIMATABLE_PROPERTIES,
   "color",
   "fontSize",
+  "extrudeDepth",
   "visible",
 ] as const;
 
