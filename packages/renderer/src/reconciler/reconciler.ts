@@ -1,6 +1,7 @@
 import type { SceneNode, SceneNodeKind } from "@cadra/core";
 import type * as THREE from "three";
 
+import type { TextRenderRegistry } from "../text/text-render-registry.js";
 import {
   applyNodeProperties,
   createThreeObject,
@@ -21,10 +22,17 @@ interface ReconciledEntry {
   owned: OwnedResources | undefined;
 }
 
-/** Dependencies a `Reconciler` resolves `mesh` geometry/material refs against. Both are optional; omitted registries default to the small in-memory seed set in `registries.ts`. */
+/**
+ * Dependencies a `Reconciler` resolves node references against.
+ * `geometryRegistry`/`materialRegistry` are optional; omitted, they default
+ * to the small in-memory seed set in `registries.ts`. `textRenderRegistry`
+ * is also optional; omitted, every `text` node renders as an empty group
+ * (see `node-factory.ts`'s `buildTextObject`).
+ */
 export interface ReconcilerOptions {
   geometryRegistry?: GeometryRegistry;
   materialRegistry?: MaterialRegistry;
+  textRenderRegistry?: TextRenderRegistry;
 }
 
 /**
@@ -61,6 +69,7 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
   const ctx: NodeFactoryContext = {
     geometryRegistry: options.geometryRegistry ?? createDefaultGeometryRegistry(),
     materialRegistry: options.materialRegistry ?? createDefaultMaterialRegistry(),
+    ...(options.textRenderRegistry !== undefined && { textRenderRegistry: options.textRenderRegistry }),
   };
 
   const entries = new Map<string, ReconciledEntry>();
@@ -122,7 +131,10 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
       object3D = createEntry(node);
     }
 
-    applyNodeProperties(node, object3D, ctx, frame);
+    // Always re-read from `entries` (rather than trusting `existing`) since
+    // both the "brand new" and "kind changed" branches above just replaced
+    // this id's entry via createEntry.
+    applyNodeProperties(node, object3D, ctx, frame, entries.get(node.id)?.owned);
 
     if (parentObject3D !== null && object3D.parent !== parentObject3D) {
       // Either brand new, or an existing node that moved to a different
@@ -227,6 +239,17 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
   function disposeEntry(entry: ReconciledEntry): void {
     entry.object3D.removeFromParent();
     entry.owned?.material?.dispose();
+    if (entry.owned?.text !== undefined) {
+      for (const geometry of entry.owned.text.geometries) {
+        geometry.dispose();
+      }
+      for (const material of entry.owned.text.materials) {
+        material.dispose();
+      }
+      for (const texture of entry.owned.text.textures) {
+        texture.dispose();
+      }
+    }
   }
 
   /** Tears down the entire current tree: every entry is disposed and `entries` is cleared. */
