@@ -25,8 +25,8 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-import { hashAssetBytes } from "@cadra/core";
 import type { ContentHash } from "@cadra/core";
+import { hashAssetBytes } from "@cadra/core";
 
 /** Subdirectory under `workspaceRoot` asset files are persisted in. */
 const ASSETS_SUBDIRECTORY = "assets";
