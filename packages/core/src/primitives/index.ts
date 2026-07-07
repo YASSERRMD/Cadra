@@ -32,6 +32,13 @@ export { Shape } from "./shape.js";
 export type { TextProps } from "./text.js";
 export { Text } from "./text.js";
 export { resolveCountUpText, resolveScrambleText } from "./text-content-effects.js";
+export type {
+  ResolvedTextPath,
+  ResolvedTextPathSegment,
+  TextPathSample,
+  TextPathSampler,
+} from "./text-path.js";
+export { createTextPathSampler, resolveTextPath } from "./text-path.js";
 export type { ResolvedGlyphPhysicsState } from "./text-physics.js";
 export { resolveGlyphPhysicsState } from "./text-physics.js";
 export type { ResolvedTextUnitState } from "./text-stagger.js";
