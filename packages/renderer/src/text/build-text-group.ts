@@ -1,4 +1,11 @@
-import type { ColorRGBA, ResolvedTextFill, ResolvedTextGlow, ResolvedTextOutline, ResolvedTextShadow } from "@cadra/core";
+import type {
+  ColorRGBA,
+  ResolvedTextFill,
+  ResolvedTextGlow,
+  ResolvedTextOutline,
+  ResolvedTextShadow,
+  WhiteBalanceGain,
+} from "@cadra/core";
 // From the browser-safe entry, not the bare "@cadra/text" barrel: this
 // module is part of packages/renderer's own code path that
 // packages/headless bundles into the browser-executed render page (via
@@ -8,6 +15,7 @@ import type { ColorRGBA, ResolvedTextFill, ResolvedTextGlow, ResolvedTextOutline
 import { getGlyphPathCommands, type GlyphPathCommand, type PositionedGlyph, type TextRenderData } from "@cadra/text/browser";
 import * as THREE from "three";
 
+import { resolveSceneColor } from "../color/resolve-scene-color.js";
 import { createMsdfTextMaterial, type MsdfMaterialConfig, type MsdfTextMaterialHandle } from "./msdf-material.js";
 
 /** Everything `buildTextGroup` allocated, so the reconciler can dispose exactly these resources (and no shared/pooled ones) when a text node's content changes or is removed. */
@@ -45,6 +53,19 @@ export interface ExtrusionFontSource {
 
 export interface BuildTextGroupOptions {
   color: ColorRGBA;
+  /**
+   * This composition's own white-balance correction gain (see
+   * `resolveSceneColor`), applied to every color this function resolves
+   * into a Three.js color/uniform - `color` itself, every glyph's own
+   * inline-style override, and every `fill`/`outline`/`glow`/`shadow`
+   * color. Captured once here, at build time (a structural, build-time-only
+   * choice, same as `perGlyphMaterial`): a composition's own `colorGrading`
+   * is not itself frame-dependent (see `Composition.colorGrading`'s own
+   * doc), so there is nothing to re-resolve per frame. Defaults to a no-op
+   * `(1, 1, 1)` gain when omitted, matching every other optional field on
+   * this same options object.
+   */
+  whiteBalanceGain?: WhiteBalanceGain;
   /** Extrusion depth in em units (the same units `TextRenderData`'s glyph positions are already in). `0`, `undefined`, or no `font` renders flat MSDF quads instead. */
   extrudeDepth?: number;
   font?: ExtrusionFontSource;
@@ -98,6 +119,10 @@ export function buildTextGroup(
   const materials: THREE.Material[] = [];
   const textures: THREE.Texture[] = [];
 
+  /** Converts one authored `ColorRGBA` into this composition's own linear, white-balanced working color - see `resolveSceneColor`'s own doc. The single point every color this function touches passes through. */
+  const whiteBalanceGain = options.whiteBalanceGain ?? [1, 1, 1];
+  const toScene = (color: ColorRGBA) => resolveSceneColor(color, whiteBalanceGain);
+
   const extrudeDepth = options.extrudeDepth ?? 0;
   const useExtrusion = extrudeDepth > 0 && options.font !== undefined;
 
@@ -142,10 +167,13 @@ export function buildTextGroup(
       const key = colorKey(color);
       let material = options.perGlyphMaterial === true ? undefined : materialsByColorKey.get(key);
       if (material === undefined) {
+        const [r, g, b, a] = toScene(color);
         material = new THREE.MeshStandardMaterial({
-          color: new THREE.Color(color[0], color[1], color[2]),
-          transparent: color[3] < 1,
-          opacity: color[3],
+          // No color-space argument: toScene's own output is already in
+          // this renderer's linear working space, not sRGB-encoded.
+          color: new THREE.Color().setRGB(r, g, b),
+          transparent: a < 1,
+          opacity: a,
         });
         if (options.perGlyphMaterial !== true) {
           materialsByColorKey.set(key, material);
@@ -188,10 +216,11 @@ export function buildTextGroup(
       materials,
       textures,
       setColor: (r, g, b, a) => {
+        const [sr, sg, sb, sa] = toScene([r, g, b, a]);
         for (const material of baseMaterials) {
-          material.color.setRGB(r, g, b);
-          material.opacity = a;
-          material.transparent = a < 1;
+          material.color.setRGB(sr, sg, sb);
+          material.opacity = sa;
+          material.transparent = sa < 1;
         }
       },
     };
@@ -200,6 +229,11 @@ export function buildTextGroup(
   const texturesByPage = data.atlasPages.map((page) => {
     const texture = new THREE.DataTexture(page.pixels, page.width, page.height, THREE.RGBAFormat);
     texture.flipY = false;
+    // Explicit (matching the already-default value), not implicit: an MSDF
+    // atlas page's own RGB channels encode a signed distance field, not
+    // real color, so there is nothing here for the sRGB-to-linear
+    // conversion `THREE.SRGBColorSpace` would trigger to apply to at all.
+    texture.colorSpace = THREE.NoColorSpace;
     texture.needsUpdate = true;
     textures.push(texture);
     return texture;
@@ -216,25 +250,17 @@ export function buildTextGroup(
     if (fill !== undefined && (fill.type === "linearGradient" || fill.type === "radialGradient")) {
       handle.setGradient(
         fill.type === "linearGradient" ? fill.angle : 0,
-        fill.stops.map((stop) => stop.color),
+        fill.stops.map((stop) => toScene(stop.color)),
       );
     } else {
-      handle.setColor(color[0], color[1], color[2], color[3]);
+      handle.setColor(...toScene(color));
     }
     if (options.outline !== undefined) {
-      const outlineColor = options.outline.color;
-      handle.setOutline(options.outline.width, outlineColor[0], outlineColor[1], outlineColor[2], outlineColor[3]);
+      handle.setOutline(options.outline.width, ...toScene(options.outline.color));
     }
     if (options.glow !== undefined) {
-      const glowColor = options.glow.color;
-      handle.setGlow(
-        options.glow.radius,
-        glowColor[0],
-        glowColor[1],
-        glowColor[2],
-        glowColor[3],
-        options.glow.intensity,
-      );
+      const [r, g, b, a] = toScene(options.glow.color);
+      handle.setGlow(options.glow.radius, r, g, b, a, options.glow.intensity);
     }
   }
 
@@ -271,7 +297,7 @@ export function buildTextGroup(
     let handle = shadowMaterialsByPage.get(page);
     if (handle === undefined) {
       handle = createMsdfTextMaterial(texture);
-      handle.setColor(shadow.color[0], shadow.color[1], shadow.color[2], shadow.color[3]);
+      handle.setColor(...toScene(shadow.color));
       handle.setBlur(shadow.blur);
       materials.push(handle.material);
       shadowMaterialsByPage.set(page, handle);
@@ -340,8 +366,9 @@ export function buildTextGroup(
     materials,
     textures,
     setColor: (r, g, b, a) => {
+      const sceneColor = toScene([r, g, b, a]);
       for (const handle of baseMaterialHandles) {
-        handle.setColor(r, g, b, a);
+        handle.setColor(...sceneColor);
       }
     },
     ...(msdfMaterialConfig.fillType !== "solid" && {
@@ -350,28 +377,30 @@ export function buildTextGroup(
           return;
         }
         for (const handle of baseMaterialHandles) {
-          handle.setGradient(fill.type === "linearGradient" ? fill.angle : 0, fill.stops.map((stop) => stop.color));
+          handle.setGradient(fill.type === "linearGradient" ? fill.angle : 0, fill.stops.map((stop) => toScene(stop.color)));
         }
       },
     }),
     ...(options.outline !== undefined && {
       setOutline: (outline: ResolvedTextOutline) => {
         for (const handle of baseMaterialHandles) {
-          handle.setOutline(outline.width, outline.color[0], outline.color[1], outline.color[2], outline.color[3]);
+          handle.setOutline(outline.width, ...toScene(outline.color));
         }
       },
     }),
     ...(options.glow !== undefined && {
       setGlow: (glow: ResolvedTextGlow) => {
+        const [r, g, b, a] = toScene(glow.color);
         for (const handle of baseMaterialHandles) {
-          handle.setGlow(glow.radius, glow.color[0], glow.color[1], glow.color[2], glow.color[3], glow.intensity);
+          handle.setGlow(glow.radius, r, g, b, a, glow.intensity);
         }
       },
     }),
     ...(options.shadow !== undefined && {
       setShadow: (shadow: ResolvedTextShadow) => {
+        const sceneColor = toScene(shadow.color);
         for (const handle of shadowMaterialsByPage.values()) {
-          handle.setColor(shadow.color[0], shadow.color[1], shadow.color[2], shadow.color[3]);
+          handle.setColor(...sceneColor);
           handle.setBlur(shadow.blur);
         }
         for (const entry of shadowMeshes) {

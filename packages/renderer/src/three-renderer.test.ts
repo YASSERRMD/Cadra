@@ -1,7 +1,9 @@
 import {
+  computeWhiteBalanceGain,
   createFrameContext,
   createIdentityTransform,
   type FrameContext,
+  type LightNode,
   type MeshNode,
   type SceneNode,
   type SceneState,
@@ -21,6 +23,7 @@ function createFakeThreeRenderer() {
     render: vi.fn(),
     dispose: vi.fn(),
     capabilities: { maxTextureSize: 4096 },
+    toneMappingExposure: 1,
   };
 }
 
@@ -61,6 +64,21 @@ function meshNode(id: string, overrides: Partial<MeshNode> = {}): MeshNode {
     children: [],
     geometryRef: "box",
     materialRef: "default",
+    ...overrides,
+  };
+}
+
+/** A single white point-light `SceneNode`, for asserting resolved color under a color grade. */
+function lightNode(id: string, overrides: Partial<LightNode> = {}): LightNode {
+  return {
+    id,
+    kind: "light",
+    transform: createIdentityTransform(),
+    visible: true,
+    children: [],
+    lightType: "point",
+    color: [1, 1, 1, 1],
+    intensity: 1,
     ...overrides,
   };
 }
@@ -629,5 +647,87 @@ describe("ThreeRenderer.renderFrame: active camera selection", () => {
     const [, firstCamera] = webGpuRenderer.render.mock.calls[0] as [THREE.Scene, THREE.Camera];
     const [, secondCamera] = webGpuRenderer.render.mock.calls[1] as [THREE.Scene, THREE.Camera];
     expect(firstCamera).toBe(secondCamera);
+  });
+});
+
+describe("ThreeRenderer.renderFrame: color workflow", () => {
+  it("sets toneMappingExposure from colorGrading.exposureStops in photographic stops, defaulting to a no-op 1 when colorGrading is unset", async () => {
+    const { deps, webGpuRenderer } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(makeSceneState(), makeFrameContext());
+    expect(webGpuRenderer.toneMappingExposure).toBe(1);
+
+    renderer.renderFrame(makeSceneState({ colorGrading: { exposureStops: 2 } }), makeFrameContext());
+    expect(webGpuRenderer.toneMappingExposure).toBe(4);
+
+    renderer.renderFrame(makeSceneState({ colorGrading: { exposureStops: -1 } }), makeFrameContext());
+    expect(webGpuRenderer.toneMappingExposure).toBe(0.5);
+  });
+
+  it("applies the composition's white balance gain to a light node's resolved color", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    const sceneState = makeSceneState({
+      layers: [
+        {
+          compositionId: "comp-1",
+          trackId: "track-1",
+          clipId: "clip-1",
+          node: lightNode("light-1"),
+          zIndex: 0,
+          localFrame: 3,
+          opacity: 1,
+        },
+      ],
+      colorGrading: { whiteBalanceTemperatureK: 3000, whiteBalanceTint: 0 },
+    });
+
+    renderer.renderFrame(sceneState, makeFrameContext());
+
+    const light = renderer.getObject3DByNodeId("light-1") as THREE.Light;
+    // The authored light color [1,1,1,1] is sRGB white, which is also linear
+    // white (1 is a fixed point of the sRGB transfer function), so the
+    // resolved color is exactly the white balance gain with nothing else
+    // mixed in.
+    const [expectedR, expectedG, expectedB] = computeWhiteBalanceGain(3000, 0);
+    expect(light.color.r).toBeCloseTo(expectedR);
+    expect(light.color.g).toBeCloseTo(expectedG);
+    expect(light.color.b).toBeCloseTo(expectedB);
+  });
+
+  it("is deterministic: identical colorGrading produces identical toneMappingExposure and resolved light color across repeated calls", async () => {
+    const { deps, webGpuRenderer } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    const sceneState = makeSceneState({
+      layers: [
+        {
+          compositionId: "comp-1",
+          trackId: "track-1",
+          clipId: "clip-1",
+          node: lightNode("light-1"),
+          zIndex: 0,
+          localFrame: 3,
+          opacity: 1,
+        },
+      ],
+      colorGrading: { exposureStops: 1.5, whiteBalanceTemperatureK: 4500, whiteBalanceTint: 0.3 },
+    });
+
+    renderer.renderFrame(sceneState, makeFrameContext(1));
+    const firstExposure = webGpuRenderer.toneMappingExposure;
+    const firstColor = (renderer.getObject3DByNodeId("light-1") as THREE.Light).color.clone();
+
+    renderer.renderFrame(sceneState, makeFrameContext(2));
+    const secondExposure = webGpuRenderer.toneMappingExposure;
+    const secondColor = (renderer.getObject3DByNodeId("light-1") as THREE.Light).color.clone();
+
+    expect(secondExposure).toBe(firstExposure);
+    expect(secondColor.toArray()).toEqual(firstColor.toArray());
   });
 });

@@ -14,10 +14,12 @@ import {
   type SatoriNode,
   type SceneNode,
   type TextNode,
+  type WhiteBalanceGain,
 } from "@cadra/core";
 import type { PositionedGlyph } from "@cadra/text/browser";
 import * as THREE from "three";
 
+import { resolveSceneColor } from "../color/resolve-scene-color.js";
 import { createSvgTexture } from "../svg-layer/create-svg-texture.js";
 import {
   computeSatoriLayerRenderKey,
@@ -83,6 +85,19 @@ export interface NodeFactoryContext {
   materialRegistry: MaterialRegistry;
   textRenderRegistry?: TextRenderRegistry;
   satoriLayerRenderRegistry?: SatoriLayerRenderRegistry;
+  /**
+   * The current composition's own white-balance correction gain (see
+   * `resolveSceneColor`), mutated in place by `reconciler.ts`'s own
+   * `reconcile` at the start of every call rather than fixed once at
+   * `createReconciler` time - a composition's own `colorGrading` is not
+   * itself frame-dependent (see `Composition.colorGrading`'s own doc), but
+   * which composition (and so which grade) a given call is even rendering
+   * can differ call to call. Every scene-graph-authored `ColorRGBA` this
+   * reconciler resolves into a Three.js color is expected to route through
+   * `resolveSceneColor` with this gain, exactly once, rather than being
+   * handed to a Three.js color API directly.
+   */
+  whiteBalanceGain: WhiteBalanceGain;
 }
 
 /**
@@ -265,6 +280,7 @@ function buildTextObject(node: TextNode, ctx: NodeFactoryContext): BuiltObject {
     color: resolveColorProperty(node.color, 0),
     extrudeDepth,
     font: { bytes: entry.fontBytes, contentHash: entry.fontContentHash },
+    whiteBalanceGain: ctx.whiteBalanceGain,
     // A staggered or physics-animated node needs every glyph's own opacity/
     // position independently settable each frame (apply-text-effects.ts),
     // which the default shared-by-(page,color) materials do not allow; see
@@ -334,7 +350,7 @@ export function applyNodeProperties(
     }
 
     case "light": {
-      applyLightProperties(node, object3D as THREE.Light, frame);
+      applyLightProperties(node, object3D as THREE.Light, frame, ctx.whiteBalanceGain);
       return;
     }
 
@@ -446,17 +462,18 @@ function createLight(lightType: LightType): THREE.Light {
   }
 }
 
-function applyLightProperties(node: LightNode, light: THREE.Light, frame: number): void {
+function applyLightProperties(
+  node: LightNode,
+  light: THREE.Light,
+  frame: number,
+  whiteBalanceGain: WhiteBalanceGain,
+): void {
   const color = resolveColorProperty(node.color, frame);
-  light.color.setRGB(...colorToRgbTuple(color));
+  const [r, g, b] = resolveSceneColor(color, whiteBalanceGain);
+  // No color-space argument: resolveSceneColor's own output is already in
+  // this renderer's linear working space, not sRGB-encoded.
+  light.color.setRGB(r, g, b);
   light.intensity = resolveNumberProperty(node.intensity, frame);
-}
-
-/** Converts an `@cadra/core` `ColorRGBA` tuple's RGB channels to a plain 3-tuple for `Color.setRGB`. */
-function colorToRgbTuple(
-  color: readonly [number, number, number, number],
-): [number, number, number] {
-  return [color[0], color[1], color[2]];
 }
 
 /**

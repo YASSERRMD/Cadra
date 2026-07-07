@@ -1,4 +1,10 @@
-import type { FrameContext, SceneNode, SceneState } from "@cadra/core";
+import {
+  computeWhiteBalanceGain,
+  type FrameContext,
+  resolveExposureMultiplier,
+  type SceneNode,
+  type SceneState,
+} from "@cadra/core";
 import * as THREE from "three";
 import { WebGPURenderer, type WebGPURendererParameters } from "three/webgpu";
 
@@ -29,6 +35,8 @@ interface ThreeRendererLike {
   render: (scene: THREE.Scene, camera: THREE.Camera) => void;
   dispose: () => void;
   capabilities?: { maxTextureSize?: number };
+  /** Set fresh every `renderFrame` call, from the composition's own resolved `colorGrading.exposureStops` - see `resolveExposureMultiplier`. */
+  toneMappingExposure: number;
 }
 
 /** Constructs the underlying Three.js renderer for a given backend and target. */
@@ -45,15 +53,38 @@ export interface ThreeRendererDependencies {
   createWebGl2Renderer: ThreeRendererFactory;
 }
 
+/**
+ * Applies this renderer's own linear-color-workflow output settings,
+ * identically regardless of backend: `outputColorSpace` is already
+ * `THREE.SRGBColorSpace` by default in this Three.js version, set here
+ * explicitly anyway (self-documenting, and robust against a future Three.js
+ * version ever changing that default); `toneMapping` defaults to
+ * `THREE.NoToneMapping`, which is the one setting this renderer actually
+ * needs to change - without ACES filmic tone mapping, a scene's own bright
+ * highlights clip harshly at 1.0 instead of rolling off smoothly, the root
+ * of the "flat, washed-out" look this phase exists to fix.
+ * `toneMappingExposure` is left at its own default (`1`, a no-op) here:
+ * `renderFrame` sets it fresh every call, from the composition's own
+ * resolved `colorGrading`.
+ */
+function applyColorWorkflowDefaults(renderer: THREE.WebGLRenderer | WebGPURenderer): void {
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+}
+
 /** The real WebGPU constructor path: `three/webgpu`'s `WebGPURenderer`, canvas passed via `canvas`. */
 function createRealWebGpuRenderer(target: RenderTarget, _size: RenderSize): ThreeRendererLike {
   const parameters: WebGPURendererParameters = { canvas: target };
-  return new WebGPURenderer(parameters);
+  const renderer = new WebGPURenderer(parameters);
+  applyColorWorkflowDefaults(renderer);
+  return renderer;
 }
 
 /** The real WebGL2 fallback path: the classic `THREE.WebGLRenderer`, also driven off `canvas`. */
 function createRealWebGl2Renderer(target: RenderTarget, _size: RenderSize): ThreeRendererLike {
-  return new THREE.WebGLRenderer({ canvas: target });
+  const renderer = new THREE.WebGLRenderer({ canvas: target });
+  applyColorWorkflowDefaults(renderer);
+  return renderer;
 }
 
 /** The dependency set a `Renderer` uses when no overrides are supplied, i.e. real Three.js. */
@@ -236,8 +267,15 @@ export class ThreeRenderer implements Renderer {
   renderFrame(sceneState: SceneState, frameContext: FrameContext): void {
     const renderer = this.requireInitialized();
 
+    const colorGrading = sceneState.colorGrading;
+    renderer.toneMappingExposure = resolveExposureMultiplier(colorGrading?.exposureStops ?? 0);
+    const whiteBalanceGain = computeWhiteBalanceGain(
+      colorGrading?.whiteBalanceTemperatureK ?? 6500,
+      colorGrading?.whiteBalanceTint ?? 0,
+    );
+
     const wrapperRoot = buildSceneStateRoot(sceneState);
-    const reconciled = this.reconciler.reconcile(wrapperRoot, frameContext.frame);
+    const reconciled = this.reconciler.reconcile(wrapperRoot, frameContext.frame, whiteBalanceGain);
     if (reconciled === null) {
       // `buildSceneStateRoot` always returns a non-null SceneNode, so
       // `reconcile` never actually returns null here; this satisfies the

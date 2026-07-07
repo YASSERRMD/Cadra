@@ -2,6 +2,7 @@ import type {
   ActiveCameraEntry,
   AudioTrack,
   Composition as CompositionData,
+  CompositionColorGrading,
   Track,
 } from "../scene-graph/timeline.js";
 
@@ -13,12 +14,13 @@ import type {
  * separate modules to share a name at the same barrel, and `Composition` the
  * type has been part of the public API since Phase 2.
  *
- * `tracks` defaults to an empty array if omitted. `activeCameraTrack` and
- * `audioTracks` are both omitted (not defaulted to an empty array) unless
- * explicitly supplied, mirroring `Composition`'s own "omitted means this
- * composition has no active-camera concept/audio at all" convention (see
- * `../scene-graph/timeline.ts`) rather than every composition gaining an
- * empty-but-present lane it never asked for.
+ * `tracks` defaults to an empty array if omitted. `activeCameraTrack`,
+ * `audioTracks`, and `colorGrading` are all omitted (not defaulted to an
+ * empty array/object) unless explicitly supplied, mirroring `Composition`'s
+ * own "omitted means this composition has no active-camera concept/audio/
+ * color grade at all" convention (see `../scene-graph/timeline.ts`) rather
+ * than every composition gaining an empty-but-present lane it never asked
+ * for.
  */
 export interface CompositionProps {
   id: string;
@@ -30,17 +32,18 @@ export interface CompositionProps {
   tracks?: Track[];
   activeCameraTrack?: ActiveCameraEntry[];
   audioTracks?: AudioTrack[];
+  colorGrading?: CompositionColorGrading;
 }
 
 /**
  * Creates a `Composition`: a fixed frame rate, integer duration, output
  * size, and the tracks of clips that populate it.
  *
- * Defaults: `tracks: []`. `activeCameraTrack`/`audioTracks` are passed
- * through only when provided, left `undefined` (not defaulted to `[]`)
- * otherwise. Every other field is required, since there is no sensible
- * default frame rate, duration, or output size for arbitrary authored
- * content.
+ * Defaults: `tracks: []`. `activeCameraTrack`/`audioTracks`/`colorGrading`
+ * are passed through only when provided, left `undefined` (not defaulted to
+ * `[]`) otherwise. Every other field is required, since there is no
+ * sensible default frame rate, duration, or output size for arbitrary
+ * authored content.
  */
 export function createComposition(props: CompositionProps): CompositionData {
   return {
@@ -53,5 +56,6 @@ export function createComposition(props: CompositionProps): CompositionData {
     tracks: props.tracks ?? [],
     ...(props.activeCameraTrack !== undefined && { activeCameraTrack: props.activeCameraTrack }),
     ...(props.audioTracks !== undefined && { audioTracks: props.audioTracks }),
+    ...(props.colorGrading !== undefined && { colorGrading: props.colorGrading }),
   };
 }

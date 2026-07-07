@@ -261,9 +261,11 @@ describe("createReconciler: kind-to-Three.js mapping", () => {
       light("root", "point", { color: [0.5, 0.25, 0.75, 1], intensity: 3.5 }),
       0,
     ) as THREE.Light;
-    expect(result.color.r).toBeCloseTo(0.5);
-    expect(result.color.g).toBeCloseTo(0.25);
-    expect(result.color.b).toBeCloseTo(0.75);
+    // Authored ColorRGBA is sRGB-encoded; resolveSceneColor converts it to
+    // THREE's linear working space, so these are NOT the raw authored values.
+    expect(result.color.r).toBeCloseTo(0.21404114047158);
+    expect(result.color.g).toBeCloseTo(0.050876088164651);
+    expect(result.color.b).toBeCloseTo(0.52252155395943);
     expect(result.intensity).toBe(3.5);
   });
 

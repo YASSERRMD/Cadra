@@ -21,6 +21,7 @@ function createFakeThreeRenderer() {
     render: vi.fn(),
     dispose: vi.fn(),
     capabilities: { maxTextureSize: 4096 },
+    toneMappingExposure: 1,
   };
 }
 
