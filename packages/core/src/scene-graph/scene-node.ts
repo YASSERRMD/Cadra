@@ -1,4 +1,5 @@
 import type { Property } from "../keyframes/keyframe-track.js";
+import type { LayerElement } from "./layer-element.js";
 import type { AnimatableTransform, ColorRGBA, Vector3 } from "./primitives.js";
 
 /**
@@ -11,7 +12,7 @@ import type { AnimatableTransform, ColorRGBA, Vector3 } from "./primitives.js";
  * resolved tree in at this point.
  */
 export type SceneNodeKind =
-  "group" | "mesh" | "camera" | "light" | "text" | "image" | "video" | "compositionRef";
+  "group" | "mesh" | "camera" | "light" | "text" | "image" | "video" | "compositionRef" | "satori";
 
 /**
  * Fields shared by every scene node, regardless of kind.
@@ -274,6 +275,99 @@ export interface CompositionRefNode extends SceneNodeBase<"compositionRef"> {
 }
 
 /**
+ * How a `SatoriNode`'s pixels combine with whatever is already composited
+ * beneath it. An alias, not a fresh type: identical semantics to
+ * `VideoNode.blendMode` (see its own doc for what each mode means), and
+ * having only one definition of "normal/add/multiply/screen" avoids two
+ * copies silently drifting apart if a mode is ever added to one but not
+ * the other.
+ */
+export type SatoriBlendMode = VideoBlendMode;
+
+/**
+ * One font a `SatoriNode.layer`'s own styles can select via CSS
+ * `fontFamily` (matched against `family`) plus `fontWeight`/`fontStyle`
+ * (matched against `weight`/`style`, both defaulting to `400`/`"normal"`,
+ * same as real CSS) - the scene-graph-side counterpart of
+ * `@cadra/satori-layer`'s own `SatoriLayerFont`, minus the resolved font
+ * bytes themselves: `fontRef` is resolved against the same font registry
+ * `TextNode.fontRef` already is (Phase 41), by the renderer, not by this
+ * package.
+ */
+export interface SatoriLayerFontRef {
+  family: string;
+  fontRef: string;
+  weight?: number;
+  style?: "normal" | "italic";
+  /** Explicit variation coordinates for this font (e.g. `{ wght: 700 }`). Axes not mentioned default to the font's own declared default. */
+  variationCoordinates?: Readonly<Record<string, number>>;
+}
+
+/**
+ * Per-frame animatable overrides for one element within a `SatoriNode`'s
+ * own `layer` tree, keyed by that element's own `LayerElement.id` (see
+ * `SatoriNode.elementAnimations`). Deliberately a small, fixed set of
+ * animatable aspects (Phase 48's own "position, opacity, style" scope)
+ * rather than a fully generic per-property style animation system: `x`/`y`
+ * become a CSS `transform: translate(...)` on top of whatever the
+ * element's own authored `style.transform` already is, `opacity` and
+ * `color` merge onto the element's own `style.opacity`/`style.color`,
+ * overriding it for whichever frame this resolves to a value at.
+ */
+export interface SatoriElementKeyframes {
+  opacity?: Property<number>;
+  /** Horizontal translation, in the same layer units as the element's own layout, added on top of its natural flex-resolved position. */
+  x?: Property<number>;
+  /** Vertical translation, in the same layer units as the element's own layout, added on top of its natural flex-resolved position. */
+  y?: Property<number>;
+  color?: Property<ColorRGBA>;
+}
+
+/**
+ * A Satori-rendered 2D layer (Phase 46-47's HTML/CSS-to-SVG-to-RGBA
+ * pipeline) placed into the scene as a textured plane, brought onto the
+ * timeline as an animatable node like any other.
+ *
+ * `layer` is this node's own inline content (like `TextNode.content`, not a
+ * ref to something authored elsewhere): the whole point of a scene-graph-
+ * native rich 2D layer is that an agent authors its element tree directly
+ * as part of the scene.
+ *
+ * `width`/`height` are the layer's own fixed rendering resolution, in
+ * layer units (matching what Satori lays out and resvg rasterizes at) -
+ * deliberately plain numbers, not `Property<number>`, since changing them
+ * requires a full re-render (new layout, new rasterization), unlike
+ * `transform.scale`, which resizes the already-rasterized result for free
+ * exactly like an `ImageNode`'s already-decoded bitmap does. Animate the
+ * displayed size via `transform.scale`, not by keyframing `width`/`height`.
+ *
+ * `opacity` mirrors `VideoNode.opacity` exactly: a `Property<number>`
+ * multiplier applied at the material level, independent of any `opacity`
+ * authored inside `layer`'s own styles (that is baked into the rasterized
+ * pixels themselves and never changes without a re-render; this field is
+ * cheap to animate per frame since it never triggers one).
+ */
+export interface SatoriNode extends SceneNodeBase<"satori"> {
+  layer: LayerElement;
+  width: number;
+  height: number;
+  opacity: Property<number>;
+  /** Defaults to `'normal'` (plain alpha compositing, i.e. `opacity` alone). */
+  blendMode?: SatoriBlendMode;
+  /** Every font `layer`'s own styles reference by `fontFamily`. Omitted or empty is only valid when `layer` contains no text. */
+  fonts?: readonly SatoriLayerFontRef[];
+  /**
+   * Per-frame animatable overrides for individual elements within `layer`,
+   * keyed by each target element's own `LayerElement.id`. An id with no
+   * matching element in `layer` (e.g. after the tree is edited but this map
+   * is not updated) is simply never applied - not an error, since which
+   * elements exist and which are animated are edited independently and can
+   * transiently disagree.
+   */
+  elementAnimations?: Readonly<Record<string, SatoriElementKeyframes>>;
+}
+
+/**
  * A node in the scene graph, discriminated on `kind`. Every variant is a
  * strict, closed shape: none of them carry a catch-all index signature, so
  * accessing a field not declared for the current `kind` is a compile error
@@ -287,4 +381,5 @@ export type SceneNode =
   | TextNode
   | ImageNode
   | VideoNode
-  | CompositionRefNode;
+  | CompositionRefNode
+  | SatoriNode;
