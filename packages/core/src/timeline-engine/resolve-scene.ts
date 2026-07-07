@@ -114,6 +114,7 @@ function resolveComposition(
     layers: pending.map((layer, index) => ({ ...layer, zIndex: index })),
     ...(activeCameraNodeId !== undefined && { activeCameraNodeId }),
     ...(composition.colorGrading !== undefined && { colorGrading: composition.colorGrading }),
+    ...(composition.environment !== undefined && { environment: composition.environment }),
   };
 }
 

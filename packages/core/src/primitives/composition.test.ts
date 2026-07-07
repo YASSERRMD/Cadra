@@ -40,7 +40,7 @@ describe("createComposition", () => {
     expect(composition.tracks).toEqual(tracks);
   });
 
-  it("omits activeCameraTrack, audioTracks, and colorGrading entirely when not provided", () => {
+  it("omits activeCameraTrack, audioTracks, colorGrading, and environment entirely when not provided", () => {
     const composition = createComposition({
       id: "comp-1",
       name: "Main",
@@ -53,6 +53,7 @@ describe("createComposition", () => {
     expect("activeCameraTrack" in composition).toBe(false);
     expect("audioTracks" in composition).toBe(false);
     expect("colorGrading" in composition).toBe(false);
+    expect("environment" in composition).toBe(false);
   });
 
   it("preserves activeCameraTrack when provided", () => {
@@ -101,5 +102,21 @@ describe("createComposition", () => {
     });
 
     expect(composition.colorGrading).toEqual(colorGrading);
+  });
+
+  it("preserves environment when provided", () => {
+    const environment = { envMapRef: "studio", rotation: Math.PI / 2, intensity: 1.5, showBackground: true };
+
+    const composition = createComposition({
+      id: "comp-1",
+      name: "Main",
+      fps: 30,
+      durationInFrames: 300,
+      width: 1920,
+      height: 1080,
+      environment,
+    });
+
+    expect(composition.environment).toEqual(environment);
   });
 });

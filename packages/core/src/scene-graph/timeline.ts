@@ -176,6 +176,14 @@ export interface Composition {
    * no-op).
    */
   colorGrading?: CompositionColorGrading;
+  /**
+   * A whole-composition image-based lighting environment: ambient light and
+   * reflections sourced from an equirectangular map, applied to every PBR
+   * material in the render. Fixed for the composition's entire length,
+   * exactly like `colorGrading` (see that field's own doc for why). Omitted
+   * means no environment lighting at all (the pre-Phase-56 default).
+   */
+  environment?: CompositionEnvironment;
 }
 
 /**
@@ -204,6 +212,51 @@ export interface CompositionColorGrading {
    * correction).
    */
   whiteBalanceTint?: number;
+}
+
+/**
+ * A whole-composition image-based lighting environment. See
+ * `Composition.environment`'s own doc for why this is a fixed,
+ * non-`Property<T>` setting.
+ */
+export interface CompositionEnvironment {
+  /**
+   * Id of a registered equirectangular environment map, resolved against an
+   * environment registry by the renderer. Two built-in refs, `"studio"` and
+   * `"outdoor"`, are always available with no registry setup at all (see
+   * `createDefaultEnvironmentRegistry` in `@cadra/renderer`).
+   */
+  envMapRef: string;
+  /** Rotation around the vertical (world Y) axis, in radians. Defaults to `0`. */
+  rotation?: number;
+  /** Multiplies the environment's own contribution to diffuse and specular image-based lighting. Defaults to `1`. */
+  intensity?: number;
+  /** Whether the environment map is also visible as the rendered background, not just a lighting source. Defaults to `false` (lighting-only, e.g. for a product shot that wants believable reflections without showing the studio backdrop itself). */
+  showBackground?: boolean;
+  /** Multiplies the displayed background's own brightness, independent of `intensity`. Only meaningful when `showBackground` is `true`. Defaults to `1`. */
+  backgroundIntensity?: number;
+  /**
+   * Projects the environment onto a virtual grounded skybox (a large sphere
+   * flattened where it meets a ground plane) instead of an infinite sphere,
+   * so reflections and the background both read as touching the ground -
+   * useful for grounded product-style shots. Omitted means a standard
+   * infinite-sphere environment.
+   */
+  groundProjection?: EnvironmentGroundProjection;
+}
+
+/** Ground-plane projection tuning for `CompositionEnvironment.groundProjection`. */
+export interface EnvironmentGroundProjection {
+  /**
+   * How far above the ground the environment's own source photo was
+   * captured from, in scene units; must be strictly positive (a larger
+   * value magnifies the downward-facing part of the image, per Three.js's
+   * own `GroundedSkybox`). The projected ground plane itself always ends up
+   * at world Y `0`.
+   */
+  height: number;
+  /** Radius of the virtual sky sphere; should comfortably contain the whole scene. Must be strictly positive. Defaults to `100`. */
+  radius?: number;
 }
 
 /** The top-level authoring unit: a named collection of compositions. */

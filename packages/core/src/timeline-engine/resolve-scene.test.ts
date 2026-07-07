@@ -839,3 +839,51 @@ describe("resolveSceneAtFrame: colorGrading passthrough", () => {
     expect(state.colorGrading).toBeUndefined();
   });
 });
+
+describe("resolveSceneAtFrame: environment passthrough", () => {
+  it("carries the composition's own environment through unchanged", () => {
+    const shape = Shape({ id: "lit-shape" });
+    const environment = { envMapRef: "studio", rotation: 1.2, intensity: 0.8, showBackground: true };
+    const composition = createComposition({
+      id: "comp-environment",
+      name: "Environment",
+      fps: 30,
+      durationInFrames: 30,
+      width: 100,
+      height: 100,
+      tracks: [
+        {
+          id: "track-content",
+          clips: [Sequence({ id: "clip-content", from: 0, durationInFrames: 30, content: shape })],
+        },
+      ],
+      environment,
+    });
+    const project = createProject({ id: "p-environment", name: "Project", compositions: [composition] });
+
+    const state = resolveSceneAtFrame(project, "comp-environment", 5);
+    expect(state.environment).toEqual(environment);
+  });
+
+  it("leaves environment undefined when the composition has none", () => {
+    const shape = Shape({ id: "unlit-shape" });
+    const composition = createComposition({
+      id: "comp-no-environment",
+      name: "No Environment",
+      fps: 30,
+      durationInFrames: 30,
+      width: 100,
+      height: 100,
+      tracks: [
+        {
+          id: "track-content",
+          clips: [Sequence({ id: "clip-content", from: 0, durationInFrames: 30, content: shape })],
+        },
+      ],
+    });
+    const project = createProject({ id: "p-no-environment", name: "Project", compositions: [composition] });
+
+    const state = resolveSceneAtFrame(project, "comp-no-environment", 5);
+    expect(state.environment).toBeUndefined();
+  });
+});
