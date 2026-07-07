@@ -77,6 +77,9 @@ importers:
       '@cadra/core':
         specifier: workspace:*
         version: link:../core
+      '@cadra/providers':
+        specifier: workspace:*
+        version: link:../providers
       '@cadra/schema':
         specifier: workspace:*
         version: link:../schema
@@ -170,6 +173,9 @@ importers:
       '@cadra/headless':
         specifier: workspace:*
         version: link:../headless
+      '@cadra/providers':
+        specifier: workspace:*
+        version: link:../providers
       '@cadra/schema':
         specifier: workspace:*
         version: link:../schema
@@ -213,6 +219,10 @@ importers:
         version: 2.1.9(@types/node@26.1.0)(jsdom@25.0.1)
 
   packages/providers:
+    dependencies:
+      '@cadra/core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       typescript:
         specifier: ^5.7.3

@@ -27,6 +27,7 @@
     "@cadra/core": "workspace:*",
     "@cadra/encode": "workspace:*",
     "@cadra/headless": "workspace:*",
+    "@cadra/providers": "workspace:*",
     "@cadra/schema": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^4.4.3"

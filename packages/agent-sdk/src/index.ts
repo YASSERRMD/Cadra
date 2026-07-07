@@ -128,11 +128,66 @@
  * minimal `(prompt: string) => Promise<string>` seam (`LlmCompletionFn`)
  * with no vendor-specific shape, so a test (or a caller preferring a
  * different provider) never needs to touch `@anthropic-ai/sdk` at all.
+ *
+ * ## Checking a generative-video slot's status
+ *
+ * Phase 35's `@cadra/providers` job store (`createGenerationStore`) is
+ * re-exported here (`./generation-status.js`) alongside a thin
+ * `getGenerationSlotStatus` helper, so a caller building a scene
+ * programmatically can check a slot's status without a second import from
+ * `@cadra/providers`:
+ *
+ * ```ts
+ * import { createGenerationStore, getGenerationSlotStatus } from "@cadra/agent-sdk";
+ *
+ * const store = createGenerationStore({ providers: { veo: myVeoProvider } });
+ * await store.submitGeneration("intro-clip", "veo", {
+ *   prompt: "A sunrise over rolling hills.",
+ *   params: { durationSeconds: 5 },
+ * });
+ *
+ * await store.refresh(); // polls every not-yet-terminal job once
+ * const resolution = getGenerationSlotStatus(store, "intro-clip");
+ * // resolution is a placeholder while generating, { status: "ready", outputUrl }
+ * // once the vendor succeeds, or { status: "failed", error } if it fails.
+ * ```
+ *
+ * This SDK does not construct or cache a `GenerationStore` itself: exactly
+ * like every `VideoProvider` adapter in `@cadra/providers`, a caller
+ * constructs and holds its own store, matching this SDK's own "no hidden
+ * global state" discipline.
  */
 
 export type { Addable, CompositionBuilderProps, CompositionSize } from "./composition-builder.js";
 export { CompositionBuilder } from "./composition-builder.js";
 export { SceneBuildError, SceneBuilderUsageError } from "./errors.js";
+export type {
+  CreateGenerationStoreOptions,
+  GenerationCacheEntry,
+  GenerationPlaceholder,
+  GenerationSlot,
+  GenerationStore,
+  LastKnownFramePlaceholder,
+  PlaceholderColor,
+  PlaceholderPreference,
+  ProviderRegistry,
+  RequestHash,
+  ResolvePlaceholderOptions,
+  SlotFailed,
+  SlotPending,
+  SlotReady,
+  SlotResolution,
+  SolidPlaceholder,
+  SpinnerPlaceholder,
+} from "./generation-status.js";
+export {
+  createGenerationStore,
+  deriveRegeneratedRequest,
+  getGenerationSlotStatus,
+  hashVideoGenerationRequest,
+  UnknownProviderError,
+  UnknownSlotError,
+} from "./generation-status.js";
 export type { AnimateInput } from "./keyframe-input.js";
 export type {
   AnimationPatchFor,

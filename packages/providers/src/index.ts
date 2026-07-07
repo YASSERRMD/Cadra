@@ -50,6 +50,18 @@
  * summary of what this phase's research verified against each vendor's real
  * documentation versus what remains best-effort, and each adapter's own
  * module doc for the complete detail behind that summary.
+ *
+ * Phase 35 adds the async job model generative video needs on top of these
+ * adapters: `createGenerationStore` (`./generation-store.ts`) is a
+ * content-hash-keyed dedup cache (`./request-hash.ts`'s
+ * `hashVideoGenerationRequest`) plus a caller-named "generation slot"
+ * concept (`submitGeneration`/`regenerateSlot`/`getSlotStatus`) tracking the
+ * current and previous request for a stable id like a `VideoNode`'s own
+ * `id`. `./placeholder.ts` defines the plain-data placeholder descriptor
+ * (`solid`/`spinner`/`lastKnownFrame`) a pending/running slot resolves to,
+ * so a preview or render path has something to show without blocking on the
+ * vendor; this package does not draw any pixels for it (see that module's
+ * own doc for the scope boundary with `packages/renderer`).
  */
 
 export const VERSION = "0.0.0";
@@ -59,6 +71,20 @@ export const PACKAGE_NAME = "@cadra/providers";
 
 export type { FetchLike } from "./fetch-like.js";
 export { defaultFetchLike } from "./fetch-like.js";
+export type {
+  CreateGenerationStoreOptions,
+  GenerationCacheEntry,
+  GenerationSlot,
+  GenerationStore,
+  ProviderRegistry,
+  RequestHash,
+} from "./generation-store.js";
+export {
+  createGenerationStore,
+  deriveRegeneratedRequest,
+  UnknownProviderError,
+  UnknownSlotError,
+} from "./generation-store.js";
 export type { KlingProviderOptions } from "./kling-provider.js";
 export {
   createKlingProvider,
@@ -76,6 +102,25 @@ export {
 } from "./luma-provider.js";
 export type { PikaProviderOptions } from "./pika-provider.js";
 export { createPikaProvider, DEFAULT_FAL_QUEUE_BASE_URL, PIKA_MODEL_PATH } from "./pika-provider.js";
+export type {
+  GenerationPlaceholder,
+  LastKnownFramePlaceholder,
+  PlaceholderColor,
+  PlaceholderPreference,
+  ResolvePlaceholderOptions,
+  SlotFailed,
+  SlotPending,
+  SlotReady,
+  SlotResolution,
+  SolidPlaceholder,
+  SpinnerPlaceholder,
+} from "./placeholder.js";
+export {
+  DEFAULT_PLACEHOLDER_SOLID_COLOR,
+  resolveGenerationStatus,
+  resolvePlaceholder,
+} from "./placeholder.js";
+export { hashVideoGenerationRequest } from "./request-hash.js";
 export type { FetchWithRetryOptions, SleepFn } from "./retry.js";
 export {
   DEFAULT_BASE_DELAY_MS,

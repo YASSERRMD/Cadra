@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   Camera,
+  createGenerationStore,
   createTextToSceneAdapter,
   extractJsonFromLlmResponse,
+  getGenerationSlotStatus,
   Image,
   Light,
   PACKAGE_NAME,
@@ -47,6 +49,11 @@ describe("@cadra/agent-sdk barrel: every public entry point is reachable from th
   it("exports the Phase 32 text-to-scene entry points", () => {
     expect(typeof createTextToSceneAdapter).toBe("function");
     expect(typeof extractJsonFromLlmResponse).toBe("function");
+  });
+
+  it("exports the Phase 35 generation job store entry points", () => {
+    expect(typeof createGenerationStore).toBe("function");
+    expect(typeof getGenerationSlotStatus).toBe("function");
   });
 
   it("builds a minimal document end to end using only barrel imports", () => {
