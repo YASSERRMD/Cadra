@@ -5,6 +5,10 @@ import {
   resolveBooleanProperty,
   resolveColorProperty,
   resolveNumberProperty,
+  resolveTextFill,
+  resolveTextGlow,
+  resolveTextOutline,
+  resolveTextShadow,
   resolveVector3Property,
   type SatoriBlendMode,
   type SatoriNode,
@@ -243,9 +247,15 @@ function buildThreeObject(node: SceneNode, ctx: NodeFactoryContext): BuiltObject
  * are already under (changing either on a *persisting* node id without a
  * kind change does not yet trigger a rebuild; this mirrors `image`/`video`
  * still being placeholders rather than a regression this phase introduces).
+ * `fill`/`outline`/`glow`/`shadow` (Phase 53) are *presence* (structural,
+ * decided once here, same as `extrudeDepth > 0`) plus *value* (re-resolved
+ * every frame in `applyNodeProperties`, same as `color`) - only whether
+ * each is configured *at all* is frame-0-only, matching `TextGroupResources`'s
+ * own `setFill`/`setOutline`/`setGlow`/`setShadow` each being present only
+ * when their config was.
  */
 function buildTextObject(node: TextNode, ctx: NodeFactoryContext): BuiltObject {
-  const entry = ctx.textRenderRegistry?.resolve(computeTextNodeRenderKey(node));
+  const entry = ctx.textRenderRegistry?.resolve(computeTextNodeRenderKey(node, 0));
   if (entry === undefined) {
     return { object3D: new THREE.Group(), owned: undefined };
   }
@@ -260,6 +270,10 @@ function buildTextObject(node: TextNode, ctx: NodeFactoryContext): BuiltObject {
     // which the default shared-by-(page,color) materials do not allow; see
     // buildTextGroup's own doc.
     perGlyphMaterial: node.stagger !== undefined || node.physics !== undefined,
+    ...(node.fill !== undefined && { fill: resolveTextFill(node.fill, 0) }),
+    ...(node.outline !== undefined && { outline: resolveTextOutline(node.outline, 0) }),
+    ...(node.glow !== undefined && { glow: resolveTextGlow(node.glow, 0) }),
+    ...(node.shadow !== undefined && { shadow: resolveTextShadow(node.shadow, 0) }),
   });
 
   return { object3D: resources.group, owned: { text: resources, textGlyphs: entry.data.glyphs } };
@@ -334,6 +348,18 @@ export function applyNodeProperties(
       // render-key/extrusion state changes; see buildTextObject).
       object3D.scale.multiplyScalar(fontSize);
       owned?.text?.setColor(color[0], color[1], color[2], color[3]);
+      if (node.fill !== undefined) {
+        owned?.text?.setFill?.(resolveTextFill(node.fill, frame));
+      }
+      if (node.outline !== undefined) {
+        owned?.text?.setOutline?.(resolveTextOutline(node.outline, frame));
+      }
+      if (node.glow !== undefined) {
+        owned?.text?.setGlow?.(resolveTextGlow(node.glow, frame));
+      }
+      if (node.shadow !== undefined) {
+        owned?.text?.setShadow?.(resolveTextShadow(node.shadow, frame));
+      }
       if (
         (node.stagger !== undefined || node.physics !== undefined || node.path !== undefined) &&
         owned?.textGlyphs !== undefined

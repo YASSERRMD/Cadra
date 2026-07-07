@@ -122,6 +122,24 @@ export interface LayerStyle {
   opacity?: number;
   overflow?: "visible" | "hidden";
 
+  /**
+   * React/Satori's own vendor-prefixed shorthand (e.g. `"1px solid #000"`),
+   * parsed by Satori itself into a stroke drawn along each glyph's own
+   * outline (`paint-order: stroke` under the hood) - a *text* stroke, not
+   * a box-model outline. Verified directly against this codebase's own
+   * installed Satori version (empirically rendering a real layer and
+   * inspecting the output SVG): CSS `outlineWidth`/`outlineColor`/
+   * `outlineStyle`/`outlineOffset` are deliberately not exposed here even
+   * though they appear as plain strings inside Satori's own bundled code,
+   * because those strings turned out to belong to an unrelated bundled
+   * Tailwind-class-name-to-CSS-property mapping table, not Satori's actual
+   * style-application/rendering path - setting them on a real layer style
+   * produces no visible output at all, silently, which is exactly the
+   * "looks supported but does nothing" failure this whole type is meant to
+   * prevent (see this file's own module doc).
+   */
+  WebkitTextStroke?: string;
+
   /** A raw CSS `transform` value (translate/rotate/scale/skew; Satori does not support 3D transforms). */
   transform?: string;
   transformOrigin?: string;

@@ -33,6 +33,14 @@ export type { TextProps } from "./text.js";
 export { Text } from "./text.js";
 export { resolveCountUpText, resolveScrambleText } from "./text-content-effects.js";
 export type {
+  ResolvedTextFill,
+  ResolvedTextGlow,
+  ResolvedTextGradientStop,
+  ResolvedTextOutline,
+  ResolvedTextShadow,
+} from "./text-material.js";
+export { resolveTextFill, resolveTextGlow, resolveTextOutline, resolveTextShadow } from "./text-material.js";
+export type {
   ResolvedTextPath,
   ResolvedTextPathSegment,
   TextPathSample,

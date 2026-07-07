@@ -137,5 +137,6 @@ export type { TextUnit, TextUnitGranularity } from "./text-units.js";
 export { splitTextUnits } from "./text-units.js";
 export type { NamedInstance, VariationAxis } from "./variable-font.js";
 export { clampToAxisRange, findNamedInstance } from "./variable-font.js";
+export { bakeVariationInstance, resolveFullVariationPin } from "./variation-instance.js";
 export { reorderRunsToVisualOrder } from "./visual-run-order.js";
 export { isWhitespaceChar } from "./whitespace.js";

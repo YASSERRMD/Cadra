@@ -155,6 +155,200 @@ describe("buildTextGroup: flat MSDF path", () => {
 
     expect(() => resources.setColor(0, 1, 0, 0.5)).not.toThrow();
   });
+
+  it("bakes a positive msdfRange attribute onto every glyph's own geometry", async () => {
+    const data = await prepareTextRenderData(ROBOTO_FLEX, "Vo");
+    const resources = buildTextGroup(data, { color: [1, 1, 1, 1] });
+
+    for (const geometry of resources.geometries) {
+      const rangeAttribute = geometry.getAttribute("msdfRange");
+      expect(rangeAttribute).toBeDefined();
+      for (let i = 0; i < rangeAttribute.count; i += 1) {
+        expect(rangeAttribute.getX(i)).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("bakes a 0-1 blockUV attribute spanning the whole rendered block, not just one glyph", async () => {
+    const data = await prepareTextRenderData(ROBOTO_FLEX, "Vote");
+    const resources = buildTextGroup(data, { color: [1, 1, 1, 1] });
+
+    let sawNearZero = false;
+    let sawNearOne = false;
+    for (const geometry of resources.geometries) {
+      const blockUvAttribute = geometry.getAttribute("blockUV");
+      expect(blockUvAttribute).toBeDefined();
+      for (let i = 0; i < blockUvAttribute.count; i += 1) {
+        const x = blockUvAttribute.getX(i);
+        expect(x).toBeGreaterThanOrEqual(0);
+        expect(x).toBeLessThanOrEqual(1);
+        if (x < 0.1) sawNearZero = true;
+        if (x > 0.9) sawNearOne = true;
+      }
+    }
+    // The first glyph's own left edge and the last glyph's own right edge
+    // should span close to the block's own full 0-1 range, not each
+    // glyph independently restarting its own 0-1 span.
+    expect(sawNearZero).toBe(true);
+    expect(sawNearOne).toBe(true);
+  });
+});
+
+describe("buildTextGroup: gradient fill", () => {
+  it("builds without throwing and does not fall back to a plain per-glyph color material", async () => {
+    const data = await prepareTextRenderData(ROBOTO_FLEX, "Vo");
+    const resources = buildTextGroup(data, {
+      color: [1, 1, 1, 1],
+      fill: {
+        type: "linearGradient",
+        angle: 0,
+        stops: [
+          { offset: 0, color: [1, 0, 0, 1] },
+          { offset: 1, color: [0, 0, 1, 1] },
+        ],
+      },
+    });
+
+    expect(resources.materials.length).toBeGreaterThan(0);
+  });
+
+  it("exposes setFill, which does not throw", async () => {
+    const data = await prepareTextRenderData(ROBOTO_FLEX, "Vo");
+    const resources = buildTextGroup(data, {
+      color: [1, 1, 1, 1],
+      fill: {
+        type: "radialGradient",
+        stops: [
+          { offset: 0, color: [1, 1, 1, 1] },
+          { offset: 1, color: [0, 0, 0, 1] },
+        ],
+      },
+    });
+
+    expect(resources.setFill).toBeDefined();
+    expect(() =>
+      resources.setFill?.({
+        type: "radialGradient",
+        stops: [
+          { offset: 0, color: [0, 1, 0, 1] },
+          { offset: 1, color: [0, 0, 0, 1] },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
+  it("does not expose setFill at all for a plain solid fill (no fill option given)", async () => {
+    const data = await prepareTextRenderData(ROBOTO_FLEX, "V");
+    const resources = buildTextGroup(data, { color: [1, 1, 1, 1] });
+
+    expect(resources.setFill).toBeUndefined();
+  });
+});
+
+describe("buildTextGroup: outline", () => {
+  it("exposes setOutline only when outline is configured", async () => {
+    const data = await prepareTextRenderData(ROBOTO_FLEX, "V");
+    const withOutline = buildTextGroup(data, {
+      color: [1, 1, 1, 1],
+      outline: { width: 0.05, color: [0, 0, 0, 1] },
+    });
+    const withoutOutline = buildTextGroup(data, { color: [1, 1, 1, 1] });
+
+    expect(withOutline.setOutline).toBeDefined();
+    expect(withoutOutline.setOutline).toBeUndefined();
+    expect(() => withOutline.setOutline?.({ width: 0.1, color: [1, 0, 0, 1] })).not.toThrow();
+  });
+});
+
+describe("buildTextGroup: glow", () => {
+  it("exposes setGlow only when glow is configured, for either direction", async () => {
+    const data = await prepareTextRenderData(ROBOTO_FLEX, "V");
+    const outer = buildTextGroup(data, {
+      color: [1, 1, 1, 1],
+      glow: { direction: "outer", radius: 0.2, color: [1, 1, 0, 1], intensity: 1 },
+    });
+    const inner = buildTextGroup(data, {
+      color: [1, 1, 1, 1],
+      glow: { direction: "inner", radius: 0.1, color: [1, 1, 1, 1], intensity: 0.5 },
+    });
+    const withoutGlow = buildTextGroup(data, { color: [1, 1, 1, 1] });
+
+    expect(outer.setGlow).toBeDefined();
+    expect(inner.setGlow).toBeDefined();
+    expect(withoutGlow.setGlow).toBeUndefined();
+  });
+});
+
+describe("buildTextGroup: shadow", () => {
+  it("adds one extra shadow mesh per glyph for a single-step shadow, behind the main glyph in render order", async () => {
+    const data = await prepareTextRenderData(ROBOTO_FLEX, "Vo");
+    const resources = buildTextGroup(data, {
+      color: [1, 1, 1, 1],
+      shadow: { offsetX: 0.05, offsetY: -0.05, blur: 0, color: [0, 0, 0, 0.5], steps: 1 },
+    });
+
+    const lineGroup = resources.group.children[0] as THREE.Group;
+    const wordGroup = lineGroup.children[0] as THREE.Group;
+    // 2 glyphs, each with one main mesh plus one shadow mesh.
+    expect(wordGroup.children).toHaveLength(4);
+    const shadowMeshes = (wordGroup.children as THREE.Mesh[]).filter((mesh) => mesh.name.includes("shadow"));
+    expect(shadowMeshes).toHaveLength(2);
+    for (const shadowMesh of shadowMeshes) {
+      expect(shadowMesh.renderOrder).toBeLessThan(0);
+    }
+  });
+
+  it("offsets a long shadow's own steps progressively further out", async () => {
+    const data = await prepareTextRenderData(ROBOTO_FLEX, "V");
+    const resources = buildTextGroup(data, {
+      color: [1, 1, 1, 1],
+      shadow: { offsetX: 0.02, offsetY: 0, blur: 0, color: [0, 0, 0, 1], steps: 3 },
+    });
+
+    const lineGroup = resources.group.children[0] as THREE.Group;
+    const wordGroup = lineGroup.children[0] as THREE.Group;
+    const shadowMeshes = (wordGroup.children as THREE.Mesh[])
+      .filter((mesh) => mesh.name.includes("shadow"))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    expect(shadowMeshes).toHaveLength(3);
+
+    const mainMesh = (wordGroup.children as THREE.Mesh[]).find((mesh) => !mesh.name.includes("shadow"));
+    const basePositionX = (mainMesh?.userData["basePosition"] as THREE.Vector3).x;
+    expect(shadowMeshes[0]?.position.x).toBeCloseTo(basePositionX + 0.02, 10);
+    expect(shadowMeshes[1]?.position.x).toBeCloseTo(basePositionX + 0.04, 10);
+    expect(shadowMeshes[2]?.position.x).toBeCloseTo(basePositionX + 0.06, 10);
+  });
+
+  it("exposes setShadow, which repositions every shadow mesh and does not throw", async () => {
+    const data = await prepareTextRenderData(ROBOTO_FLEX, "V");
+    const resources = buildTextGroup(data, {
+      color: [1, 1, 1, 1],
+      shadow: { offsetX: 0.02, offsetY: 0.02, blur: 0, color: [0, 0, 0, 1], steps: 1 },
+    });
+
+    expect(resources.setShadow).toBeDefined();
+    expect(() =>
+      resources.setShadow?.({ offsetX: 0.1, offsetY: 0.1, blur: 0.01, color: [0, 0, 0, 0.8], steps: 1 }),
+    ).not.toThrow();
+
+    const lineGroup = resources.group.children[0] as THREE.Group;
+    const wordGroup = lineGroup.children[0] as THREE.Group;
+    const shadowMesh = (wordGroup.children as THREE.Mesh[]).find((mesh) => mesh.name.includes("shadow"));
+    const mainMesh = (wordGroup.children as THREE.Mesh[]).find((mesh) => !mesh.name.includes("shadow"));
+    const basePosition = mainMesh?.userData["basePosition"] as THREE.Vector3;
+    expect(shadowMesh?.position.x).toBeCloseTo(basePosition.x + 0.1, 10);
+    expect(shadowMesh?.position.y).toBeCloseTo(basePosition.y + 0.1, 10);
+  });
+
+  it("does not add any shadow meshes when shadow is not configured", async () => {
+    const data = await prepareTextRenderData(ROBOTO_FLEX, "V");
+    const resources = buildTextGroup(data, { color: [1, 1, 1, 1] });
+
+    const lineGroup = resources.group.children[0] as THREE.Group;
+    const wordGroup = lineGroup.children[0] as THREE.Group;
+    expect(wordGroup.children).toHaveLength(1);
+    expect(resources.setShadow).toBeUndefined();
+  });
 });
 
 describe("buildTextGroup: extruded path", () => {

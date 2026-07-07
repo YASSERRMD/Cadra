@@ -4,6 +4,7 @@ export {
   resolveColorProperty,
   resolveNumberProperty,
   resolveProperty,
+  resolveVariationAxesProperty,
   resolveVector3Property,
 } from "./compile.js";
 export type { ContinuousEasing, Easing } from "./easing.js";

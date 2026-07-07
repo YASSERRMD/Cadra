@@ -103,6 +103,29 @@ describe("renderLayerToSvg", () => {
     expect(svg).toContain("clipPath");
   });
 
+  it("renders WebkitTextStroke as a real SVG text stroke", async () => {
+    const layer: LayerElement = {
+      type: "div",
+      style: { display: "flex", width: "100%", height: "100%" },
+      children: [
+        {
+          type: "span",
+          style: {
+            fontFamily: "Inter",
+            fontSize: 40,
+            color: "white",
+            WebkitTextStroke: "2px black",
+          },
+          children: ["Stroked"],
+        },
+      ],
+    };
+    const svg = await renderLayerToSvg(layer, { width: 300, height: 150, fonts: [REGULAR_FONT] });
+    expect(svg).toContain('stroke="black"');
+    expect(svg).toContain('stroke-width="2px"');
+    expect(svg).toContain('paint-order="stroke"');
+  });
+
   it("embeds an image element via a data URI", async () => {
     const pngDataUri =
       "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";

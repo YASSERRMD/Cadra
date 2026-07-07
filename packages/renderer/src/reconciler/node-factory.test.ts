@@ -15,7 +15,7 @@ import {
   createInMemorySatoriLayerRenderRegistry,
 } from "../svg-layer/satori-layer-render-registry.js";
 import type { TextGroupResources } from "../text/build-text-group.js";
-import { createInMemoryTextRenderRegistry } from "../text/text-render-registry.js";
+import { computeTextNodeRenderKey, createInMemoryTextRenderRegistry } from "../text/text-render-registry.js";
 import { applyNodeProperties, createThreeObject, type NodeFactoryContext } from "./node-factory.js";
 import { createDefaultGeometryRegistry, createDefaultMaterialRegistry } from "./registries.js";
 
@@ -40,14 +40,15 @@ const FAKE_TEXT_RENDER_DATA: TextRenderData = {
       quad: { left: 0, right: 1, bottom: 0, top: 1 },
       page: 0,
       uv: { u0: 0, v0: 0, u1: 1, v1: 1 },
+      range: 0.1,
     },
   ],
 };
 
-/** `makeCtx` plus a `textRenderRegistry` pre-populated with `FAKE_TEXT_RENDER_DATA` under the given text node's own render key ("default::"+content). */
+/** `makeCtx` plus a `textRenderRegistry` pre-populated with `FAKE_TEXT_RENDER_DATA` under the given text node's own render key. */
 function makeCtxWithText(content: string): NodeFactoryContext {
   const textRenderRegistry = createInMemoryTextRenderRegistry();
-  textRenderRegistry.register(`default::${content}`, {
+  textRenderRegistry.register(computeTextNodeRenderKey({ content }, 0), {
     data: FAKE_TEXT_RENDER_DATA,
     fontBytes: new Uint8Array(),
     fontContentHash: "fake-font",
@@ -524,6 +525,7 @@ describe("node-factory: text stagger", () => {
         quad: { left: 0, right: 1, bottom: 0, top: 1 },
         page: 0,
         uv: { u0: 0, v0: 0, u1: 1, v1: 1 },
+        range: 0.1,
       },
       {
         glyphId: 2,
@@ -534,13 +536,14 @@ describe("node-factory: text stagger", () => {
         quad: { left: 1, right: 2, bottom: 0, top: 1 },
         page: 0,
         uv: { u0: 0, v0: 0, u1: 1, v1: 1 },
+        range: 0.1,
       },
     ],
   };
 
   function makeCtxWithTwoGlyphText(content: string): NodeFactoryContext {
     const textRenderRegistry = createInMemoryTextRenderRegistry();
-    textRenderRegistry.register(`default::${content}`, {
+    textRenderRegistry.register(computeTextNodeRenderKey({ content }, 0), {
       data: TWO_GLYPH_TEXT_RENDER_DATA,
       fontBytes: new Uint8Array(),
       fontContentHash: "fake-font",
@@ -640,6 +643,7 @@ describe("node-factory: text physics", () => {
         quad: { left: 0, right: 1, bottom: 0, top: 1 },
         page: 0,
         uv: { u0: 0, v0: 0, u1: 1, v1: 1 },
+        range: 0.1,
       },
       {
         glyphId: 2,
@@ -650,13 +654,14 @@ describe("node-factory: text physics", () => {
         quad: { left: 1, right: 2, bottom: 0, top: 1 },
         page: 0,
         uv: { u0: 0, v0: 0, u1: 1, v1: 1 },
+        range: 0.1,
       },
     ],
   };
 
   function makeCtxWithTwoGlyphText(content: string): NodeFactoryContext {
     const textRenderRegistry = createInMemoryTextRenderRegistry();
-    textRenderRegistry.register(`default::${content}`, {
+    textRenderRegistry.register(computeTextNodeRenderKey({ content }, 0), {
       data: TWO_GLYPH_TEXT_RENDER_DATA,
       fontBytes: new Uint8Array(),
       fontContentHash: "fake-font",
@@ -738,5 +743,97 @@ describe("node-factory: text physics", () => {
     // jitter's own contribution must also be present.
     expect(firstMesh.position.y).not.toBeCloseTo(firstBase.y - 0.5, 3);
     expect(firstMesh.position.y).not.toBeCloseTo(firstBase.y, 3);
+  });
+});
+
+describe("node-factory: text materials (Phase 53)", () => {
+  function textNodeWith(extra: Partial<SceneNode>): SceneNode {
+    return {
+      id: "t",
+      kind: "text",
+      transform: createIdentityTransform(),
+      visible: true,
+      children: [],
+      content: "a",
+      fontSize: 12,
+      color: [1, 1, 1, 1],
+      ...extra,
+    } as SceneNode;
+  }
+
+  it("wires a gradient fill through to a real setFill on the built resources", () => {
+    const ctx = makeCtxWithText("a");
+    const node = textNodeWith({
+      fill: {
+        type: "linearGradient",
+        stops: [
+          { offset: 0, color: [1, 0, 0, 1] },
+          { offset: 1, color: [0, 0, 1, 1] },
+        ],
+      },
+    });
+    const built = createThreeObject(node, ctx);
+
+    expect(built.owned?.text?.setFill).toBeDefined();
+
+    const setFillSpy = vi.spyOn(built.owned?.text as TextGroupResources, "setFill");
+    applyNodeProperties(node, built.object3D, ctx, 5, built.owned);
+    expect(setFillSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not expose setFill for a node with no fill configured", () => {
+    const ctx = makeCtxWithText("a");
+    const node = textNodeWith({});
+    const built = createThreeObject(node, ctx);
+
+    expect(built.owned?.text?.setFill).toBeUndefined();
+  });
+
+  it("wires an outline through to a real setOutline, re-resolved every frame", () => {
+    const ctx = makeCtxWithText("a");
+    const node = textNodeWith({
+      outline: {
+        width: { type: "keyframeTrack", keyframes: [{ frame: 0, value: 0 }, { frame: 10, value: 0.1 }] },
+        color: [0, 0, 0, 1],
+      },
+    });
+    const built = createThreeObject(node, ctx);
+    const setOutlineSpy = vi.spyOn(built.owned?.text as TextGroupResources, "setOutline");
+
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+    expect(setOutlineSpy).toHaveBeenLastCalledWith(expect.objectContaining({ width: 0 }));
+
+    applyNodeProperties(node, built.object3D, ctx, 10, built.owned);
+    expect(setOutlineSpy).toHaveBeenLastCalledWith(expect.objectContaining({ width: 0.1 }));
+  });
+
+  it("wires glow and shadow through to real setGlow/setShadow calls", () => {
+    const ctx = makeCtxWithText("a");
+    const node = textNodeWith({
+      glow: { radius: 0.2, color: [1, 1, 0, 1] },
+      shadow: { offsetX: 0.05, offsetY: 0.05, color: [0, 0, 0, 0.5] },
+    });
+    const built = createThreeObject(node, ctx);
+
+    expect(built.owned?.text?.setGlow).toBeDefined();
+    expect(built.owned?.text?.setShadow).toBeDefined();
+
+    const setGlowSpy = vi.spyOn(built.owned?.text as TextGroupResources, "setGlow");
+    const setShadowSpy = vi.spyOn(built.owned?.text as TextGroupResources, "setShadow");
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+    expect(setGlowSpy).toHaveBeenCalledTimes(1);
+    expect(setShadowSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not call setFill/setOutline/setGlow/setShadow at all when none are configured", () => {
+    const ctx = makeCtxWithText("a");
+    const node = textNodeWith({});
+    const built = createThreeObject(node, ctx);
+
+    expect(() => applyNodeProperties(node, built.object3D, ctx, 0, built.owned)).not.toThrow();
+    expect(built.owned?.text?.setFill).toBeUndefined();
+    expect(built.owned?.text?.setOutline).toBeUndefined();
+    expect(built.owned?.text?.setGlow).toBeUndefined();
+    expect(built.owned?.text?.setShadow).toBeUndefined();
   });
 });

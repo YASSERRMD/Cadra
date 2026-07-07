@@ -15,7 +15,7 @@ import {
   computeSatoriLayerRenderKey,
   createInMemorySatoriLayerRenderRegistry,
 } from "../svg-layer/satori-layer-render-registry.js";
-import { createInMemoryTextRenderRegistry } from "../text/text-render-registry.js";
+import { computeTextNodeRenderKey, createInMemoryTextRenderRegistry } from "../text/text-render-registry.js";
 import { createReconciler } from "./reconciler.js";
 import { createDefaultGeometryRegistry, createDefaultMaterialRegistry } from "./registries.js";
 
@@ -33,6 +33,7 @@ const FAKE_TEXT_RENDER_DATA: TextRenderData = {
       quad: { left: 0, right: 1, bottom: 0, top: 1 },
       page: 0,
       uv: { u0: 0, v0: 0, u1: 1, v1: 1 },
+      range: 0.1,
     },
   ],
 };
@@ -275,7 +276,7 @@ describe("createReconciler: kind-to-Three.js mapping", () => {
 
   it("maps text with registered render data to real glyph meshes, colored per the resolved color", () => {
     const textRenderRegistry = createInMemoryTextRenderRegistry();
-    textRenderRegistry.register("default::hello", {
+    textRenderRegistry.register(computeTextNodeRenderKey({ content: "hello" }, 0), {
       data: FAKE_TEXT_RENDER_DATA,
       fontBytes: new Uint8Array(),
       fontContentHash: "fake-font",
@@ -466,7 +467,7 @@ describe("createReconciler: add, update, remove", () => {
 
   it("reconcile(null) disposes every geometry, material, and texture a text node's own render resources own", () => {
     const textRenderRegistry = createInMemoryTextRenderRegistry();
-    textRenderRegistry.register("default::hello", {
+    textRenderRegistry.register(computeTextNodeRenderKey({ content: "hello" }, 0), {
       data: FAKE_TEXT_RENDER_DATA,
       fontBytes: new Uint8Array(),
       fontContentHash: "fake-font",
@@ -565,7 +566,7 @@ describe("createReconciler: reordering", () => {
     // in that list) the moment they disagreed in length - i.e. on every
     // single reconcile of a text node with real render data.
     const textRenderRegistry = createInMemoryTextRenderRegistry();
-    textRenderRegistry.register("default::hello", {
+    textRenderRegistry.register(computeTextNodeRenderKey({ content: "hello" }, 0), {
       data: FAKE_TEXT_RENDER_DATA,
       fontBytes: new Uint8Array(),
       fontContentHash: "fake-font",

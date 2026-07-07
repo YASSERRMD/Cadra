@@ -182,3 +182,32 @@ export function resolveColorProperty(property: Property<ColorRGBA>, frame: numbe
 export function resolveBooleanProperty(property: Property<boolean>, frame: number): boolean {
   return resolveProperty(property, frame, stepBooleanValue);
 }
+
+/**
+ * Interpolates a set of variation-axis coordinates (e.g. `{wght: 400}`)
+ * key by key: a key present on only one side holds its one known value for
+ * the whole blend (there is nothing to blend toward), rather than treating
+ * it as `0` (which would animate axes like `wght`, whose meaningful range
+ * never includes `0`, through a nonsensical dip).
+ */
+function interpolateVariationAxesValue(
+  a: Readonly<Record<string, number>>,
+  b: Readonly<Record<string, number>>,
+  t: number,
+): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const tag of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    const from = a[tag];
+    const to = b[tag];
+    result[tag] = from !== undefined && to !== undefined ? lerp(from, to, t) : ((to ?? from) as number);
+  }
+  return result;
+}
+
+/** `resolveProperty` specialized for variable-font axis coordinates, using `interpolateVariationAxesValue`. */
+export function resolveVariationAxesProperty(
+  property: Property<Readonly<Record<string, number>>>,
+  frame: number,
+): Readonly<Record<string, number>> {
+  return resolveProperty(property, frame, interpolateVariationAxesValue);
+}

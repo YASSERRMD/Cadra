@@ -12,8 +12,13 @@ import type {
   SatoriNode,
   SceneNode,
   SceneNodeKind,
+  TextFill,
+  TextGlowConfig,
+  TextGlowDirection,
+  TextGradientStop,
   TextMorphConfig,
   TextNode,
+  TextOutlineConfig,
   TextPathAlignment,
   TextPathConfig,
   TextPathOrientation,
@@ -21,6 +26,7 @@ import type {
   TextPathSpacing,
   TextPhysicsConfig,
   TextPhysicsEffect,
+  TextShadowConfig,
   TextStaggerConfig,
   TextStaggerDirection,
   TextStaggerGrouping,
@@ -517,6 +523,81 @@ export const textMorphConfigSchema = z.strictObject({
 
 type _CheckTextMorphConfig = AssertTrue<AssertEqual<z.infer<typeof textMorphConfigSchema>, TextMorphConfig>>;
 
+/** Mirrors `TextGradientStop`. */
+export const textGradientStopSchema = z.strictObject({
+  offset: z.number().describe("0 at the gradient's own start, 1 at its own end. Structural, not animatable."),
+  color: propertySchema(colorRgbaSchema),
+});
+
+type _CheckTextGradientStop = AssertTrue<AssertEqual<z.infer<typeof textGradientStopSchema>, TextGradientStop>>;
+
+/** Mirrors `TextFill`. */
+export const textFillSchema = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("solid"), color: propertySchema(colorRgbaSchema) }),
+  z.strictObject({
+    type: z.literal("linearGradient"),
+    angle: propertySchema(z.number()).optional().describe("In degrees. Defaults to 0."),
+    stops: z.array(textGradientStopSchema).readonly(),
+  }),
+  z.strictObject({
+    type: z.literal("radialGradient"),
+    stops: z.array(textGradientStopSchema).readonly(),
+  }),
+  z.strictObject({ type: z.literal("texture"), assetRef: z.string() }),
+  z.strictObject({ type: z.literal("video"), assetRef: z.string() }),
+]);
+
+type _CheckTextFill = AssertTrue<AssertEqual<z.infer<typeof textFillSchema>, TextFill>>;
+
+/** Mirrors `TextOutlineConfig`. */
+export const textOutlineConfigSchema = z.strictObject({
+  width: propertySchema(z.number()).describe("In fontSize-relative em units."),
+  color: propertySchema(colorRgbaSchema),
+});
+
+type _CheckTextOutlineConfig = AssertTrue<
+  AssertEqual<z.infer<typeof textOutlineConfigSchema>, TextOutlineConfig>
+>;
+
+/** Mirrors `TextGlowDirection`. */
+export const textGlowDirectionSchema = z
+  .enum(["outer", "inner"])
+  .describe("Whether a TextGlowConfig extends outward from a glyph's own edge or fades inward from it.");
+
+type _CheckTextGlowDirection = AssertTrue<
+  AssertEqual<z.infer<typeof textGlowDirectionSchema>, TextGlowDirection>
+>;
+
+/** Mirrors `TextGlowConfig`. */
+export const textGlowConfigSchema = z.strictObject({
+  direction: textGlowDirectionSchema.optional().describe("Defaults to \"outer\"."),
+  radius: propertySchema(z.number()).describe("In fontSize-relative em units."),
+  color: propertySchema(colorRgbaSchema),
+  intensity: propertySchema(z.number()).optional().describe("Multiplies the glow's own peak opacity. Defaults to 1."),
+});
+
+type _CheckTextGlowConfig = AssertTrue<AssertEqual<z.infer<typeof textGlowConfigSchema>, TextGlowConfig>>;
+
+/** Mirrors `TextShadowConfig`. */
+export const textShadowConfigSchema = z.strictObject({
+  offsetX: propertySchema(z.number()).describe("In fontSize-relative em units."),
+  offsetY: propertySchema(z.number()).describe("In fontSize-relative em units."),
+  blur: propertySchema(z.number())
+    .optional()
+    .describe("Softens the shadow's own edge, in fontSize-relative em units. Defaults to 0 (a hard shadow)."),
+  color: propertySchema(colorRgbaSchema),
+  steps: z
+    .number()
+    .optional()
+    .describe(
+      "Repeats offsetX/offsetY this many times, stepping further out each repetition, approximating a long shadow. Structural, not animatable. Defaults to 1.",
+    ),
+});
+
+type _CheckTextShadowConfig = AssertTrue<
+  AssertEqual<z.infer<typeof textShadowConfigSchema>, TextShadowConfig>
+>;
+
 /**
  * A block of rendered text.
  *
@@ -569,6 +650,23 @@ export const textNodeSchema = z.strictObject({
   morph: textMorphConfigSchema
     .optional()
     .describe("Crossfade-morphs this node's own content from another string. Omitted means no morphing: content renders as-is."),
+  fill: textFillSchema
+    .optional()
+    .describe(
+      "A richer fill than a flat color: gradient, texture, or video. Omitted means a plain color fill (only meaningful for the flat MSDF path, not the extruded one).",
+    ),
+  outline: textOutlineConfigSchema
+    .optional()
+    .describe("An MSDF-based outline around each glyph. Omitted means no outline."),
+  glow: textGlowConfigSchema.optional().describe("A soft glow around each glyph. Omitted means no glow."),
+  shadow: textShadowConfigSchema
+    .optional()
+    .describe("A drop or long shadow behind each glyph. Omitted means no shadow."),
+  variationAxes: propertySchema(z.record(z.string(), z.number()).readonly())
+    .optional()
+    .describe(
+      "This node's own variable-font axis coordinates (e.g. {wght: 700}), resolved fresh at whatever frame the text is rendered. Omitted means the font's own default instance.",
+    ),
   get children(): z.ZodArray<typeof sceneNodeSchema> {
     return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
   },

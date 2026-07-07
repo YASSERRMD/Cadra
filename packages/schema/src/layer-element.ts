@@ -117,6 +117,8 @@ export const layerStyleSchema = z
     opacity: z.number().optional(),
     overflow: z.enum(["visible", "hidden"]).optional(),
 
+    WebkitTextStroke: z.string().optional(),
+
     transform: z.string().optional(),
     transformOrigin: z.string().optional(),
 
