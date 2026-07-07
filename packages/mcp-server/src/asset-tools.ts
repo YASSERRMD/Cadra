@@ -133,7 +133,8 @@ export function registerCadraAssetTools(
       if ((sourceUrl === undefined) === (bytesBase64 === undefined)) {
         return jsonResult({
           success: false,
-          message: "upload_asset requires exactly one of sourceUrl or bytesBase64, not both or neither.",
+          message:
+            "upload_asset requires exactly one of sourceUrl or bytesBase64, not both or neither.",
         } satisfies AssetToolFailurePayload);
       }
 

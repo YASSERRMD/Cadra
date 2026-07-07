@@ -117,7 +117,9 @@ export const videoBlendModeSchema = z
       "(plain alpha compositing).",
   );
 
-type _CheckVideoBlendMode = AssertTrue<AssertEqual<z.infer<typeof videoBlendModeSchema>, VideoBlendMode>>;
+type _CheckVideoBlendMode = AssertTrue<
+  AssertEqual<z.infer<typeof videoBlendModeSchema>, VideoBlendMode>
+>;
 
 /** A plain container node. Groups exist only to organize their children. */
 export const groupNodeSchema = z.strictObject({
@@ -369,9 +371,7 @@ export const videoNodeSchema = z
       .int()
       .min(0)
       .optional()
-      .describe(
-        "Source-video-local frame the trimmed range starts at, inclusive. Defaults to 0.",
-      ),
+      .describe("Source-video-local frame the trimmed range starts at, inclusive. Defaults to 0."),
     outFrame: z
       .number()
       .int()

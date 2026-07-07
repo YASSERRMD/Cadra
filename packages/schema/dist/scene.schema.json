@@ -3742,7 +3742,21 @@
             },
             "assetRef": {
               "type": "string",
-              "description": "Id of a video asset, resolved against an asset registry by the renderer."
+              "description": "Id of a video asset, resolved against an asset registry by the renderer. May transiently be a cadra-generation://<slotId> placeholder ref for a not-yet-finished generation job, rewritten to a real ref once that job completes."
+            },
+            "blendMode": {
+              "description": "How this video layer's pixels combine with whatever renders beneath it. Defaults to 'normal'.",
+              "type": "string",
+              "enum": [
+                "normal",
+                "add",
+                "multiply",
+                "screen"
+              ]
+            },
+            "maskRef": {
+              "description": "Optional reference to a mask asset restricting which pixels of this video layer are visible. Omitted means no masking.",
+              "type": "string"
             },
             "inFrame": {
               "description": "Source-video-local frame the trimmed range starts at, inclusive. Defaults to 0.",

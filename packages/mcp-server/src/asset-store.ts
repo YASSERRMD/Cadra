@@ -119,12 +119,17 @@ function extensionFromUrl(sourceUrl: string): string | undefined {
  * Mirrors `scene-store.ts`'s `sanitizeSceneId` structure exactly, applied to
  * this module's own narrower "just an extension" path segment.
  */
-export function sanitizeAssetExtension(extension: string): { valid: true; extension: string } | { valid: false; reason: string } {
+export function sanitizeAssetExtension(
+  extension: string,
+): { valid: true; extension: string } | { valid: false; reason: string } {
   if (extension.length === 0) {
     return { valid: false, reason: "Extension must not be empty." };
   }
   if (extension.length > MAX_EXTENSION_LENGTH) {
-    return { valid: false, reason: `Extension must be at most ${MAX_EXTENSION_LENGTH} characters long.` };
+    return {
+      valid: false,
+      reason: `Extension must be at most ${MAX_EXTENSION_LENGTH} characters long.`,
+    };
   }
   if (!VALID_EXTENSION_PATTERN.test(extension)) {
     return {
@@ -143,8 +148,12 @@ export function sanitizeAssetExtension(extension: string): { valid: true; extens
  * not is silently replaced with the default instead of ever propagating an
  * unsafe value into a filename).
  */
-export function resolveAssetExtension(contentType: string | undefined, sourceUrl: string | undefined): string {
-  const fromContentType = contentType !== undefined ? CONTENT_TYPE_EXTENSIONS[contentType.toLowerCase()] : undefined;
+export function resolveAssetExtension(
+  contentType: string | undefined,
+  sourceUrl: string | undefined,
+): string {
+  const fromContentType =
+    contentType !== undefined ? CONTENT_TYPE_EXTENSIONS[contentType.toLowerCase()] : undefined;
   const fromUrl = sourceUrl !== undefined ? extensionFromUrl(sourceUrl) : undefined;
   const candidate = fromContentType ?? fromUrl ?? DEFAULT_ASSET_EXTENSION;
 
@@ -169,7 +178,9 @@ function resolveAssetFilePath(workspaceRoot: string, hash: ContentHash, extensio
   const filePath = resolve(assetsDirectory, `${hash}.${extension}`);
 
   if (filePath !== join(assetsDirectory, `${hash}.${extension}`)) {
-    throw new Error(`Refusing to resolve asset hash "${hash}" to a path outside the assets directory.`);
+    throw new Error(
+      `Refusing to resolve asset hash "${hash}" to a path outside the assets directory.`,
+    );
   }
 
   return filePath;
@@ -181,7 +192,9 @@ function resolveAssetMetaFilePath(workspaceRoot: string, hash: ContentHash): str
   const filePath = resolve(assetsDirectory, `${hash}${ASSET_META_SUFFIX}`);
 
   if (filePath !== join(assetsDirectory, `${hash}${ASSET_META_SUFFIX}`)) {
-    throw new Error(`Refusing to resolve asset hash "${hash}" to a metadata path outside the assets directory.`);
+    throw new Error(
+      `Refusing to resolve asset hash "${hash}" to a metadata path outside the assets directory.`,
+    );
   }
 
   return filePath;
@@ -322,7 +335,10 @@ export async function ingestAssetFromUrl(
 }
 
 /** Reads back `hash`'s metadata sidecar, or `undefined` if no asset with this hash has been stored yet. Does not read the asset's own bytes; see {@link readAssetBytes} for that. */
-export async function readAssetMetadata(workspaceRoot: string, hash: ContentHash): Promise<AssetMetadata | undefined> {
+export async function readAssetMetadata(
+  workspaceRoot: string,
+  hash: ContentHash,
+): Promise<AssetMetadata | undefined> {
   const assetsDirectory = resolve(workspaceRoot, ASSETS_SUBDIRECTORY);
 
   let entries;
@@ -352,7 +368,10 @@ export async function readAssetMetadata(workspaceRoot: string, hash: ContentHash
  * sidecar first (an asset's own extension is not otherwise derivable from
  * its hash alone).
  */
-export async function readAssetBytes(workspaceRoot: string, hash: ContentHash): Promise<Uint8Array | undefined> {
+export async function readAssetBytes(
+  workspaceRoot: string,
+  hash: ContentHash,
+): Promise<Uint8Array | undefined> {
   const metadata = await readAssetMetadata(workspaceRoot, hash);
   if (metadata === undefined) {
     return undefined;
@@ -416,4 +435,3 @@ function isNotFoundError(error: unknown): boolean {
     (error as { code: unknown }).code === "ENOENT"
   );
 }
-

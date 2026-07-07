@@ -130,7 +130,12 @@ describe("resolveVideoSourceFrame", () => {
   });
 
   describe("outOfRangeBehavior: 'hold' (explicit)", () => {
-    const mapping = { inFrame: 10, outFrame: 19, playbackRate: 1, outOfRangeBehavior: "hold" } as const;
+    const mapping = {
+      inFrame: 10,
+      outFrame: 19,
+      playbackRate: 1,
+      outOfRangeBehavior: "hold",
+    } as const;
 
     it("is exact at outFrame itself", () => {
       expect(resolveVideoSourceFrame(mapping, 9)).toBe(19);
@@ -146,7 +151,12 @@ describe("resolveVideoSourceFrame", () => {
   });
 
   describe("outOfRangeBehavior: 'loop'", () => {
-    const mapping = { inFrame: 10, outFrame: 19, playbackRate: 1, outOfRangeBehavior: "loop" } as const;
+    const mapping = {
+      inFrame: 10,
+      outFrame: 19,
+      playbackRate: 1,
+      outOfRangeBehavior: "loop",
+    } as const;
 
     it("is exact at outFrame itself (does not wrap early)", () => {
       expect(resolveVideoSourceFrame(mapping, 9)).toBe(19);
@@ -229,14 +239,23 @@ describe("resolveVideoSourceFrame", () => {
   describe("outFrame omitted (unbounded range, never triggers outOfRangeBehavior)", () => {
     it("keeps advancing indefinitely with no hold or loop applied", () => {
       expect(resolveVideoSourceFrame({ inFrame: 10, outOfRangeBehavior: "hold" }, 0)).toBe(10);
-      expect(resolveVideoSourceFrame({ inFrame: 10, outOfRangeBehavior: "hold" }, 10000)).toBe(10010);
-      expect(resolveVideoSourceFrame({ inFrame: 10, outOfRangeBehavior: "loop" }, 10000)).toBe(10010);
+      expect(resolveVideoSourceFrame({ inFrame: 10, outOfRangeBehavior: "hold" }, 10000)).toBe(
+        10010,
+      );
+      expect(resolveVideoSourceFrame({ inFrame: 10, outOfRangeBehavior: "loop" }, 10000)).toBe(
+        10010,
+      );
     });
   });
 
   describe("determinism", () => {
     it("returns the exact same result for the same inputs every call", () => {
-      const mapping = { inFrame: 5, outFrame: 50, playbackRate: 1.5, outOfRangeBehavior: "loop" } as const;
+      const mapping = {
+        inFrame: 5,
+        outFrame: 50,
+        playbackRate: 1.5,
+        outOfRangeBehavior: "loop",
+      } as const;
       expect(resolveVideoSourceFrame(mapping, 37)).toBe(resolveVideoSourceFrame(mapping, 37));
     });
   });

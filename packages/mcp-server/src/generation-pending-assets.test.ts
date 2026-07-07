@@ -64,7 +64,15 @@ function sceneStateWithNode(node: SceneNode): SceneState {
     width: 64,
     height: 36,
     layers: [
-      { compositionId: "comp-1", trackId: "track-1", clipId: "clip-1", node, zIndex: 0, localFrame: 0, opacity: 1 },
+      {
+        compositionId: "comp-1",
+        trackId: "track-1",
+        clipId: "clip-1",
+        node,
+        zIndex: 0,
+        localFrame: 0,
+        opacity: 1,
+      },
     ],
   };
 }
@@ -82,7 +90,9 @@ function buildProjectWithVideoAssetRef(assetRef: string): Project {
     tracks: [
       {
         id: "track-1",
-        clips: [Sequence({ id: "clip-1", from: 0, durationInFrames: DURATION_IN_FRAMES, content: video })],
+        clips: [
+          Sequence({ id: "clip-1", from: 0, durationInFrames: DURATION_IN_FRAMES, content: video }),
+        ],
       },
     ],
   });
@@ -112,7 +122,9 @@ describe("createGenerationPendingAssets", () => {
     const store = createGenerationStore({ providers: {} });
     const getPendingAssets = createGenerationPendingAssets(store);
 
-    const sceneState = sceneStateWithNode(Video({ id: "video-1", assetRef: "cadra-asset://already-real" }));
+    const sceneState = sceneStateWithNode(
+      Video({ id: "video-1", assetRef: "cadra-asset://already-real" }),
+    );
     const pending = Array.from(getPendingAssets(0, sceneState));
 
     expect(pending).toEqual([]);
@@ -124,7 +136,9 @@ describe("createGenerationPendingAssets", () => {
     await store.submitGeneration("hero-clip", "veo", BASE_REQUEST);
     const getPendingAssets = createGenerationPendingAssets(store);
 
-    const sceneState = sceneStateWithNode(Video({ id: "video-1", assetRef: buildGenerationRef("hero-clip") }));
+    const sceneState = sceneStateWithNode(
+      Video({ id: "video-1", assetRef: buildGenerationRef("hero-clip") }),
+    );
     const [pending] = Array.from(getPendingAssets(0, sceneState));
 
     await expect(pending!.ready).rejects.toThrow(/not ready yet/);
@@ -137,7 +151,9 @@ describe("createGenerationPendingAssets", () => {
     fake.setNextStatus("veo-job-1", { status: "failed", error: "vendor rejected the prompt" });
     const getPendingAssets = createGenerationPendingAssets(store);
 
-    const sceneState = sceneStateWithNode(Video({ id: "video-1", assetRef: buildGenerationRef("hero-clip") }));
+    const sceneState = sceneStateWithNode(
+      Video({ id: "video-1", assetRef: buildGenerationRef("hero-clip") }),
+    );
     const [pending] = Array.from(getPendingAssets(0, sceneState));
 
     await expect(pending!.ready).rejects.toThrow(/vendor rejected the prompt/);
@@ -147,10 +163,15 @@ describe("createGenerationPendingAssets", () => {
     const fake = createFakeProvider("veo");
     const store = createGenerationStore({ providers: { veo: fake.provider } });
     await store.submitGeneration("hero-clip", "veo", BASE_REQUEST);
-    fake.setNextStatus("veo-job-1", { status: "succeeded", outputUrl: "https://vendor.example/hero.mp4" });
+    fake.setNextStatus("veo-job-1", {
+      status: "succeeded",
+      outputUrl: "https://vendor.example/hero.mp4",
+    });
     const getPendingAssets = createGenerationPendingAssets(store);
 
-    const sceneState = sceneStateWithNode(Video({ id: "video-1", assetRef: buildGenerationRef("hero-clip") }));
+    const sceneState = sceneStateWithNode(
+      Video({ id: "video-1", assetRef: buildGenerationRef("hero-clip") }),
+    );
     const [pending] = Array.from(getPendingAssets(0, sceneState));
 
     await expect(pending!.ready).resolves.toBeUndefined();
@@ -179,10 +200,15 @@ describe("createGenerationPendingAssets", () => {
     const fake = createFakeProvider("veo");
     const store = createGenerationStore({ providers: { veo: fake.provider } });
     await store.submitGeneration("hero-clip", "veo", BASE_REQUEST);
-    fake.setNextStatus("veo-job-1", { status: "succeeded", outputUrl: "https://vendor.example/hero.mp4" });
+    fake.setNextStatus("veo-job-1", {
+      status: "succeeded",
+      outputUrl: "https://vendor.example/hero.mp4",
+    });
     const refreshSpy = vi.spyOn(store, "refresh");
     const getPendingAssets = createGenerationPendingAssets(store);
-    const sceneState = sceneStateWithNode(Video({ id: "video-1", assetRef: buildGenerationRef("hero-clip") }));
+    const sceneState = sceneStateWithNode(
+      Video({ id: "video-1", assetRef: buildGenerationRef("hero-clip") }),
+    );
 
     const [firstFramePending] = Array.from(getPendingAssets(0, sceneState));
     await firstFramePending!.ready;
@@ -224,7 +250,10 @@ describe("createGenerationPendingAssets", () => {
       const fake = createFakeProvider("veo");
       const store = createGenerationStore({ providers: { veo: fake.provider } });
       await store.submitGeneration("hero-clip", "veo", BASE_REQUEST);
-      fake.setNextStatus("veo-job-1", { status: "succeeded", outputUrl: "https://vendor.example/hero.mp4" });
+      fake.setNextStatus("veo-job-1", {
+        status: "succeeded",
+        outputUrl: "https://vendor.example/hero.mp4",
+      });
 
       const project = buildProjectWithVideoAssetRef(buildGenerationRef("hero-clip"));
       const renderer = createFakePixelReadableRenderer();
