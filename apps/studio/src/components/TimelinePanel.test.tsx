@@ -669,6 +669,121 @@ describe("TimelinePanel", () => {
     });
   });
 
+  describe("clicking a clip selects its node (Phase 39's prerequisite selection mechanism)", () => {
+    it("a plain click (mousedown/mouseup, no movement) on a clip calls onSelectNode with that clip's node.id", async () => {
+      const onSelectNode = vi.fn();
+      await act(async () => {
+        root.render(
+          <TimelinePanel
+            document={buildDocument()}
+            selectedCompositionId={COMPOSITION_ID}
+            commitDocument={vi.fn((_candidate: unknown) => true)}
+            previewHandle={undefined}
+            onUndo={vi.fn()}
+            onRedo={vi.fn()}
+            onSelectNode={onSelectNode}
+          />,
+        );
+      });
+
+      const clip = container.querySelector(`[data-testid="timeline-clip-${CLIP_1_ID}"]`) as HTMLElement;
+
+      await act(async () => {
+        clip.dispatchEvent(
+          new MouseEvent("mousedown", { clientX: 100, bubbles: true, cancelable: true }),
+        );
+      });
+      await act(async () => {
+        document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
+      });
+
+      expect(onSelectNode).toHaveBeenCalledTimes(1);
+      expect(onSelectNode).toHaveBeenCalledWith("node-1");
+    });
+
+    it("dragging a clip (a real move, not a click) does not call onSelectNode", async () => {
+      const onSelectNode = vi.fn();
+      await act(async () => {
+        root.render(
+          <TimelinePanel
+            document={buildDocument()}
+            selectedCompositionId={COMPOSITION_ID}
+            commitDocument={vi.fn((_candidate: unknown) => true)}
+            previewHandle={undefined}
+            onUndo={vi.fn()}
+            onRedo={vi.fn()}
+            onSelectNode={onSelectNode}
+          />,
+        );
+      });
+
+      const clip = container.querySelector(`[data-testid="timeline-clip-${CLIP_1_ID}"]`) as HTMLElement;
+
+      await act(async () => {
+        clip.dispatchEvent(
+          new MouseEvent("mousedown", { clientX: 100, bubbles: true, cancelable: true }),
+        );
+      });
+      await act(async () => {
+        document.dispatchEvent(
+          new MouseEvent("mousemove", { clientX: 140, bubbles: true, cancelable: true }),
+        );
+      });
+      await act(async () => {
+        document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
+      });
+
+      expect(onSelectNode).not.toHaveBeenCalled();
+    });
+
+    it("renders the --selected modifier class on the clip matching selectedNodeId", async () => {
+      await act(async () => {
+        root.render(
+          <TimelinePanel
+            document={buildDocument()}
+            selectedCompositionId={COMPOSITION_ID}
+            commitDocument={vi.fn((_candidate: unknown) => true)}
+            previewHandle={undefined}
+            onUndo={vi.fn()}
+            onRedo={vi.fn()}
+            selectedNodeId="node-1"
+          />,
+        );
+      });
+
+      const selectedClip = container.querySelector(`[data-testid="timeline-clip-${CLIP_1_ID}"]`);
+      const unselectedClip = container.querySelector(`[data-testid="timeline-clip-${CLIP_2_ID}"]`);
+      expect(selectedClip?.className).toContain("cadra-studio-timeline__clip--selected");
+      expect(unselectedClip?.className).not.toContain("cadra-studio-timeline__clip--selected");
+    });
+
+    it("does not throw when onSelectNode is not supplied (optional prop)", async () => {
+      await act(async () => {
+        root.render(
+          <TimelinePanel
+            document={buildDocument()}
+            selectedCompositionId={COMPOSITION_ID}
+            commitDocument={vi.fn((_candidate: unknown) => true)}
+            previewHandle={undefined}
+            onUndo={vi.fn()}
+            onRedo={vi.fn()}
+          />,
+        );
+      });
+
+      const clip = container.querySelector(`[data-testid="timeline-clip-${CLIP_1_ID}"]`) as HTMLElement;
+
+      await expect(
+        act(async () => {
+          clip.dispatchEvent(
+            new MouseEvent("mousedown", { clientX: 100, bubbles: true, cancelable: true }),
+          );
+          document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
+        }),
+      ).resolves.not.toThrow();
+    });
+  });
+
   describe("trimming a clip's edges", () => {
     it("dragging the left trim handle right shrinks duration and moves startFrame later, keeping the end frame fixed", async () => {
       const commitDocument = vi.fn((_candidate: unknown) => true);

@@ -1,4 +1,4 @@
-import { createComposition, createProject } from "@cadra/core";
+import { createComposition, createProject, findNode } from "@cadra/core";
 import type { SceneDocument, SceneParseDiagnostic } from "@cadra/schema";
 import { CURRENT_SCHEMA_VERSION, parseScene } from "@cadra/schema";
 import { create } from "zustand";
@@ -41,6 +41,24 @@ export interface DocumentStoreState {
   document: SceneDocument;
   /** Which of `document.project.compositions` is currently selected/previewed. */
   selectedCompositionId: string;
+  /**
+   * Which `SceneNode` (by id) is currently selected for inspection, or
+   * `undefined` if nothing is selected.
+   *
+   * There was previously no concept of "the selected node" anywhere in this
+   * app (only `selectedCompositionId` existed): this phase (Phase 39, the
+   * property inspector) is the first consumer that needs one, since an
+   * inspector has nothing to show property editors for otherwise. Set via
+   * `selectNode`; the natural, minimal place to trigger it is clicking a
+   * clip in `TimelinePanel` (the only existing UI surface with clips
+   * rendered at all), which selects that clip's root `SceneNode.id`. Reset
+   * to `undefined` whenever a fresh document is committed and the
+   * previously selected node no longer exists anywhere in it (mirroring how
+   * `selectedCompositionId` itself already falls back on an invalidating
+   * commit), so the inspector never keeps showing stale editors for a node
+   * that no longer exists.
+   */
+  selectedNodeId: string | undefined;
   /** This document's persistence provenance (display name and save handle). */
   provenance: DocumentProvenance;
   /**
@@ -96,6 +114,19 @@ export interface DocumentStoreState {
   commitDocument(candidate: unknown): boolean;
   /** Selects a different composition to preview, if `compositionId` exists in the current document. No-op (does not throw) otherwise. */
   selectComposition(compositionId: string): void;
+  /**
+   * Selects a node for inspection by id, or clears the selection entirely
+   * when called with `undefined`. Unlike `selectComposition`, this does not
+   * verify `nodeId` exists anywhere in the current document before setting
+   * it: doing so would mean walking every composition's every track's every
+   * clip's node subtree on every selection, for a check whose only purpose
+   * is guarding against a caller passing an id that was never valid in the
+   * first place. Every real caller (`TimelinePanel`, selecting a clip's own
+   * `node.id`) always passes an id that does, in fact, exist at the moment
+   * of the call; `applyDocument` is what actually guards against a
+   * selection surviving into a document that no longer contains it.
+   */
+  selectNode(nodeId: string | undefined): void;
   /** Resets to a small, fresh, valid starting document: one empty composition. Always succeeds (its own output always passes `parseScene`). */
   newDocument(): void;
   /** Opens a document via `persistence.open()`. No-op if the user cancels the picker. Rejects (via `lastValidationError`) and does not commit if the opened file's contents fail `parseScene`; sets `lastPersistenceError` if reading the file itself fails (e.g. invalid JSON). */
@@ -152,6 +183,27 @@ function buildFreshDocument(): SceneDocument {
 const UNTITLED_DOCUMENT_NAME = "Untitled";
 
 /**
+ * Reports whether `nodeId` matches some `SceneNode` somewhere in
+ * `document`: any clip's own `node` root, on any track, in any composition
+ * (`findNode` itself only searches one root's own subtree, so this walks
+ * every clip's root across the whole document to cover every node the
+ * inspector could possibly have selected).
+ *
+ * Used only to decide whether a `selectedNodeId` survives a document
+ * replacement (`applyDocument`, below); not a general-purpose lookup (the
+ * inspector, which actually needs the matched node and its owning clip, does
+ * its own equivalent walk with `findNode` per clip, since it also needs to
+ * know *which* clip/track/composition the match came from).
+ */
+function documentContainsNode(document: SceneDocument, nodeId: string): boolean {
+  return document.project.compositions.some((composition) =>
+    composition.tracks.some((track) =>
+      track.clips.some((clip) => findNode(clip.node, nodeId) !== undefined),
+    ),
+  );
+}
+
+/**
  * Constructs the studio document store. `persistence` is injectable
  * (defaulting to the real `fileSystemAccessPersistence`) purely so tests can
  * supply `createFakeDocumentPersistence()` instead, exactly this codebase's
@@ -174,15 +226,18 @@ export function createDocumentStore(
      * truncates the redo stack and appends, undo/redo only move the index).
      */
     function applyDocument(nextDocument: SceneDocument): void {
-      const { selectedCompositionId } = get();
+      const { selectedCompositionId, selectedNodeId } = get();
       const stillSelected = nextDocument.project.compositions.some(
         (composition) => composition.id === selectedCompositionId,
       );
+      const nodeStillSelected =
+        selectedNodeId !== undefined && documentContainsNode(nextDocument, selectedNodeId);
       set({
         document: nextDocument,
         selectedCompositionId: stillSelected
           ? selectedCompositionId
           : (nextDocument.project.compositions[0]?.id ?? ""),
+        selectedNodeId: nodeStillSelected ? selectedNodeId : undefined,
         lastValidationError: undefined,
       });
     }
@@ -190,6 +245,7 @@ export function createDocumentStore(
     return {
       document: initialDocument,
       selectedCompositionId: initialDocument.project.compositions[0]?.id ?? "",
+      selectedNodeId: undefined,
       provenance: { name: UNTITLED_DOCUMENT_NAME, handle: undefined },
       lastValidationError: undefined,
       isPersistenceBusy: false,
@@ -275,6 +331,10 @@ export function createDocumentStore(
           return;
         }
         set({ selectedCompositionId: compositionId });
+      },
+
+      selectNode(nodeId) {
+        set({ selectedNodeId: nodeId });
       },
 
       newDocument() {

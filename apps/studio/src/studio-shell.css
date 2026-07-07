@@ -176,6 +176,12 @@ body {
   user-select: none;
 }
 
+/* A clip whose root SceneNode is the current selectedNodeId (Phase 39's prerequisite selection mechanism). */
+.cadra-studio-timeline__clip--selected {
+  border-color: #ffb84a;
+  box-shadow: 0 0 0 1px #ffb84a;
+}
+
 .cadra-studio-timeline__clip-label {
   font-size: 0.7rem;
   color: #e0e0e0;

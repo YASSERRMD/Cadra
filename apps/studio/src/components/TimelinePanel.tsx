@@ -5,6 +5,7 @@ import type { SceneDocument } from "@cadra/schema";
 import type { JSX } from "react";
 import { useEffect, useRef, useState } from "react";
 
+import { replaceComposition } from "../store/document-edits.js";
 import {
   clampZoom,
   computeClipMove,
@@ -24,9 +25,10 @@ export interface TimelinePanelProps {
    * The store's `commitDocument` funnel. Every drag/trim/reorder gesture
    * this panel performs ends in exactly one call to this, with a candidate
    * `SceneDocument` built from splicing an updated `Composition` back into
-   * `document` (see `replaceComposition` below) - never a second, parallel
-   * way of mutating `document`, matching this codebase's established
-   * invariant that `commitDocument` is the only funnel.
+   * `document` (see `replaceComposition` in `../store/document-edits.js`) -
+   * never a second, parallel way of mutating `document`, matching this
+   * codebase's established invariant that `commitDocument` is the only
+   * funnel.
    */
   commitDocument: (candidate: unknown) => boolean;
   /**
@@ -42,6 +44,26 @@ export interface TimelinePanelProps {
   onUndo: () => void;
   /** Calls the store's `redo` action. */
   onRedo: () => void;
+  /**
+   * Which `SceneNode` id (a clip's root node) is currently selected for
+   * inspection, or `undefined` if none is. Used only to highlight the
+   * corresponding clip box (`.cadra-studio-timeline__clip--selected`); the
+   * selection itself is set via `onSelectNode`, not owned by this panel.
+   */
+  selectedNodeId?: string | undefined;
+  /**
+   * Calls the store's `selectNode` action with a clip's root `node.id` when
+   * that clip is clicked (a plain click, i.e. a `mousedown`/`mouseup` pair
+   * with no intervening `mousemove`, mirroring exactly how this panel's own
+   * `handleDocumentMouseUp` already distinguishes "a click, not a drag" for
+   * its own no-op-commit case below). This is Phase 39's prerequisite
+   * selection mechanism: there was previously no concept of "the selected
+   * node" anywhere in this app, and a clip is the only existing UI surface
+   * with clips (and therefore `SceneNode`s) rendered at all. Optional so
+   * every pre-existing `TimelinePanel` test (Phases 37/38, none of which
+   * pass this prop) continues to render exactly as before.
+   */
+  onSelectNode?: (nodeId: string) => void;
 }
 
 /** Minimum/maximum pixels-per-frame zoom level this panel allows. */
@@ -55,33 +77,6 @@ const ZOOM_STEP_FACTOR = 1.5;
 const SNAP_THRESHOLD_FRAMES = 5;
 /** Fixed per-track row height, in pixels. */
 const TRACK_ROW_HEIGHT = 48;
-
-/**
- * Returns a new `SceneDocument` equal to `sceneDocument` except that the
- * composition matching `compositionId` is replaced by `nextComposition`.
- *
- * A small, local, document-envelope-level splice (distinct from
- * `@cadra/core`'s `updateClipTiming`/`moveClipToTrack`, which operate one
- * level down, on a bare `Composition`): this is what turns "a new
- * `Composition` with one clip's timing changed" into the full candidate
- * `SceneDocument` `commitDocument` expects. Immutable; does not mutate
- * `sceneDocument`.
- */
-function replaceComposition(
-  sceneDocument: SceneDocument,
-  compositionId: string,
-  nextComposition: Composition,
-): SceneDocument {
-  return {
-    ...sceneDocument,
-    project: {
-      ...sceneDocument.project,
-      compositions: sceneDocument.project.compositions.map((composition) =>
-        composition.id === compositionId ? nextComposition : composition,
-      ),
-    },
-  };
-}
 
 /** A clip boundary (start or end frame) collected from every track, for magnetic-edge snapping. See this module's own top-level doc. */
 interface ClipBoundary {
@@ -194,6 +189,8 @@ export function TimelinePanel({
   previewHandle,
   onUndo,
   onRedo,
+  selectedNodeId,
+  onSelectNode,
 }: TimelinePanelProps): JSX.Element {
   const [pixelsPerFrame, setPixelsPerFrame] = useState(DEFAULT_PIXELS_PER_FRAME);
   const [scrollOffsetFrames, setScrollOffsetFrames] = useState(0);
@@ -428,12 +425,26 @@ export function TimelinePanel({
     const finalPreview = dragPreviewRef.current;
     updateDragPreview(undefined);
 
-    if (
-      dragState === undefined ||
-      dragState.kind === "playhead" ||
-      composition === undefined ||
-      finalPreview === undefined
-    ) {
+    if (dragState === undefined || dragState.kind === "playhead" || composition === undefined) {
+      return;
+    }
+
+    if (finalPreview === undefined) {
+      // A mousedown/mouseup with no intervening mousemove: a plain click,
+      // not a drag (dragPreview is only ever set by handleDocumentMouseMove,
+      // so its absence here means the pointer never moved between the two).
+      // Selecting the clip's root node is this phase's (Phase 39) whole
+      // prerequisite selection mechanism, distinct from (and not gated
+      // behind) the drag-commit path below: a "move" or either trim kind can
+      // all originate from a mousedown directly on a clip box, so any of
+      // them landing here as a genuine click still selects that same clip's
+      // node, exactly the same way a real editor lets a single click select
+      // an item it did not end up dragging.
+      const clickedTrack = composition.tracks.find((track) => track.id === dragState.trackId);
+      const clickedClip = clickedTrack?.clips.find((clip) => clip.id === dragState.clipId);
+      if (clickedClip !== undefined) {
+        onSelectNode?.(clickedClip.node.id);
+      }
       return;
     }
 
@@ -527,10 +538,15 @@ export function TimelinePanel({
                   : clip.durationInFrames;
                 const leftPixels = frameToPixel(startFrame, pixelsPerFrame, scrollOffsetFrames);
                 const widthPixels = durationInFrames * pixelsPerFrame;
+                const isSelected = selectedNodeId !== undefined && clip.node.id === selectedNodeId;
 
                 return (
                   <div
-                    className="cadra-studio-timeline__clip"
+                    className={
+                      isSelected
+                        ? "cadra-studio-timeline__clip cadra-studio-timeline__clip--selected"
+                        : "cadra-studio-timeline__clip"
+                    }
                     key={clip.id}
                     data-testid={`timeline-clip-${clip.id}`}
                     style={{ left: `${leftPixels}px`, width: `${widthPixels}px` }}

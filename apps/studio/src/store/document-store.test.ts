@@ -29,6 +29,50 @@ function buildAlternateValidDocument(): unknown {
   };
 }
 
+/** A structurally valid document with one composition, one track, and one clip whose root node has id `"node-alt"` (for `selectedNodeId` survival tests). */
+function buildDocumentWithNode(): unknown {
+  return {
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    project: {
+      id: "project-node",
+      name: "Project With Node",
+      compositions: [
+        {
+          id: "comp-node",
+          name: "Composition With Node",
+          fps: 30,
+          durationInFrames: 90,
+          width: 1920,
+          height: 1080,
+          tracks: [
+            {
+              id: "track-1",
+              clips: [
+                {
+                  id: "clip-1",
+                  startFrame: 0,
+                  durationInFrames: 90,
+                  node: {
+                    id: "node-alt",
+                    kind: "group",
+                    transform: {
+                      position: [0, 0, 0],
+                      rotation: [0, 0, 0],
+                      scale: [1, 1, 1],
+                    },
+                    visible: true,
+                    children: [],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
 /** A third structurally valid document, distinct from both the store's fresh default and `buildAlternateValidDocument`, for multi-step undo/redo tests. */
 function buildThirdValidDocument(): unknown {
   return {
@@ -163,6 +207,87 @@ describe("createDocumentStore", () => {
       store.getState().selectComposition("does-not-exist");
 
       expect(store.getState().selectedCompositionId).toBe(before);
+    });
+  });
+
+  describe("selectNode / selectedNodeId (Phase 39's prerequisite selection mechanism)", () => {
+    it("starts with no node selected", () => {
+      expect(store.getState().selectedNodeId).toBeUndefined();
+    });
+
+    it("selectNode sets selectedNodeId", () => {
+      store.getState().selectNode("some-node-id");
+
+      expect(store.getState().selectedNodeId).toBe("some-node-id");
+    });
+
+    it("selectNode(undefined) clears the selection", () => {
+      store.getState().selectNode("some-node-id");
+
+      store.getState().selectNode(undefined);
+
+      expect(store.getState().selectedNodeId).toBeUndefined();
+    });
+
+    it("a selected node survives an unrelated commit that still contains it", () => {
+      store.getState().commitDocument(buildDocumentWithNode());
+      store.getState().selectNode("node-alt");
+
+      // A second, unrelated valid commit (the same document, re-committed)
+      // must not clear a selection that is still present in the result.
+      store.getState().commitDocument(buildDocumentWithNode());
+
+      expect(store.getState().selectedNodeId).toBe("node-alt");
+    });
+
+    it("a selected node is cleared once a newly committed document no longer contains it", () => {
+      store.getState().commitDocument(buildDocumentWithNode());
+      store.getState().selectNode("node-alt");
+
+      store.getState().commitDocument(buildAlternateValidDocument());
+
+      expect(store.getState().selectedNodeId).toBeUndefined();
+    });
+
+    it("a selected node is cleared by newDocument (a fresh document never contains a prior selection)", () => {
+      store.getState().commitDocument(buildDocumentWithNode());
+      store.getState().selectNode("node-alt");
+
+      store.getState().newDocument();
+
+      expect(store.getState().selectedNodeId).toBeUndefined();
+    });
+
+    it("undo re-populates selectedNodeId when the restored document contains the currently selected node", () => {
+      // selectedNodeId is not itself part of the undo history (only
+      // document/historyIndex are); undo/applyDocument simply re-validates
+      // whatever selectedNodeId is current against the document undo is
+      // restoring, exactly like commitDocument already does for a fresh
+      // commit. Selecting "node-alt" only after the commit that removes it
+      // from history (rather than before, per this suite's other cases)
+      // proves that: the restored document still contains "node-alt" (it
+      // was never removed from the document itself, only from history via
+      // the later commit this test undoes), so undo keeps the selection
+      // rather than clearing it.
+      store.getState().commitDocument(buildDocumentWithNode());
+      store.getState().commitDocument(buildAlternateValidDocument());
+      store.getState().selectNode("node-alt");
+
+      store.getState().undo();
+
+      expect(store.getState().document).toEqual(buildDocumentWithNode());
+      expect(store.getState().selectedNodeId).toBe("node-alt");
+    });
+
+    it("undo clears selectedNodeId when the restored document does not contain the currently selected node", () => {
+      store.getState().commitDocument(buildAlternateValidDocument());
+      store.getState().commitDocument(buildDocumentWithNode());
+      store.getState().selectNode("node-alt");
+
+      store.getState().undo();
+
+      expect(store.getState().document).toEqual(buildAlternateValidDocument());
+      expect(store.getState().selectedNodeId).toBeUndefined();
     });
   });
 
