@@ -35,6 +35,16 @@ export type {
   MsdfFontMetrics,
   MsdfGlyphPlacement,
 } from "./msdf-atlas.js";
+// Type-only, same as every other re-export here: the paragraph layout
+// engine's own value exports (layoutParagraphLines, harfbuzzjs-backed;
+// prepareParagraphRenderData, msdfgen-wasm-backed) stay out of this browser
+// entry for the same reason shapeText/generateMsdfAtlas do (see this
+// module's own doc), but ParagraphRenderData's shape is a superset of
+// TextRenderData's (adds each glyph's resolved style plus per-line
+// metrics), so a renderer can type against it without pulling in either
+// Node-only implementation.
+export type { ParagraphLineMetrics } from "./paragraph-layout.js";
+export type { ParagraphRenderData, StyledPositionedGlyph } from "./paragraph-render-data.js";
 export type { FontParseBackend, ParsedFont } from "./parsed-font.js";
 export type { ShapedGlyph, ShapedTextRun } from "./shaped-run.js";
 export type { PrepareTextRenderDataOptions, TextRenderData } from "./text-render-data.js";
