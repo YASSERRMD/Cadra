@@ -31,6 +31,18 @@ describe("generateMsdfAtlas", () => {
     expect(placedGlyphIds).toEqual(Array.from(glyphIds).sort((a, b) => a - b));
   });
 
+  it("also exposes the same page as raw RGBA8 pixels, needing no image decoder", async () => {
+    const atlas = await generateMsdfAtlas(ROBOTO_FLEX, shapedGlyphIds("Vote"));
+    const page = atlas.pages[0];
+
+    expect(page?.pixels.byteLength).toBe((page?.width ?? 0) * (page?.height ?? 0) * 4);
+    // Blitted glyph regions are fully opaque (msdfgen's own bitmap
+    // composition always writes alpha 255 there); un-blitted padding
+    // between packed glyphs is not, so only some (not every) pixel is.
+    const alphaChannels = Array.from(page?.pixels ?? []).filter((_, i) => i % 4 === 3);
+    expect(alphaChannels.some((a) => a === 255)).toBe(true);
+  });
+
   it("only generates the glyphs actually requested, not the whole font", async () => {
     const smallAtlas = await generateMsdfAtlas(ROBOTO_FLEX, shapedGlyphIds("Vo"));
     const largerAtlas = await generateMsdfAtlas(ROBOTO_FLEX, shapedGlyphIds("Vote"));

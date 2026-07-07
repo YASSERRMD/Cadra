@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
-import type { Msdfgen as MsdfgenClass } from "msdfgen-wasm";
+import type { Bitmap as BitmapClass, Msdfgen as MsdfgenClass } from "msdfgen-wasm";
 
 /**
  * `msdfgen-wasm@1.0.0`'s published ESM build (`dist/esm/index.js`) re-exports
@@ -13,10 +13,14 @@ import type { Msdfgen as MsdfgenClass } from "msdfgen-wasm";
  * `require("msdfgen-wasm")` (its CJS build) works. `createRequire` is the
  * standard, documented way to reach a CJS module's `require` from ESM, used
  * here specifically to route around this upstream bug rather than to avoid
- * ESM in general.
+ * ESM in general. Every other module in this package that needs a runtime
+ * (not just type-only) value from `msdfgen-wasm` (e.g. `Bitmap`, to build a
+ * raw RGBA atlas buffer) imports it from here rather than importing
+ * `msdfgen-wasm` directly, for the same reason.
  */
 const require = createRequire(import.meta.url);
 const Msdfgen = (require("msdfgen-wasm") as { Msdfgen: typeof MsdfgenClass }).Msdfgen;
+export const Bitmap = (require("msdfgen-wasm") as { Bitmap: typeof BitmapClass }).Bitmap;
 
 let cachedInstance: Promise<MsdfgenClass> | undefined;
 
