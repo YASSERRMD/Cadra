@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { hashAssetBytes, type TextPhysicsConfig, type TextStaggerConfig } from "@cadra/core";
+import { hashAssetBytes, type TextPathConfig, type TextPhysicsConfig, type TextStaggerConfig } from "@cadra/core";
 import { parseFontWithFontkit, prepareTextRenderData } from "@cadra/text";
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
@@ -207,6 +207,108 @@ describe("applyTextEffects: stagger and physics compose", () => {
       0,
     );
     expect(material.opacity).toBe(0);
+  });
+});
+
+const STRAIGHT_PATH: TextPathConfig = {
+  start: [0, 0, 0],
+  segments: [{ type: "line", to: [100, 50, 0] }],
+};
+
+describe("applyTextEffects: path only", () => {
+  it("moves glyph meshes onto the curve, away from their own natural flat-layout position", async () => {
+    const data = await prepareTextRenderData(ROBOTO_FLEX, "ab");
+    const resources = buildTextGroup(data, { color: [1, 1, 1, 1], perGlyphMaterial: true });
+    const [firstGlyph, secondGlyph] = data.glyphs;
+    const firstMesh = resources.group.getObjectByName(
+      `glyph-${firstGlyph?.cluster}-${firstGlyph?.glyphId}`,
+    ) as THREE.Mesh;
+    const secondMesh = resources.group.getObjectByName(
+      `glyph-${secondGlyph?.cluster}-${secondGlyph?.glyphId}`,
+    ) as THREE.Mesh;
+    const firstBase = firstMesh.userData["basePosition"] as THREE.Vector3;
+    const secondBase = secondMesh.userData["basePosition"] as THREE.Vector3;
+
+    applyTextEffects(resources.group, data.glyphs, { path: STRAIGHT_PATH }, 0);
+
+    // Default alignment "start", startOffset 0, progress 1: the first glyph
+    // (fraction 0 of the text's own span) sits at the curve's own start
+    // point (0,0,0); the last glyph (fraction 1) sits at the curve's own
+    // end point (100,50,0).
+    expect(firstMesh.position.x).toBeCloseTo(0, 5);
+    expect(firstMesh.position.y).toBeCloseTo(0, 5);
+    expect(secondMesh.position.x).toBeCloseTo(100, 5);
+    expect(secondMesh.position.y).toBeCloseTo(50, 5);
+    expect(firstMesh.position.x).not.toBeCloseTo(firstBase.x, 5);
+    expect(secondMesh.position.x).not.toBeCloseTo(secondBase.x, 5);
+  });
+
+  it("rotates a glyph mesh to face the path's own tangent direction by default (orientation tangent)", async () => {
+    const data = await prepareTextRenderData(ROBOTO_FLEX, "ab");
+    const resources = buildTextGroup(data, { color: [1, 1, 1, 1], perGlyphMaterial: true });
+    const glyph = data.glyphs[0];
+    const mesh = resources.group.getObjectByName(`glyph-${glyph?.cluster}-${glyph?.glyphId}`) as THREE.Mesh;
+
+    applyTextEffects(resources.group, data.glyphs, { path: STRAIGHT_PATH }, 0);
+
+    expect(mesh.rotation.z).toBeCloseTo(Math.atan2(50, 100), 5);
+  });
+
+  it("keeps rotationZ at 0 with orientation upright", async () => {
+    const data = await prepareTextRenderData(ROBOTO_FLEX, "ab");
+    const resources = buildTextGroup(data, { color: [1, 1, 1, 1], perGlyphMaterial: true });
+    const glyph = data.glyphs[0];
+    const mesh = resources.group.getObjectByName(`glyph-${glyph?.cluster}-${glyph?.glyphId}`) as THREE.Mesh;
+
+    applyTextEffects(resources.group, data.glyphs, { path: { ...STRAIGHT_PATH, orientation: "upright" } }, 0);
+
+    expect(mesh.rotation.z).toBe(0);
+  });
+
+  it("offsets a glyph mesh's z position on top of its own basePosition when the path moves through depth", async () => {
+    const data = await prepareTextRenderData(ROBOTO_FLEX, "ab");
+    const resources = buildTextGroup(data, { color: [1, 1, 1, 1], perGlyphMaterial: true });
+    const glyph = data.glyphs[1];
+    const mesh = resources.group.getObjectByName(`glyph-${glyph?.cluster}-${glyph?.glyphId}`) as THREE.Mesh;
+    const basePosition = mesh.userData["basePosition"] as THREE.Vector3;
+
+    const depthPath: TextPathConfig = { start: [0, 0, 0], segments: [{ type: "line", to: [100, 50, 20] }] };
+    applyTextEffects(resources.group, data.glyphs, { path: depthPath }, 0);
+
+    // Second glyph (fraction 1, default alignment start): u=1, z=20.
+    expect(mesh.position.z).toBeCloseTo(basePosition.z + 20, 5);
+  });
+});
+
+describe("applyTextEffects: path composes with physics", () => {
+  it("adds physics offsetX/offsetY on top of the path's own placement, rather than one replacing the other", async () => {
+    const data = await prepareTextRenderData(ROBOTO_FLEX, "ab");
+    const resources = buildTextGroup(data, { color: [1, 1, 1, 1], perGlyphMaterial: true });
+    const glyph = data.glyphs[0];
+    const mesh = resources.group.getObjectByName(`glyph-${glyph?.cluster}-${glyph?.glyphId}`) as THREE.Mesh;
+
+    applyTextEffects(resources.group, data.glyphs, { path: STRAIGHT_PATH }, 5);
+    const pathOnlyPosition = mesh.position.clone();
+
+    applyTextEffects(resources.group, data.glyphs, { path: STRAIGHT_PATH, physics: JITTER }, 5);
+
+    const movedBy = mesh.position.distanceTo(pathOnlyPosition);
+    expect(movedBy).toBeGreaterThan(0);
+    expect(movedBy).toBeLessThanOrEqual(JITTER.positionAmplitude! * Math.SQRT2 + 1e-6);
+  });
+
+  it("adds physics rotationZ on top of the path's own tangent rotation", async () => {
+    const data = await prepareTextRenderData(ROBOTO_FLEX, "ab");
+    const resources = buildTextGroup(data, { color: [1, 1, 1, 1], perGlyphMaterial: true });
+    const glyph = data.glyphs[0];
+    const mesh = resources.group.getObjectByName(`glyph-${glyph?.cluster}-${glyph?.glyphId}`) as THREE.Mesh;
+
+    applyTextEffects(resources.group, data.glyphs, { path: STRAIGHT_PATH }, 5);
+    const pathOnlyRotation = mesh.rotation.z;
+
+    applyTextEffects(resources.group, data.glyphs, { path: STRAIGHT_PATH, physics: JITTER }, 5);
+
+    expect(mesh.rotation.z).not.toBeCloseTo(pathOnlyRotation, 5);
   });
 });
 
