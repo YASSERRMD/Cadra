@@ -55,6 +55,16 @@
  * `RenderTarget`/`GPUCanvasContext` it is handed. See that package's own
  * `render-frame-native-gpu.ts` module doc for the full design and its
  * documented platform caveats.
+ *
+ * `./gizmo` additively exports `attachTransformGizmo` (Phase 40), which
+ * attaches a real `three/addons/controls/TransformControls` gizmo to a
+ * reconciled node for interactive move/rotate/scale handles in a live
+ * viewport. Its own exported signature stays entirely free of Three.js
+ * types (its `renderer` parameter is the plain `Renderer` interface, and its
+ * `onTransformChange` callback hands back a plain `@cadra/core` `Transform`),
+ * even though its *implementation* imports the real, internal `ThreeRenderer`
+ * class to do the actual work; see that module's own doc for the full
+ * boundary rationale.
  */
 
 export const VERSION = "0.0.0";
@@ -88,6 +98,12 @@ export { loadVideo, sampleVideoFrame } from "./assets/video-loader.js";
 export type { WebGpuDetector } from "./capability-detection.js";
 export type { CreateRendererOptions } from "./create-renderer.js";
 export { createRenderer } from "./create-renderer.js";
+export type {
+  AttachedTransformGizmo,
+  AttachTransformGizmoOptions,
+  TransformGizmoMode,
+} from "./gizmo/attach-transform-gizmo.js";
+export { attachTransformGizmo } from "./gizmo/attach-transform-gizmo.js";
 export type { PixelBuffer, PixelReadableRenderer } from "./pixel-readable-renderer.js";
 export type {
   CreatePixelReadableRendererOptions,

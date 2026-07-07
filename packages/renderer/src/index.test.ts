@@ -34,7 +34,7 @@ describe("@cadra/renderer public surface", () => {
   });
 
   it("exposes a usable createWorkerRenderer from the package entry point", () => {
-    const renderer = createWorkerRenderer({ createWorker: () => ({} as never) });
+    const renderer = createWorkerRenderer({ createWorker: () => ({}) as never });
     expect(typeof renderer.init).toBe("function");
     expect(typeof renderer.renderFrame).toBe("function");
     expect(typeof renderer.resize).toBe("function");
@@ -83,13 +83,28 @@ describe("@cadra/renderer public surface", () => {
  * contradict that this is exactly the file whose whole purpose is
  * constructing real Three.js renderers.
  *
+ * `gizmo/attach-transform-gizmo.ts` is excluded for the same reason, as of
+ * Phase 40: it additively exports `attachTransformGizmo`, whose own declared
+ * signature (`AttachTransformGizmoOptions`/`AttachedTransformGizmo`) is
+ * already entirely free of Three.js types (its `renderer` parameter is the
+ * plain `Renderer`, its callback hands back a plain `@cadra/core`
+ * `Transform`), but whose *implementation* imports `three` and
+ * `three/addons/controls/TransformControls.js` directly to do the real work,
+ * exactly like `three-renderer.ts` itself does. Scanning this file's own
+ * imports for "no Three.js" would again contradict that constructing a real
+ * Three.js gizmo is this module's entire purpose; what actually matters (its
+ * *exported signature* staying Three.js-free) is enforced by
+ * `attach-transform-gizmo.test.ts` asserting on that module's own exported
+ * types, not by a source-text scan here.
+ *
  * What this proves: none of the source files that make up the `Renderer`-facing
  * export graph (`index.ts` itself, plus every local module it re-exports
- * types or values from, excluding `./reconciler/*` and `three-renderer.ts`)
- * contain a `from "three"` or `from "three/*"` import. Since those are
- * exactly the files whose declared export shapes become that part of
- * `@cadra/renderer`'s public `.d.ts` surface, this rules out a `three` type
- * reaching an exported `Renderer`-facing signature through any *other* file.
+ * types or values from, excluding `./reconciler/*`, `three-renderer.ts`, and
+ * `gizmo/attach-transform-gizmo.ts`) contain a `from "three"` or `from
+ * "three/*"` import. Since those are exactly the files whose declared export
+ * shapes become that part of `@cadra/renderer`'s public `.d.ts` surface, this
+ * rules out a `three` type reaching an exported `Renderer`-facing signature
+ * through any *other* file.
  *
  * What this does not prove: it does not catch a `three` type smuggled in
  * through a type-only re-export several modules deep that this list doesn't
