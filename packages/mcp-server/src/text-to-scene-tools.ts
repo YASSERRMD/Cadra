@@ -154,9 +154,9 @@ export function registerCadraTextToSceneTools(
         sceneId: z
           .string()
           .describe(
-            "Unique id for the new scene; also used as the new project's own id and as the " +
-              "filename this scene is persisted under. Letters, digits, hyphens, and " +
-              "underscores only.",
+            "Unique id for the new scene; used as the filename this scene is persisted under " +
+              "(not necessarily the same as the generated document's own project.id, which comes " +
+              "from the model). Letters, digits, hyphens, and underscores only.",
           ),
         brief: z
           .string()

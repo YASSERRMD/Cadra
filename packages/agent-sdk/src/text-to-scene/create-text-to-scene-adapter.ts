@@ -1,4 +1,4 @@
-import { applyPatchAtPath, parseScene, type SceneParseDiagnostic } from "@cadra/schema";
+import { applyPatchAtPath, parseScene, type SceneDocument, type SceneParseDiagnostic } from "@cadra/schema";
 
 import { extractJsonFromLlmResponse } from "./json-extraction.js";
 import type { LlmCompletionFn } from "./llm-completion.js";
@@ -72,7 +72,10 @@ function jsonExtractionFailureDiagnostic(reason: string): SceneParseDiagnostic {
  * `kind`, which `parseScene` deliberately never attaches a `suggestedPatch`
  * to at all).
  */
-function tryCheapPatchRepair(rawCandidate: unknown, diagnostics: readonly SceneParseDiagnostic[]) {
+function tryCheapPatchRepair(
+  rawCandidate: unknown,
+  diagnostics: readonly SceneParseDiagnostic[],
+): SceneDocument | undefined {
   let patched = rawCandidate;
   let appliedAny = false;
 
@@ -185,15 +188,15 @@ export function createTextToSceneAdapter(options: CreateTextToSceneAdapterOption
           continue;
         }
 
+        const rationale = deriveRationale(extraction.leftoverText);
+
         const parsed = parseScene(extraction.value);
         if (parsed.success) {
           return {
             success: true,
             document: parsed.document,
             attempts: attempt,
-            ...(deriveRationale(extraction.leftoverText) !== undefined
-              ? { rationale: deriveRationale(extraction.leftoverText) }
-              : {}),
+            ...(rationale !== undefined ? { rationale } : {}),
           };
         }
 
@@ -205,9 +208,7 @@ export function createTextToSceneAdapter(options: CreateTextToSceneAdapterOption
             success: true,
             document: cheapRepair,
             attempts: attempt,
-            ...(deriveRationale(extraction.leftoverText) !== undefined
-              ? { rationale: deriveRationale(extraction.leftoverText) }
-              : {}),
+            ...(rationale !== undefined ? { rationale } : {}),
           };
         }
 
