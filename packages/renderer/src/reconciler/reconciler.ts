@@ -1,4 +1,4 @@
-import type { SceneNode, SceneNodeKind } from "@cadra/core";
+import type { SceneNode, SceneNodeKind, WhiteBalanceGain } from "@cadra/core";
 import type * as THREE from "three";
 
 import type { SatoriLayerRenderRegistry } from "../svg-layer/satori-layer-render-registry.js";
@@ -58,8 +58,21 @@ export interface Reconciler {
    * knows how to resolve (currently only a `camera` node's `fov`/`near`/
    * `far`/`target`) is evaluated at; every other node kind's own fields are
    * still plain values, so `frame` has no effect on them.
+   *
+   * `whiteBalanceGain` is this call's own composition-level white-balance
+   * correction (see `NodeFactoryContext.whiteBalanceGain`'s own doc);
+   * defaults to a no-op `(1, 1, 1)` gain when omitted. Not itself
+   * `Property<T>`/frame-dependent (a composition's own `colorGrading` is
+   * fixed for its whole length - see `Composition.colorGrading`'s own
+   * doc), but still supplied fresh each call rather than once at
+   * `createReconciler` time, since which composition (and so which grade)
+   * a given `renderFrame` call is even rendering can differ call to call.
    */
-  reconcile(nextRoot: SceneNode | null, frame: number): THREE.Object3D | null;
+  reconcile(
+    nextRoot: SceneNode | null,
+    frame: number,
+    whiteBalanceGain?: WhiteBalanceGain,
+  ): THREE.Object3D | null;
 }
 
 /**
@@ -72,6 +85,7 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
   const ctx: NodeFactoryContext = {
     geometryRegistry: options.geometryRegistry ?? createDefaultGeometryRegistry(),
     materialRegistry: options.materialRegistry ?? createDefaultMaterialRegistry(),
+    whiteBalanceGain: [1, 1, 1],
     ...(options.textRenderRegistry !== undefined && { textRenderRegistry: options.textRenderRegistry }),
     ...(options.satoriLayerRenderRegistry !== undefined && {
       satoriLayerRenderRegistry: options.satoriLayerRenderRegistry,
@@ -96,7 +110,13 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
    * 3. reorderAll: fix up each surviving parent's children order to match
    *    `nextRoot`.
    */
-  function reconcile(nextRoot: SceneNode | null, frame: number): THREE.Object3D | null {
+  function reconcile(
+    nextRoot: SceneNode | null,
+    frame: number,
+    whiteBalanceGain?: WhiteBalanceGain,
+  ): THREE.Object3D | null {
+    ctx.whiteBalanceGain = whiteBalanceGain ?? [1, 1, 1];
+
     if (nextRoot === null) {
       teardownAll();
       return null;

@@ -53,7 +53,7 @@ export interface MsdfTextMaterialHandle {
   /** Updates only this material's own overall opacity uniform, leaving color/gradient/outline/glow untouched - multiplies through the *entire* composited result (fill, outline, and glow together), so a stagger/physics fade dims the whole glyph uniformly regardless of which effects are configured. */
   setOpacity(a: number): void;
   /** Only meaningful (and only callable without throwing) if this material was built with a gradient `fillType`: `stopColors` must have exactly as many entries, in the same order, as `gradientStopOffsets` did at build time. */
-  setGradient(angleDegrees: number, stopColors: readonly [number, number, number, number][]): void;
+  setGradient(angleDegrees: number, stopColors: readonly (readonly [number, number, number, number])[]): void;
   /** Only meaningful if this material was built with `outline: true`. */
   setOutline(width: number, r: number, g: number, b: number, a: number): void;
   /** Only meaningful if this material was built with a `glow` direction. */

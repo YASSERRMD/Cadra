@@ -23,6 +23,7 @@ function makeCtx(): NodeFactoryContext {
   return {
     geometryRegistry: createDefaultGeometryRegistry(),
     materialRegistry: createDefaultMaterialRegistry(),
+    whiteBalanceGain: [1, 1, 1],
   };
 }
 
@@ -249,7 +250,12 @@ describe("node-factory: Phase 26 keyframed properties resolve to different value
 
     applyNodeProperties(node, built.object3D, ctx, 5);
     expect(light.intensity).toBe(1);
-    expect([light.color.r, light.color.g, light.color.b]).toEqual([0.5, 0.5, 0.5]);
+    // Authored ColorRGBA is sRGB-encoded; resolveSceneColor converts it to
+    // THREE's linear working space, so 0.5 sRGB is not 0.5 here. 0 and 1
+    // are fixed points of the sRGB transfer function, so those stay exact.
+    expect([light.color.r, light.color.g, light.color.b]).toEqual([
+      0.2140411404715882, 0.2140411404715882, 0.2140411404715882,
+    ]);
 
     applyNodeProperties(node, built.object3D, ctx, 10);
     expect(light.intensity).toBe(2);
