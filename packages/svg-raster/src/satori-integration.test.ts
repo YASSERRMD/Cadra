@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import type { LayerElement } from "@cadra/satori-layer";
+import type { LayerElement, SatoriLayerFont } from "@cadra/satori-layer";
 import { renderLayerToSvg } from "@cadra/satori-layer";
 import { parseFontWithFontkit } from "@cadra/text";
 import { describe, expect, it } from "vitest";
@@ -14,6 +14,12 @@ function loadFixtureFont(name: string): Uint8Array {
 }
 
 const INTER_VARIABLE = parseFontWithFontkit(loadFixtureFont("Inter-Variable"));
+const INTER_BOLD_FONT: SatoriLayerFont = {
+  family: "Inter",
+  font: INTER_VARIABLE,
+  weight: 700,
+  variationCoordinates: { wght: 700 },
+};
 
 const CARD_LAYER: LayerElement = {
   type: "div",
@@ -40,7 +46,7 @@ describe("rasterizeSvg against real @cadra/satori-layer output", () => {
     const svg = await renderLayerToSvg(CARD_LAYER, {
       width: 300,
       height: 150,
-      fonts: [{ family: "Inter", font: INTER_VARIABLE, weight: 700, variationCoordinates: { wght: 700 } }],
+      fonts: [INTER_BOLD_FONT],
     });
 
     const result = rasterizeSvg(svg);
@@ -63,7 +69,7 @@ describe("rasterizeSvg against real @cadra/satori-layer output", () => {
     const options = {
       width: 300,
       height: 150,
-      fonts: [{ family: "Inter", font: INTER_VARIABLE, weight: 700, variationCoordinates: { wght: 700 } }],
+      fonts: [INTER_BOLD_FONT],
     };
     const firstSvg = await renderLayerToSvg(CARD_LAYER, options);
     const secondSvg = await renderLayerToSvg(CARD_LAYER, options);
