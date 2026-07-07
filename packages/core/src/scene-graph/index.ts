@@ -1,3 +1,5 @@
+export type { ClipTimingUpdate } from "./clip-operations.js";
+export { ClipNotFoundError, moveClipToTrack, updateClipTiming } from "./clip-operations.js";
 export { createIdGenerator } from "./id-generator.js";
 export type { AnimatableTransform, ColorRGBA, Transform, Vector2, Vector3 } from "./primitives.js";
 export { createIdentityTransform } from "./primitives.js";
