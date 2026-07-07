@@ -12,7 +12,13 @@
  */
 import type { Project } from "@cadra/core";
 import { createProject } from "@cadra/core";
-import { CURRENT_SCHEMA_VERSION, parseScene, type SceneDocument, type SceneParseDiagnostic } from "@cadra/schema";
+import {
+  CURRENT_SCHEMA_VERSION,
+  DIAGNOSTIC_CODES,
+  parseScene,
+  type SceneDocument,
+  type SceneParseDiagnostic,
+} from "@cadra/schema";
 import type { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
@@ -51,11 +57,16 @@ interface ToolDocumentSuccessPayload {
   document: SceneDocument;
 }
 
-/** Builds a single-diagnostic {@link ToolFailurePayload} for an error that is not itself a schema-validation failure (e.g. an unknown scene id, an invalid scene id, a patch targeting a missing node), so every failure mode this module can produce still fits the one `{ success, diagnostics }` shape a caller can branch on uniformly. */
-function singleDiagnosticFailure(path: string, message: string, suggestedFix?: string): ToolFailurePayload {
+/** Builds a single-diagnostic {@link ToolFailurePayload} for an error that is not itself a schema-validation failure (e.g. an unknown scene id, an invalid scene id, a patch targeting a missing node), so every failure mode this module can produce still fits the one `{ success, diagnostics }` shape a caller can branch on uniformly. `code` is a stable, machine-comparable identifier for this failure class, matching the same role `SceneParseDiagnostic.code` plays for a schema-validation failure (see `@cadra/schema`'s `DIAGNOSTIC_CODES` for the schema-validation set; the tool-level codes here are this module's own, since these failures happen before `parseScene` is ever reached). */
+function singleDiagnosticFailure(
+  path: string,
+  message: string,
+  code: string,
+  suggestedFix?: string,
+): ToolFailurePayload {
   return {
     success: false,
-    diagnostics: [{ path, message, ...(suggestedFix !== undefined ? { suggestedFix } : {}) }],
+    diagnostics: [{ path, message, code, ...(suggestedFix !== undefined ? { suggestedFix } : {}) }],
   };
 }
 
@@ -76,7 +87,7 @@ function validateSceneIdOrFailure(
 ): { ok: true; sceneId: string } | { ok: false; failure: ToolFailurePayload } {
   const validation = sanitizeSceneId(sceneId);
   if (!validation.valid) {
-    return { ok: false, failure: singleDiagnosticFailure("sceneId", validation.reason) };
+    return { ok: false, failure: singleDiagnosticFailure("sceneId", validation.reason, "INVALID_SCENE_ID") };
   }
   return { ok: true, sceneId: validation.sceneId };
 }
@@ -86,6 +97,7 @@ function sceneNotFoundFailure(sceneId: string): ToolFailurePayload {
   return singleDiagnosticFailure(
     "sceneId",
     `No scene with id "${sceneId}" was found in this workspace.`,
+    "SCENE_NOT_FOUND",
     "Call list_scenes to see every scene id currently persisted in this workspace, or " +
       "create_scene to create it first.",
   );
@@ -184,6 +196,7 @@ async function handleReplaceMode(
       singleDiagnosticFailure(
         "document",
         "mode 'replace' requires a 'document' field with the complete new scene document.",
+        DIAGNOSTIC_CODES.MISSING_REQUIRED_FIELD,
       ),
     );
   }
@@ -216,7 +229,11 @@ async function handlePatchMode(
 ): Promise<{ content: Array<{ type: "text"; text: string }> }> {
   if (operations === undefined || operations.length === 0) {
     return jsonResult(
-      singleDiagnosticFailure("operations", "mode 'patch' requires a non-empty 'operations' array."),
+      singleDiagnosticFailure(
+        "operations",
+        "mode 'patch' requires a non-empty 'operations' array.",
+        DIAGNOSTIC_CODES.MISSING_REQUIRED_FIELD,
+      ),
     );
   }
 
@@ -230,7 +247,7 @@ async function handlePatchMode(
     patchedProject = applyScenePatchOperations(existing.document.project, operations);
   } catch (error) {
     if (error instanceof PatchNodeNotFoundError || error instanceof DuplicateNodeIdError) {
-      return jsonResult(singleDiagnosticFailure("operations", error.message));
+      return jsonResult(singleDiagnosticFailure("operations", error.message, "PATCH_OPERATION_FAILED"));
     }
     throw error;
   }

@@ -4,7 +4,7 @@ import { SceneBuildError, SceneBuilderUsageError } from "./errors.js";
 
 describe("SceneBuildError", () => {
   it("is an instance of Error and carries the exact diagnostics array passed in", () => {
-    const diagnostics = [{ path: "project.compositions[0].fps", message: "expected int" }];
+    const diagnostics = [{ path: "project.compositions[0].fps", message: "expected int", code: "TEST_CODE" }];
     const error = new SceneBuildError(diagnostics);
 
     expect(error).toBeInstanceOf(Error);
@@ -14,15 +14,15 @@ describe("SceneBuildError", () => {
   });
 
   it("formats a single diagnostic using the singular 'problem'", () => {
-    const error = new SceneBuildError([{ path: "project.name", message: "Required" }]);
+    const error = new SceneBuildError([{ path: "project.name", message: "Required", code: "TEST_CODE" }]);
     expect(error.message).toContain("(1 problem)");
     expect(error.message).toContain("project.name: Required");
   });
 
   it("formats multiple diagnostics using the plural 'problems', one per line", () => {
     const error = new SceneBuildError([
-      { path: "project.name", message: "Required" },
-      { path: "project.compositions[0].fps", message: "Expected int" },
+      { path: "project.name", message: "Required", code: "TEST_CODE" },
+      { path: "project.compositions[0].fps", message: "Expected int", code: "TEST_CODE" },
     ]);
     expect(error.message).toContain("(2 problems)");
     expect(error.message).toContain("project.name: Required");
@@ -37,8 +37,8 @@ describe("SceneBuildError", () => {
 
   it("preserves diagnostic order in the formatted message", () => {
     const error = new SceneBuildError([
-      { path: "a", message: "first" },
-      { path: "b", message: "second" },
+      { path: "a", message: "first", code: "TEST_CODE" },
+      { path: "b", message: "second", code: "TEST_CODE" },
     ]);
     const indexOfA = error.message.indexOf("a: first");
     const indexOfB = error.message.indexOf("b: second");
@@ -59,7 +59,7 @@ describe("SceneBuilderUsageError", () => {
 
   it("is distinguishable from SceneBuildError via instanceof", () => {
     const usageError = new SceneBuilderUsageError("bad usage");
-    const buildError = new SceneBuildError([{ path: "x", message: "y" }]);
+    const buildError = new SceneBuildError([{ path: "x", message: "y", code: "TEST_CODE" }]);
 
     expect(usageError).not.toBeInstanceOf(SceneBuildError);
     expect(buildError).not.toBeInstanceOf(SceneBuilderUsageError);
