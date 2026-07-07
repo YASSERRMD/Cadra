@@ -358,3 +358,66 @@ body {
 .cadra-inspector__keyframe-seek {
   flex-shrink: 0;
 }
+
+/*
+ * Phase 40's live DSL/JSON panel: a fourth fixed-width sidebar, to the right
+ * of the inspector, following the same "fixed-width flex child" shape
+ * .cadra-studio-panel--asset/.cadra-studio-inspector already use. Wider than
+ * the inspector (360px vs 280px): raw JSON needs more horizontal room than a
+ * property editor's compact rows to stay readable without excessive
+ * wrapping.
+ */
+.cadra-studio-dsl-panel {
+  width: 360px;
+  flex-shrink: 0;
+  border-left: 1px solid #3a3a3a;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.cadra-studio-dsl-panel__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid #3a3a3a;
+  flex-shrink: 0;
+}
+
+.cadra-studio-dsl-panel__label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  flex: 1;
+}
+
+.cadra-studio-dsl-panel__dirty-indicator {
+  font-size: 0.7rem;
+  color: #ffb84a;
+}
+
+.cadra-studio-dsl-panel__textarea {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+  background: #1e1e1e;
+  color: #e0e0e0;
+  border: none;
+  padding: 0.5rem;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  box-sizing: border-box;
+}
+
+.cadra-studio-dsl-panel__diagnostics {
+  flex-shrink: 0;
+  max-height: 120px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.4rem 0.75rem;
+  color: #ff6b6b;
+  font-size: 0.75rem;
+  border-top: 1px solid #3a3a3a;
+  background: #2a1e1e;
+}

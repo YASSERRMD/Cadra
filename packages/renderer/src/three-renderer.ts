@@ -171,6 +171,15 @@ export class ThreeRenderer implements Renderer {
   private threeRenderer: ThreeRendererLike | undefined;
   private resolvedBackend: RendererBackend | undefined;
   private wasFallback = false;
+  /**
+   * The `RenderTarget` most recently passed to `init()`. Tracked purely so
+   * `getDomElement` (below) can hand back the canvas a caller outside this
+   * package (namely `attachTransformGizmo`, in `./gizmo/`) needs for pointer
+   * event binding: `Renderer.init`'s own signature never returns it, and
+   * `PreviewHandle` (`@cadra/player`) does not expose the canvas it
+   * constructs either, so this is the one place that ever sees it.
+   */
+  private domTarget: RenderTarget | undefined;
 
   /**
    * One `Reconciler` for this renderer's entire lifetime, constructed once
@@ -190,6 +199,15 @@ export class ThreeRenderer implements Renderer {
    * the placeholder's original always-available default camera.
    */
   private readonly defaultCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
+  /**
+   * The camera actually used by the most recent `renderFrame` call (either a
+   * reconciled scene camera or `defaultCamera`), tracked purely for
+   * `getActiveCamera` (below) to hand back a live, current `THREE.Camera` to
+   * `attachTransformGizmo` without that caller needing to re-derive
+   * `findActiveCamera`'s own resolution logic itself. `undefined` until the
+   * first `renderFrame` call.
+   */
+  private lastUsedCamera: THREE.Camera | undefined;
 
   constructor(deps: ThreeRendererDependencies = defaultThreeRendererDependencies) {
     this.deps = deps;
@@ -212,6 +230,7 @@ export class ThreeRenderer implements Renderer {
     }
 
     this.threeRenderer.setSize(size.width, size.height, false);
+    this.domTarget = target;
   }
 
   renderFrame(sceneState: SceneState, frameContext: FrameContext): void {
@@ -248,6 +267,7 @@ export class ThreeRenderer implements Renderer {
 
     const camera =
       findActiveCamera(reconciled, sceneState.activeCameraNodeId) ?? this.defaultCamera;
+    this.lastUsedCamera = camera;
     renderer.render(this.scene, camera);
   }
 
@@ -273,6 +293,61 @@ export class ThreeRenderer implements Renderer {
       isFallback: this.wasFallback,
       maxTextureSize: renderer.capabilities?.maxTextureSize,
     };
+  }
+
+  /**
+   * Narrow accessors added for Phase 40's viewport gizmo integration (see
+   * `../gizmo/attach-transform-gizmo.ts`). Deliberately kept off the public
+   * `Renderer` interface (`renderer.ts` is untouched): every other consumer
+   * of `Renderer` is unaffected, and only code inside this package (which
+   * already imports `ThreeRenderer` directly, e.g. `attachTransformGizmo`'s
+   * `instanceof` check) can reach these at all. Each returns a real Three.js
+   * type, matching this class's own established exemption (see the doc
+   * comment above `ThreeRendererLike`) from the "no Three.js on anything
+   * `Renderer`-shaped" rule the rest of this package's public surface
+   * follows.
+   */
+
+  /**
+   * Looks up the live, reconciled `THREE.Object3D` tagged with `nodeId` (via
+   * `createThreeObject` in `./reconciler/node-factory.ts`, which sets
+   * `Object3D.name = node.id` for every node kind, not just cameras).
+   * Returns `undefined` if no such object exists in the current scene graph
+   * (e.g. `nodeId` was never reconciled, or belongs to a document this
+   * renderer has not yet rendered a frame for).
+   */
+  getObject3DByNodeId(nodeId: string): THREE.Object3D | undefined {
+    return this.scene.getObjectByName(nodeId) ?? undefined;
+  }
+
+  /**
+   * The camera actually used to draw the most recently rendered frame (a
+   * reconciled scene camera, or this renderer's own `defaultCamera` fallback
+   * if the scene has none active). `undefined` before the first
+   * `renderFrame` call.
+   */
+  getActiveCamera(): THREE.Camera | undefined {
+    return this.lastUsedCamera;
+  }
+
+  /** The one persistent Three.js scene every reconciled node is attached under, for a gizmo helper object to be added alongside. */
+  getScene(): THREE.Scene {
+    return this.scene;
+  }
+
+  /**
+   * The canvas-like target most recently passed to `init()`, for
+   * `TransformControls`'s own pointer event binding (its constructor takes
+   * an `HTMLElement`). `undefined` before `init()` resolves.
+   *
+   * Typed as the same `RenderTarget` union `init()` itself accepts (which
+   * includes a bare `OffscreenCanvas`, not an `HTMLElement`): a caller
+   * needing a real `HTMLElement` specifically (as `attachTransformGizmo`
+   * does) is responsible for narrowing it, since an `OffscreenCanvas` has no
+   * DOM presence to bind pointer events to at all.
+   */
+  getDomTarget(): RenderTarget | undefined {
+    return this.domTarget;
   }
 
   private requireInitialized(): ThreeRendererLike {

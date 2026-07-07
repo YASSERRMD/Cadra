@@ -179,4 +179,194 @@ describe("Viewport", () => {
 
     expect(renderer.dispose).toHaveBeenCalledTimes(1);
   });
+
+  describe("click-to-select", () => {
+    it("calls onSelectNode on a canvas click (a fake Renderer is not a real ThreeRenderer, so pickNodeAtPoint gracefully reports no hit)", async () => {
+      const createRenderer = vi.fn(createFakeRenderer);
+      const observeResize = createFakeObserveResize();
+      const onSelectNode = vi.fn();
+
+      await act(async () => {
+        root.render(
+          <Viewport
+            document={buildDocument("comp-1")}
+            selectedCompositionId="comp-1"
+            createRenderer={createRenderer}
+            observeResize={observeResize}
+            onSelectNode={onSelectNode}
+          />,
+        );
+      });
+
+      const canvas = container.querySelector(".cadra-preview__canvas");
+      expect(canvas).not.toBeNull();
+      // getBoundingClientRect defaults to all-zero in jsdom (no real
+      // layout); Viewport's own click handler bails out early on a
+      // zero-size rect (see its own guard), so this stubs a non-zero rect,
+      // the same seam TimelinePanel.test.tsx's own stubTrackAreaRect uses
+      // for an identical reason.
+      vi.spyOn(canvas as HTMLCanvasElement, "getBoundingClientRect").mockReturnValue({
+        left: 0,
+        top: 0,
+        right: 640,
+        bottom: 360,
+        width: 640,
+        height: 360,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      });
+
+      act(() => {
+        canvas?.dispatchEvent(
+          new MouseEvent("click", { bubbles: true, clientX: 320, clientY: 180 }),
+        );
+      });
+
+      // A fake Renderer is never `instanceof ThreeRenderer`, so
+      // pickNodeAtPoint's own graceful "not a real renderer" path always
+      // reports undefined here: this proves the click listener is wired
+      // through to onSelectNode at all (the pure data-flow this codebase
+      // tests in this situation), not that real raycast hit-testing works
+      // (proven instead by pick-node-at-point.test.ts in @cadra/renderer,
+      // against a real ThreeRenderer/scene/camera).
+      expect(onSelectNode).toHaveBeenCalledWith(undefined);
+    });
+
+    it("removes the click listener when the canvas is torn down (document change)", async () => {
+      const createRenderer = vi.fn(createFakeRenderer);
+      const observeResize = createFakeObserveResize();
+      const onSelectNode = vi.fn();
+
+      await act(async () => {
+        root.render(
+          <Viewport
+            document={buildDocument("comp-1")}
+            selectedCompositionId="comp-1"
+            createRenderer={createRenderer}
+            observeResize={observeResize}
+            onSelectNode={onSelectNode}
+          />,
+        );
+      });
+
+      const firstCanvas = container.querySelector(".cadra-preview__canvas");
+      expect(firstCanvas).not.toBeNull();
+
+      await act(async () => {
+        root.render(
+          <Viewport
+            document={buildDocument("comp-2")}
+            selectedCompositionId="comp-2"
+            createRenderer={createRenderer}
+            observeResize={observeResize}
+            onSelectNode={onSelectNode}
+          />,
+        );
+      });
+
+      act(() => {
+        firstCanvas?.dispatchEvent(
+          new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }),
+        );
+      });
+
+      // The old canvas element is gone from the DOM after the remount; a
+      // click dispatched directly against the detached reference must not
+      // still be wired to onSelectNode.
+      expect(onSelectNode).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("selection-driven gizmo attach", () => {
+    it("does not throw when selectedNodeId is set against a fake (non-ThreeRenderer) Renderer", async () => {
+      const createRenderer = vi.fn(createFakeRenderer);
+      const observeResize = createFakeObserveResize();
+
+      await expect(
+        act(async () => {
+          root.render(
+            <Viewport
+              document={buildDocument("comp-1")}
+              selectedCompositionId="comp-1"
+              createRenderer={createRenderer}
+              observeResize={observeResize}
+              selectedNodeId="some-node"
+              commitDocument={vi.fn(() => true)}
+            />,
+          );
+        }),
+      ).resolves.not.toThrow();
+
+      expect(container.querySelector('[data-testid="studio-viewport"]')).not.toBeNull();
+    });
+
+    it("does not throw when selectedNodeId changes across a re-render", async () => {
+      const createRenderer = vi.fn(createFakeRenderer);
+      const observeResize = createFakeObserveResize();
+      const document = buildDocument("comp-1");
+
+      await act(async () => {
+        root.render(
+          <Viewport
+            document={document}
+            selectedCompositionId="comp-1"
+            createRenderer={createRenderer}
+            observeResize={observeResize}
+            selectedNodeId="node-a"
+            commitDocument={vi.fn(() => true)}
+          />,
+        );
+      });
+
+      await expect(
+        act(async () => {
+          root.render(
+            <Viewport
+              document={document}
+              selectedCompositionId="comp-1"
+              createRenderer={createRenderer}
+              observeResize={observeResize}
+              selectedNodeId="node-b"
+              commitDocument={vi.fn(() => true)}
+            />,
+          );
+        }),
+      ).resolves.not.toThrow();
+    });
+
+    it("does not throw when selectedNodeId is cleared back to undefined", async () => {
+      const createRenderer = vi.fn(createFakeRenderer);
+      const observeResize = createFakeObserveResize();
+      const document = buildDocument("comp-1");
+
+      await act(async () => {
+        root.render(
+          <Viewport
+            document={document}
+            selectedCompositionId="comp-1"
+            createRenderer={createRenderer}
+            observeResize={observeResize}
+            selectedNodeId="node-a"
+            commitDocument={vi.fn(() => true)}
+          />,
+        );
+      });
+
+      await expect(
+        act(async () => {
+          root.render(
+            <Viewport
+              document={document}
+              selectedCompositionId="comp-1"
+              createRenderer={createRenderer}
+              observeResize={observeResize}
+              selectedNodeId={undefined}
+              commitDocument={vi.fn(() => true)}
+            />,
+          );
+        }),
+      ).resolves.not.toThrow();
+    });
+  });
 });

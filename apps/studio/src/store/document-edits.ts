@@ -1,8 +1,9 @@
-import type { Composition, SceneNode } from "@cadra/core";
+import type { Composition, SceneNode, Transform } from "@cadra/core";
 import { updateNode } from "@cadra/core";
 import type { SceneDocument } from "@cadra/schema";
 
 import type { SelectedClipMatch } from "../inspector/find-selected-clip.js";
+import { findSelectedClip } from "../inspector/find-selected-clip.js";
 
 /**
  * Returns a new `SceneDocument` equal to `sceneDocument` except that the
@@ -92,4 +93,51 @@ export function replaceNodeInDocument(
   };
 
   return replaceComposition(sceneDocument, match.compositionId, nextComposition);
+}
+
+/**
+ * Commits a single node's new `Transform` (e.g. the final result of one
+ * completed viewport gizmo drag; see `Viewport.tsx`'s own `attachTransformGizmo`
+ * wiring, which calls this directly) into `sceneDocument`, via
+ * `commitDocument`.
+ *
+ * This is the exact splice `attachTransformGizmo`'s `onTransformChange`
+ * needs, all the way from "a node id plus its new `Transform`" to an actual
+ * `commitDocument` call: looks the node up via `findSelectedClip` (the same
+ * tree walk every other selection lookup in this app already uses),
+ * replaces its `transform` field (a plain `Transform` is always a valid
+ * `AnimatableTransform`; see `@cadra/core`'s own `primitives.ts` doc for why
+ * this assignment needs no conversion), splices the result back into a full
+ * candidate document via `replaceNodeInDocument`, and calls `commitDocument`
+ * with it.
+ *
+ * Extracted as its own small, pure, exported function (rather than staying
+ * a private closure inside `Viewport.tsx`'s own gizmo-attach effect) so it
+ * has exactly one implementation that both `Viewport.tsx` (wiring a real
+ * gizmo drag to a real `commitDocument`) and this app's own convergence test
+ * (`convergence.test.ts`, proving a gizmo edit and a DSL panel edit commit
+ * identical documents) call directly, rather than the test re-implementing
+ * this splice a second, parallel way that could silently drift from what
+ * `Viewport.tsx` actually does.
+ *
+ * A no-op (returns `false`, matching `commitDocument`'s own "rejected"
+ * return value) if `nodeId` does not resolve to any node in `sceneDocument`
+ * (e.g. it was deleted by an edit that landed after a gizmo was attached to
+ * it, but before the in-progress drag ended): `findSelectedClip` returning
+ * `undefined` is treated as "nothing to commit", not an error, exactly the
+ * same posture `Viewport.tsx`'s own former inline `commitTransform` took.
+ */
+export function commitNodeTransform(
+  sceneDocument: SceneDocument,
+  nodeId: string,
+  transform: Transform,
+  commitDocument: (candidate: unknown) => boolean,
+): boolean {
+  const match = findSelectedClip(sceneDocument, nodeId);
+  if (match === undefined) {
+    return false;
+  }
+  const nextNode: SceneNode = { ...match.node, transform };
+  const candidate = replaceNodeInDocument(sceneDocument, match, nextNode);
+  return commitDocument(candidate);
 }
