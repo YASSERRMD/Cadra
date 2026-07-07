@@ -144,6 +144,81 @@ export interface TextStaggerConfig {
   periodFrames?: number;
 }
 
+/**
+ * Which per-glyph animation a `TextPhysicsConfig` drives: `"spring"` (a
+ * mass-spring-damper entrance - position/scale/opacity settle into place,
+ * physically, rather than following an algebraic easing curve, so
+ * overshoot/bounce falls naturally out of the simulation), `"jitter"` (a
+ * continuous, smoothly-noisy position/rotation wobble, never settling),
+ * `"wave"` (a continuous sine-driven vertical bob, phase-shifted by each
+ * unit's own rank - independent of, and composable with, `TextStaggerConfig`'s
+ * own `"wave"` preset, which cannot run alongside a *different* stagger
+ * preset the way this can), `"scramble"` (each unit shows a random
+ * character from `charset` until it locks into its real content at its own
+ * scheduled frame - a content effect, see `resolveScrambleText`, not a
+ * transform), and `"countUp"` (the node's own content becomes a formatted
+ * number animating from `fromValue` to `toValue` - also a content effect,
+ * see `resolveCountUpText`).
+ */
+export type TextPhysicsEffect = "spring" | "jitter" | "wave" | "scramble" | "countUp";
+
+/**
+ * Drives expressive per-glyph animation on top of a `TextNode`'s own
+ * layout positions (and, for `"spring"`/`"scramble"`, on top of whatever
+ * `TextStaggerConfig` reveal is already happening - see `effect`'s own
+ * doc). Every field is a plain value, not a `Property<T>` keyframe track,
+ * for the same reason `TextStaggerConfig`'s own fields are: this is one
+ * deterministic function of `frame` given fixed parameters, not itself
+ * something a caller keyframes mid-animation.
+ */
+export interface TextPhysicsConfig {
+  effect: TextPhysicsEffect;
+  grouping: TextStaggerGrouping;
+  /** Seeds this effect's own deterministic randomness (`"jitter"`'s noise, `"scramble"`'s character choices). Defaults to `0`. */
+  seed?: number;
+
+  /** `"spring"`/`"scramble"` only: the frame the very first unit (in rank order) begins animating at. Defaults to `0`. */
+  startFrame?: number;
+  /** `"spring"`/`"scramble"` only: frames between each consecutive unit's own start, in rank order. Defaults to `0` (every unit starts together). */
+  delayFrames?: number;
+  /** `"spring"`/`"scramble"`/`"countUp"` only: how many frames one unit's own animation takes, once it starts. Defaults to `30`. */
+  durationFrames?: number;
+  /** Defaults to `"forward"`. */
+  direction?: TextStaggerDirection;
+
+  /** `"spring"` only: the composition's own frame rate, needed to convert `frame` counts into physical time for the mass-spring-damper simulation. Defaults to `30`. */
+  fps?: number;
+  /** `"spring"` only. Defaults to `100`. */
+  stiffness?: number;
+  /** `"spring"` only. Defaults to `10`. */
+  damping?: number;
+  /** `"spring"` only. Defaults to `1`. */
+  mass?: number;
+  /** `"spring"` only: how far (in `fontSize`-relative em units) a unit starts offset from its natural position. Defaults to `1`. */
+  distance?: number;
+
+  /** `"jitter"`/`"wave"` only: peak offset, in `fontSize`-relative em units. Defaults to `0.05` for `"jitter"`, `0.1` for `"wave"`. */
+  positionAmplitude?: number;
+  /** `"jitter"` only: peak rotation around the glyph's own local Z axis, in radians. Defaults to `0` (no rotation jitter). */
+  rotationAmplitude?: number;
+  /** `"jitter"`'s own noise checkpoint spacing, or `"wave"`'s own oscillation period, in frames. Defaults to `20` for `"jitter"`, `30` for `"wave"`. */
+  periodFrames?: number;
+
+  /** `"scramble"` only: which characters a not-yet-locked-in unit is randomly drawn from. Defaults to uppercase Latin letters and digits. */
+  charset?: string;
+
+  /** `"countUp"` only: the value displayed at `frame <= startFrame`. Defaults to `0`. */
+  fromValue?: number;
+  /** `"countUp"` only: the value displayed at `frame >= startFrame + durationFrames`. Defaults to `0`. */
+  toValue?: number;
+  /** `"countUp"` only: fixed decimal places in the formatted number. Defaults to `0`. */
+  decimalPlaces?: number;
+  /** `"countUp"` only: whether to group digits with a thousands separator (always `,`, a fixed `"en-US"`-equivalent format regardless of runtime locale, so rendering a given frame never depends on the machine it runs on). Defaults to `false`. */
+  useGrouping?: boolean;
+  /** `"countUp"` only: eases the count's own progress. Defaults to `"linear"`. */
+  easing?: EasingName;
+}
+
 /** A block of rendered text. */
 export interface TextNode extends SceneNodeBase<"text"> {
   content: string;
@@ -161,6 +236,8 @@ export interface TextNode extends SceneNodeBase<"text"> {
   extrudeDepth?: Property<number>;
   /** A deterministic per-unit staggered reveal animation across this node's own content. Omitted means no staggering: every glyph renders exactly as laid out, unaffected. */
   stagger?: TextStaggerConfig;
+  /** Expressive per-glyph animation (springs, jitter, wave, scramble, count-up), composable with `stagger`. Omitted means no physics effect. */
+  physics?: TextPhysicsConfig;
 }
 
 /** A 2D image plane. `assetRef` is resolved against an asset registry. */

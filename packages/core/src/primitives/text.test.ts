@@ -50,6 +50,19 @@ describe("Text", () => {
     expect(node.stagger).toEqual(stagger);
   });
 
+  it("does not set physics when omitted", () => {
+    const node = Text({ id: "text-1" });
+
+    expect("physics" in node).toBe(false);
+  });
+
+  it("sets physics when provided", () => {
+    const physics = { effect: "jitter" as const, grouping: "character" as const, positionAmplitude: 0.05 };
+    const node = Text({ id: "text-1", physics });
+
+    expect(node.physics).toEqual(physics);
+  });
+
   it("overrides every default when props are given", () => {
     const node = Text({
       id: "text-1",
