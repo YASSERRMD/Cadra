@@ -7,13 +7,19 @@
  * instead of a caller-supplied id (see that module's own doc for why a
  * hash-derived path can never itself be a path-traversal vector).
  *
- * `upload_asset` accepts exactly one of two sources: `sourceUrl` (fetched
- * with Node's built-in `fetch`) or `bytesBase64` (raw bytes, base64-encoded
- * since MCP tool inputs are JSON). Either way, the fetched/decoded bytes are
- * hashed with `@cadra/core`'s `hashAssetBytes` (this codebase's sole
- * standardized content-hashing primitive) and stored once, deduplicating
- * automatically: re-uploading identical bytes resolves to the same asset ref
- * rather than creating a second copy.
+ * `upload_asset` accepts exactly one of two sources: `sourceUrl` (ingested
+ * via `./asset-store.ts`'s `ingestAssetFromUrl`, fetched with Node's
+ * built-in `fetch`) or `bytesBase64` (raw bytes, base64-encoded since MCP
+ * tool inputs are JSON). Either way, the fetched/decoded bytes are hashed
+ * with `@cadra/core`'s `hashAssetBytes` (this codebase's sole standardized
+ * content-hashing primitive) and stored once, deduplicating automatically:
+ * re-uploading identical bytes resolves to the same asset ref rather than
+ * creating a second copy. `ingestAssetFromUrl` is the same function
+ * `./generation-asset-binding.ts` (Phase 36) calls to turn a finished
+ * generation job's vendor-hosted output URL into a real, durable asset ref,
+ * so a URL becomes a stored asset exactly one way in this codebase,
+ * regardless of whether an agent supplied it directly or a generation job
+ * produced it.
  */
 import { hashAssetBytes } from "@cadra/core";
 import type { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -21,6 +27,7 @@ import { z } from "zod";
 
 import {
   buildAssetRef,
+  ingestAssetFromUrl,
   listStoredAssets,
   resolveAssetExtension,
   writeAssetFile,
@@ -53,25 +60,6 @@ interface UploadAssetSuccessPayload {
   sizeBytes: number;
   contentType?: string;
   sourceUrl?: string;
-}
-
-/**
- * Fetches `sourceUrl` with Node's built-in `fetch` and returns its bytes
- * plus, if present, its response's own `Content-Type` header (stripped of
- * any `; charset=...` parameter, since {@link resolveAssetExtension}'s
- * lookup table is keyed on the bare MIME type).
- */
-async function fetchAssetBytes(
-  sourceUrl: string,
-): Promise<{ bytes: Uint8Array; contentType: string | undefined }> {
-  const response = await fetch(sourceUrl);
-  if (!response.ok) {
-    throw new Error(`upload_asset: fetching "${sourceUrl}" failed with status ${response.status}.`);
-  }
-  const arrayBuffer = await response.arrayBuffer();
-  const rawContentType = response.headers.get("content-type") ?? undefined;
-  const contentType = rawContentType?.split(";")[0]?.trim();
-  return { bytes: new Uint8Array(arrayBuffer), contentType };
 }
 
 /**
@@ -149,36 +137,55 @@ export function registerCadraAssetTools(
         } satisfies AssetToolFailurePayload);
       }
 
-      let bytes: Uint8Array;
-      let resolvedContentType = contentType;
-
-      try {
-        if (sourceUrl !== undefined) {
-          const fetched = await fetchAssetBytes(sourceUrl);
-          bytes = fetched.bytes;
-          resolvedContentType = contentType ?? fetched.contentType;
-        } else {
-          bytes = decodeBase64AssetBytes(bytesBase64!);
+      if (sourceUrl !== undefined) {
+        let summary;
+        try {
+          summary = await ingestAssetFromUrl(config.workspaceRoot, sourceUrl, contentType);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          toolLogger.warn("upload_asset failed to obtain bytes", { sourceUrl, message });
+          return jsonResult({ success: false, message } satisfies AssetToolFailurePayload);
         }
+
+        toolLogger.info("upload_asset stored a new asset", {
+          hash: summary.hash,
+          sizeBytes: summary.sizeBytes,
+          extension: summary.extension,
+          viaUrl: true,
+        });
+
+        return jsonResult({
+          success: true,
+          assetRef: summary.assetRef,
+          hash: summary.hash,
+          extension: summary.extension,
+          sizeBytes: summary.sizeBytes,
+          ...(summary.contentType !== undefined ? { contentType: summary.contentType } : {}),
+          ...(summary.sourceUrl !== undefined ? { sourceUrl: summary.sourceUrl } : {}),
+        } satisfies UploadAssetSuccessPayload);
+      }
+
+      let bytes: Uint8Array;
+      try {
+        bytes = decodeBase64AssetBytes(bytesBase64!);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        toolLogger.warn("upload_asset failed to obtain bytes", { sourceUrl, message });
+        toolLogger.warn("upload_asset failed to obtain bytes", { message });
         return jsonResult({ success: false, message } satisfies AssetToolFailurePayload);
       }
 
       const hash = hashAssetBytes(bytes);
-      const extension = resolveAssetExtension(resolvedContentType, sourceUrl);
+      const extension = resolveAssetExtension(contentType, undefined);
 
       const metadata = await writeAssetFile(config.workspaceRoot, hash, extension, bytes, {
-        ...(resolvedContentType !== undefined ? { contentType: resolvedContentType } : {}),
-        ...(sourceUrl !== undefined ? { sourceUrl } : {}),
+        ...(contentType !== undefined ? { contentType } : {}),
       });
 
       toolLogger.info("upload_asset stored a new asset", {
         hash,
         sizeBytes: metadata.sizeBytes,
         extension,
-        viaUrl: sourceUrl !== undefined,
+        viaUrl: false,
       });
 
       return jsonResult({

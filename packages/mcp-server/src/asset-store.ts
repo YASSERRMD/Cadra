@@ -25,6 +25,7 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
+import { hashAssetBytes } from "@cadra/core";
 import type { ContentHash } from "@cadra/core";
 
 /** Subdirectory under `workspaceRoot` asset files are persisted in. */
@@ -251,6 +252,73 @@ export async function writeAssetFile(
   await writeFile(metaFilePath, JSON.stringify(fullMetadata, null, 2), "utf8");
 
   return fullMetadata;
+}
+
+/**
+ * Fetches `sourceUrl` with Node's built-in `fetch` and returns its bytes
+ * plus, if present, its response's own `Content-Type` header (stripped of
+ * any `; charset=...` parameter, since {@link resolveAssetExtension}'s
+ * lookup table is keyed on the bare MIME type).
+ *
+ * Extracted as its own function so both `upload_asset`
+ * (`./asset-tools.ts`) and any other caller ingesting a URL into this same
+ * durable, content-addressed store (e.g. `./generation-asset-binding.ts`,
+ * binding a finished generation job's `outputUrl` onto a scene node) fetch
+ * bytes exactly the same way, rather than one of them re-implementing this
+ * URL-to-bytes step independently.
+ */
+async function fetchBytesFromUrl(
+  sourceUrl: string,
+): Promise<{ bytes: Uint8Array; contentType: string | undefined }> {
+  const response = await fetch(sourceUrl);
+  if (!response.ok) {
+    throw new Error(`Fetching "${sourceUrl}" failed with status ${response.status}.`);
+  }
+  const arrayBuffer = await response.arrayBuffer();
+  const rawContentType = response.headers.get("content-type") ?? undefined;
+  const contentType = rawContentType?.split(";")[0]?.trim();
+  return { bytes: new Uint8Array(arrayBuffer), contentType };
+}
+
+/**
+ * Ingests `sourceUrl` into this workspace's durable, content-addressed asset
+ * store in one step: fetches its bytes ({@link fetchBytesFromUrl}), hashes
+ * them (`@cadra/core`'s `hashAssetBytes`, this codebase's sole standardized
+ * content-hashing primitive), derives a safe extension
+ * ({@link resolveAssetExtension}), and persists them ({@link writeAssetFile}),
+ * deduplicating automatically exactly like every other write through this
+ * module.
+ *
+ * This is the one real "ingest a URL into the asset store" code path in this
+ * package: `upload_asset`'s "by URL" tool input (`./asset-tools.ts`) calls
+ * this directly rather than duplicating the fetch/hash/extension/write
+ * sequence, and `./generation-asset-binding.ts` (Phase 36) calls it too, to
+ * turn a finished generation job's vendor-hosted `outputUrl` into a real,
+ * durable `cadra-asset://<hash>` ref the same way a human-uploaded URL
+ * becomes one.
+ *
+ * `contentType`, if given, overrides whatever the URL response's own
+ * `Content-Type` header reports (matching `upload_asset`'s own precedence);
+ * omit it to trust the response header (falling back to sniffing
+ * `sourceUrl`'s own extension, then a generic default, if the response has
+ * no `Content-Type` either).
+ */
+export async function ingestAssetFromUrl(
+  workspaceRoot: string,
+  sourceUrl: string,
+  contentType?: string,
+): Promise<StoredAssetSummary> {
+  const fetched = await fetchBytesFromUrl(sourceUrl);
+  const resolvedContentType = contentType ?? fetched.contentType;
+  const hash = hashAssetBytes(fetched.bytes);
+  const extension = resolveAssetExtension(resolvedContentType, sourceUrl);
+
+  const metadata = await writeAssetFile(workspaceRoot, hash, extension, fetched.bytes, {
+    ...(resolvedContentType !== undefined ? { contentType: resolvedContentType } : {}),
+    sourceUrl,
+  });
+
+  return { ...metadata, assetRef: buildAssetRef(metadata.hash) };
 }
 
 /** Reads back `hash`'s metadata sidecar, or `undefined` if no asset with this hash has been stored yet. Does not read the asset's own bytes; see {@link readAssetBytes} for that. */
