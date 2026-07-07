@@ -5,11 +5,31 @@ import {
   type SceneNode,
   type Transform,
 } from "@cadra/core";
+import type { TextRenderData } from "@cadra/text";
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
 
+import { createInMemoryTextRenderRegistry } from "../text/text-render-registry.js";
 import { createReconciler } from "./reconciler.js";
 import { createDefaultGeometryRegistry, createDefaultMaterialRegistry } from "./registries.js";
+
+/** A minimal, structurally-valid `TextRenderData` (one glyph, one atlas page): real shaping/atlas generation is `@cadra/text`'s own test responsibility, not this reconciler's. */
+const FAKE_TEXT_RENDER_DATA: TextRenderData = {
+  lineCount: 1,
+  atlasPages: [{ width: 4, height: 4, pixels: new Uint8Array(4 * 4 * 4).fill(255), png: new Uint8Array() }],
+  glyphs: [
+    {
+      glyphId: 1,
+      cluster: 0,
+      lineIndex: 0,
+      wordIndex: 0,
+      origin: { x: 0, y: 0 },
+      quad: { left: 0, right: 1, bottom: 0, top: 1 },
+      page: 0,
+      uv: { u0: 0, v0: 0, u1: 1, v1: 1 },
+    },
+  ],
+};
 
 /** Builds a `Transform` at the identity, optionally overriding `position`. */
 function transformAt(position: Transform["position"] = [0, 0, 0]): Transform {
@@ -210,13 +230,25 @@ describe("createReconciler: kind-to-Three.js mapping", () => {
     expect(result.intensity).toBe(3.5);
   });
 
-  it("maps text to a Mesh using the shared placeholder plane geometry and a per-node colored material", () => {
+  it("maps a text node with no registered render data to an empty group", () => {
     const reconciler = createReconciler();
-    const result = reconciler.reconcile(text("root", { color: [0, 1, 0, 1] }), 0) as THREE.Mesh;
-    expect(result).toBeInstanceOf(THREE.Mesh);
-    expect(result.geometry).toBeInstanceOf(THREE.PlaneGeometry);
-    const material = result.material as THREE.MeshBasicMaterial;
-    expect(material.color.g).toBeCloseTo(1);
+    const result = reconciler.reconcile(text("root", { color: [0, 1, 0, 1] }), 0) as THREE.Group;
+    expect(result).toBeInstanceOf(THREE.Group);
+    expect(result.children).toHaveLength(0);
+  });
+
+  it("maps text with registered render data to real glyph meshes, colored per the resolved color", () => {
+    const textRenderRegistry = createInMemoryTextRenderRegistry();
+    textRenderRegistry.register("default::hello", {
+      data: FAKE_TEXT_RENDER_DATA,
+      fontBytes: new Uint8Array(),
+      fontContentHash: "fake-font",
+    });
+    const reconciler = createReconciler({ textRenderRegistry });
+    const result = reconciler.reconcile(text("root", { color: [0, 1, 0, 1] }), 0) as THREE.Group;
+
+    const glyphMesh = result.children[0]?.children[0]?.children[0] as THREE.Mesh;
+    expect(glyphMesh).toBeInstanceOf(THREE.Mesh);
   });
 
   it("maps image to a Mesh using the shared placeholder plane geometry and a fixed placeholder color", () => {
@@ -227,21 +259,21 @@ describe("createReconciler: kind-to-Three.js mapping", () => {
     expect(result.material).toBeInstanceOf(THREE.MeshBasicMaterial);
   });
 
-  it("text and image placeholders share the exact same plane geometry instance", () => {
-    const textResult = createReconciler().reconcile(text("t1"), 0) as THREE.Mesh;
-    const imageResult = createReconciler().reconcile(image("i1"), 0) as THREE.Mesh;
-    expect(textResult.geometry).toBe(imageResult.geometry);
+  it("two image placeholders share the exact same plane geometry instance", () => {
+    const firstResult = createReconciler().reconcile(image("i1"), 0) as THREE.Mesh;
+    const secondResult = createReconciler().reconcile(image("i2", "asset-2"), 0) as THREE.Mesh;
+    expect(firstResult.geometry).toBe(secondResult.geometry);
   });
 
-  it("text and image placeholders each own a distinct per-node material", () => {
+  it("two image placeholders each own a distinct per-node material", () => {
     const reconciler = createReconciler();
     const rootObject = reconciler.reconcile(
-      group("root", [text("t1"), image("i1")]),
+      group("root", [image("i1"), image("i2", "asset-2")]),
       0,
     ) as THREE.Group;
-    const textMaterial = (rootObject.children[0] as THREE.Mesh).material;
-    const imageMaterial = (rootObject.children[1] as THREE.Mesh).material;
-    expect(textMaterial).not.toBe(imageMaterial);
+    const firstMaterial = (rootObject.children[0] as THREE.Mesh).material;
+    const secondMaterial = (rootObject.children[1] as THREE.Mesh).material;
+    expect(firstMaterial).not.toBe(secondMaterial);
   });
 });
 
@@ -343,23 +375,46 @@ describe("createReconciler: add, update, remove", () => {
 
   it("reconcile(null) tears down the entire tree and disposes owned resources", () => {
     const reconciler = createReconciler();
-    const rootObject = reconciler.reconcile(group("root", [text("t1")]), 0) as THREE.Group;
-    const textMesh = rootObject.children[0] as THREE.Mesh;
-    const material = textMesh.material as THREE.MeshBasicMaterial;
+    const rootObject = reconciler.reconcile(group("root", [image("i1")]), 0) as THREE.Group;
+    const imageMesh = rootObject.children[0] as THREE.Mesh;
+    const material = imageMesh.material as THREE.MeshBasicMaterial;
     const disposeSpy = vi.spyOn(material, "dispose");
 
     const result = reconciler.reconcile(null, 0);
 
     expect(result).toBeNull();
     expect(disposeSpy).toHaveBeenCalledTimes(1);
-    expect(textMesh.parent).toBeNull();
+    expect(imageMesh.parent).toBeNull();
+  });
+
+  it("reconcile(null) disposes every geometry, material, and texture a text node's own render resources own", () => {
+    const textRenderRegistry = createInMemoryTextRenderRegistry();
+    textRenderRegistry.register("default::hello", {
+      data: FAKE_TEXT_RENDER_DATA,
+      fontBytes: new Uint8Array(),
+      fontContentHash: "fake-font",
+    });
+    const reconciler = createReconciler({ textRenderRegistry });
+    reconciler.reconcile(text("t1"), 0);
+    // Re-reconcile once to reach into the live entry's owned resources via a
+    // second, identical tree - simplest way to observe what got built without
+    // exposing the reconciler's private `entries` map.
+    const rootObject = reconciler.reconcile(text("t1"), 0) as THREE.Group;
+    const glyphMesh = rootObject.children[0]?.children[0]?.children[0] as THREE.Mesh;
+    const geometryDisposeSpy = vi.spyOn(glyphMesh.geometry, "dispose");
+    const materialDisposeSpy = vi.spyOn(glyphMesh.material as THREE.Material, "dispose");
+
+    reconciler.reconcile(null, 0);
+
+    expect(geometryDisposeSpy).toHaveBeenCalledTimes(1);
+    expect(materialDisposeSpy).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("createReconciler: kind change on the same id", () => {
   it("disposes the old owned resources and creates a fresh Object3D when kind changes", () => {
     const reconciler = createReconciler();
-    const first = reconciler.reconcile(text("root"), 0) as THREE.Mesh;
+    const first = reconciler.reconcile(image("root"), 0) as THREE.Mesh;
     const oldMaterial = first.material as THREE.MeshBasicMaterial;
     const disposeSpy = vi.spyOn(oldMaterial, "dispose");
 
@@ -402,6 +457,35 @@ describe("createReconciler: kind change on the same id", () => {
 });
 
 describe("createReconciler: reordering", () => {
+  it("preserves a node's own internal (non-scene-graph) Object3D structure across reconcile calls, even with a sibling to reorder", () => {
+    // Regression test: reorderChildren used to unconditionally reassign
+    // parent.children to exactly the scene-graph-tracked children,
+    // silently discarding a text node's own internal line/word/glyph
+    // groups (which have no corresponding SceneNode and so never appear
+    // in that list) the moment they disagreed in length - i.e. on every
+    // single reconcile of a text node with real render data.
+    const textRenderRegistry = createInMemoryTextRenderRegistry();
+    textRenderRegistry.register("default::hello", {
+      data: FAKE_TEXT_RENDER_DATA,
+      fontBytes: new Uint8Array(),
+      fontContentHash: "fake-font",
+    });
+    const reconciler = createReconciler({ textRenderRegistry });
+
+    const first = reconciler.reconcile(group("root", [text("t1"), image("i1")]), 0) as THREE.Group;
+    const textObject = first.children[0] as THREE.Group;
+    const innerLineGroup = textObject.children[0];
+    expect(innerLineGroup?.name).toBe("line-0");
+
+    // Reorder the two scene-graph siblings; the text node's own internal
+    // structure must still be there afterward, untouched.
+    const second = reconciler.reconcile(group("root", [image("i1"), text("t1")]), 0) as THREE.Group;
+    const textObjectAfterReorder = second.children[1] as THREE.Group;
+
+    expect(textObjectAfterReorder).toBe(textObject);
+    expect(textObjectAfterReorder.children).toContain(innerLineGroup);
+  });
+
   it("reorders existing children to match new order without disposing or recreating them", () => {
     const reconciler = createReconciler();
     const rootObject = reconciler.reconcile(

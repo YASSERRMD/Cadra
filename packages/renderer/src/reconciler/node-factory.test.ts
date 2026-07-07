@@ -1,7 +1,10 @@
 import { createIdentityTransform, type SceneNode } from "@cadra/core";
+import type { TextRenderData } from "@cadra/text";
 import * as THREE from "three";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import type { TextGroupResources } from "../text/build-text-group.js";
+import { createInMemoryTextRenderRegistry } from "../text/text-render-registry.js";
 import { applyNodeProperties, createThreeObject, type NodeFactoryContext } from "./node-factory.js";
 import { createDefaultGeometryRegistry, createDefaultMaterialRegistry } from "./registries.js";
 
@@ -10,6 +13,35 @@ function makeCtx(): NodeFactoryContext {
     geometryRegistry: createDefaultGeometryRegistry(),
     materialRegistry: createDefaultMaterialRegistry(),
   };
+}
+
+/** A minimal, structurally-valid `TextRenderData` (one glyph, one atlas page): real shaping/atlas generation is `@cadra/text`'s own test responsibility, not this reconciler's. */
+const FAKE_TEXT_RENDER_DATA: TextRenderData = {
+  lineCount: 1,
+  atlasPages: [{ width: 4, height: 4, pixels: new Uint8Array(4 * 4 * 4).fill(255), png: new Uint8Array() }],
+  glyphs: [
+    {
+      glyphId: 1,
+      cluster: 0,
+      lineIndex: 0,
+      wordIndex: 0,
+      origin: { x: 0, y: 0 },
+      quad: { left: 0, right: 1, bottom: 0, top: 1 },
+      page: 0,
+      uv: { u0: 0, v0: 0, u1: 1, v1: 1 },
+    },
+  ],
+};
+
+/** `makeCtx` plus a `textRenderRegistry` pre-populated with `FAKE_TEXT_RENDER_DATA` under the given text node's own render key ("default::"+content). */
+function makeCtxWithText(content: string): NodeFactoryContext {
+  const textRenderRegistry = createInMemoryTextRenderRegistry();
+  textRenderRegistry.register(`default::${content}`, {
+    data: FAKE_TEXT_RENDER_DATA,
+    fontBytes: new Uint8Array(),
+    fontContentHash: "fake-font",
+  });
+  return { ...makeCtx(), textRenderRegistry };
 }
 
 function meshNode(geometryRef: string, materialRef: string): SceneNode {
@@ -213,7 +245,7 @@ describe("node-factory: Phase 26 keyframed properties resolve to different value
   });
 
   it("resolves a keyframed text color to different values at different frames", () => {
-    const ctx = makeCtx();
+    const ctx = makeCtxWithText("Hello");
     const node: SceneNode = {
       id: "title",
       kind: "text",
@@ -231,13 +263,77 @@ describe("node-factory: Phase 26 keyframed properties resolve to different value
       },
     };
     const built = createThreeObject(node, ctx);
-    const mesh = built.object3D as THREE.Mesh;
-    const material = mesh.material as THREE.MeshBasicMaterial;
+    // MSDF materials hold their color in a TSL uniform node, not the
+    // classic `.color` property (see msdf-material.ts), so this asserts
+    // through the same setColor seam applyNodeProperties itself calls,
+    // rather than reading a material property that would not reflect it.
+    const textResources = built.owned?.text as TextGroupResources;
+    const setColorSpy = vi.spyOn(textResources, "setColor");
 
-    applyNodeProperties(node, built.object3D, ctx, 0);
-    expect([material.color.r, material.color.g, material.color.b]).toEqual([1, 0, 0]);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+    expect(setColorSpy).toHaveBeenLastCalledWith(1, 0, 0, 1);
 
-    applyNodeProperties(node, built.object3D, ctx, 10);
-    expect([material.color.r, material.color.g, material.color.b]).toEqual([0, 0, 1]);
+    applyNodeProperties(node, built.object3D, ctx, 10, built.owned);
+    expect(setColorSpy).toHaveBeenLastCalledWith(0, 0, 1, 1);
+  });
+
+  it("renders an empty group when a text node's render data is not yet registered", () => {
+    const ctx = makeCtx();
+    const node: SceneNode = {
+      id: "title",
+      kind: "text",
+      transform: createIdentityTransform(),
+      visible: true,
+      children: [],
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+    };
+    const built = createThreeObject(node, ctx);
+
+    expect(built.object3D).toBeInstanceOf(THREE.Group);
+    expect(built.object3D.children).toHaveLength(0);
+    expect(built.owned).toBeUndefined();
+  });
+
+  it("builds real glyph meshes grouped under line and word groups when render data is registered", () => {
+    const ctx = makeCtxWithText("Hi");
+    const node: SceneNode = {
+      id: "title",
+      kind: "text",
+      transform: createIdentityTransform(),
+      visible: true,
+      children: [],
+      content: "Hi",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+    };
+    const built = createThreeObject(node, ctx);
+    const group = built.object3D as THREE.Group;
+
+    const lineGroup = group.children[0] as THREE.Group;
+    expect(lineGroup.name).toBe("line-0");
+    const wordGroup = lineGroup.children[0] as THREE.Group;
+    expect(wordGroup.name).toBe("word-0:0");
+    expect(wordGroup.children[0]).toBeInstanceOf(THREE.Mesh);
+  });
+
+  it("scales the text group by the resolved fontSize each frame, on top of the authored transform scale", () => {
+    const ctx = makeCtxWithText("Hi");
+    const node: SceneNode = {
+      id: "title",
+      kind: "text",
+      transform: { ...createIdentityTransform(), scale: [2, 2, 2] },
+      visible: true,
+      children: [],
+      content: "Hi",
+      fontSize: 10,
+      color: [1, 1, 1, 1],
+    };
+    const built = createThreeObject(node, ctx);
+
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+
+    expect(built.object3D.scale.toArray()).toEqual([20, 20, 20]);
   });
 });
