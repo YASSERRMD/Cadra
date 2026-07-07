@@ -16,6 +16,15 @@
  * variable-font interpolation, full metrics, named-instance enumeration)
  * but Node-only; `opentype.js` is lighter and universal, for contexts like
  * a browser-bundled render page where fontkit cannot run.
+ *
+ * Phase 42: real text shaping. `shapeText` resolves Unicode bidi (via
+ * `bidi-js`), itemizes into single-script single-direction runs (script
+ * detection via `unicode-properties`), shapes each run with real HarfBuzz
+ * (via `harfbuzzjs`, applying OpenType features and variable-font
+ * coordinates), and reorders the runs into visual order per UAX #9 rule
+ * L2. Every shaped glyph carries a `cluster` mapping back to the original
+ * string, for later phases' per-glyph animation and grapheme-safe
+ * splitting.
  */
 
 export const VERSION = "0.0.0";
@@ -23,6 +32,8 @@ export const VERSION = "0.0.0";
 /** Identifies this package at runtime, useful for diagnostics. */
 export const PACKAGE_NAME = "@cadra/text";
 
+export type { BidiParagraph, BidiResolution, TextDirection } from "./bidi-resolution.js";
+export { isRtlLevel, resolveBidi } from "./bidi-resolution.js";
 export type { FontMetrics } from "./font-metrics.js";
 export {
   resolveFontVariationInstance,
@@ -34,6 +45,19 @@ export type { FontRegistration, FontRegistry, FontRegistryOptions } from "./font
 export { createFontRegistry } from "./font-registry.js";
 export type { FontSubsetOptions } from "./font-subset.js";
 export { codePointSetKey, subsetFontToCodePoints } from "./font-subset.js";
+export type { ShapeRunOptions } from "./harfbuzz-shaping.js";
+export { shapeRun } from "./harfbuzz-shaping.js";
 export type { FontParseBackend, ParsedFont } from "./parsed-font.js";
+export type { ItemizedRun } from "./script-runs.js";
+export { computeItemizedRuns } from "./script-runs.js";
+export {
+  SCRIPT_LESS_UNICODE_SCRIPTS,
+  UNICODE_SCRIPT_TO_ISO_15924,
+  unicodeScriptToIso15924,
+} from "./script-tags.js";
+export type { ShapeTextOptions } from "./shape-text.js";
+export { shapeText } from "./shape-text.js";
+export type { ShapedGlyph, ShapedTextRun } from "./shaped-run.js";
 export type { NamedInstance, VariationAxis } from "./variable-font.js";
 export { clampToAxisRange, findNamedInstance } from "./variable-font.js";
+export { reorderRunsToVisualOrder } from "./visual-run-order.js";
