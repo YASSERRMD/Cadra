@@ -15,6 +15,8 @@ export type { ImageProps } from "./image.js";
 export { Image } from "./image.js";
 export type { LightProps } from "./light.js";
 export { Light } from "./light.js";
+export type { ResolvedMeshMaterial } from "./material.js";
+export { PBR_PRESETS, resolveMeshMaterial } from "./material.js";
 export type { SatoriProps } from "./satori.js";
 export { Satori } from "./satori.js";
 export type { ResolvedSatoriElementStyle } from "./satori-element-animation.js";
