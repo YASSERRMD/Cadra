@@ -1109,6 +1109,655 @@
               "type": "string",
               "description": "Id of a material asset, resolved against a material registry by the renderer."
             },
+            "material": {
+              "description": "A physically based material, taking over from materialRef entirely when present.",
+              "type": "object",
+              "properties": {
+                "baseColor": {
+                  "description": "The surface's own albedo color. Defaults to a neutral, cinematic 70% gray.",
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1,
+                          "description": "The red channel, in the inclusive range 0 to 1."
+                        },
+                        {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1,
+                          "description": "The green channel, in the inclusive range 0 to 1."
+                        },
+                        {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1,
+                          "description": "The blue channel, in the inclusive range 0 to 1."
+                        },
+                        {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1,
+                          "description": "The alpha channel, in the inclusive range 0 to 1."
+                        }
+                      ],
+                      "description": "A straight (non-premultiplied) RGBA color. Each channel is a number in the inclusive range 0 to 1, not 0 to 255."
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1,
+                                    "description": "The red channel, in the inclusive range 0 to 1."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1,
+                                    "description": "The green channel, in the inclusive range 0 to 1."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1,
+                                    "description": "The blue channel, in the inclusive range 0 to 1."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1,
+                                    "description": "The alpha channel, in the inclusive range 0 to 1."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "metalness": {
+                  "description": "0 (fully dielectric) to 1 (fully metallic). Defaults to 0.",
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "number",
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "roughness": {
+                  "description": "0 (mirror-smooth) to 1 (fully matte). Defaults to a cinematic 0.5.",
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "number",
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "emissive": {
+                  "description": "Self-illumination color, added on top of lit shading. Defaults to black (no emission).",
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1,
+                          "description": "The red channel, in the inclusive range 0 to 1."
+                        },
+                        {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1,
+                          "description": "The green channel, in the inclusive range 0 to 1."
+                        },
+                        {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1,
+                          "description": "The blue channel, in the inclusive range 0 to 1."
+                        },
+                        {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1,
+                          "description": "The alpha channel, in the inclusive range 0 to 1."
+                        }
+                      ],
+                      "description": "A straight (non-premultiplied) RGBA color. Each channel is a number in the inclusive range 0 to 1, not 0 to 255."
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1,
+                                    "description": "The red channel, in the inclusive range 0 to 1."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1,
+                                    "description": "The green channel, in the inclusive range 0 to 1."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1,
+                                    "description": "The blue channel, in the inclusive range 0 to 1."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1,
+                                    "description": "The alpha channel, in the inclusive range 0 to 1."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "emissiveIntensity": {
+                  "description": "Multiplies emissive. Defaults to 1.",
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "number",
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "clearcoat": {
+                  "description": "A second, thin reflective layer over the base surface, 0 to 1. Defaults to 0.",
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "number",
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "clearcoatRoughness": {
+                  "description": "The clearcoat layer's own roughness, independent of the base surface's roughness. Defaults to 0.",
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "number",
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "opacity": {
+                  "description": "Overall opacity, 0 to 1. Defaults to 1.",
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "number",
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "normalMapRef": {
+                  "description": "Id of a normal map texture asset, resolved against a texture registry by the renderer.",
+                  "type": "string"
+                },
+                "aoMapRef": {
+                  "description": "Id of an ambient-occlusion map texture asset, resolved against a texture registry by the renderer.",
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "castShadow": {
+              "description": "Whether this mesh casts a shadow onto other shadow-receiving surfaces. Defaults to false.",
+              "type": "boolean"
+            },
+            "receiveShadow": {
+              "description": "Whether this mesh receives shadows cast by shadow-casting lights. Defaults to false.",
+              "type": "boolean"
+            },
             "children": {
               "type": "array",
               "items": {
@@ -2194,7 +2843,8 @@
                 "ambient",
                 "directional",
                 "point",
-                "spot"
+                "spot",
+                "area"
               ],
               "description": "The kind of light source this light node represents."
             },
@@ -2380,6 +3030,53 @@
                 }
               ],
               "description": "The brightness of this light source. A plain number or a keyframe track."
+            },
+            "castShadow": {
+              "description": "Whether this light casts shadows onto shadow-receiving meshes. Defaults to false. A harmless no-op for lightType 'area', since Three.js's RectAreaLight has no shadow support at all.",
+              "type": "boolean"
+            },
+            "shadow": {
+              "description": "Shadow-map quality tuning, only meaningful when castShadow is true. Omitted means Three.js's own defaults.",
+              "type": "object",
+              "properties": {
+                "mapSize": {
+                  "description": "Shadow map resolution (both width and height), in pixels; must be a power of two. Defaults to 512.",
+                  "type": "number"
+                },
+                "bias": {
+                  "description": "Shadow map depth bias; small adjustments (around 0.0001) can reduce shadow acne. Defaults to 0.",
+                  "type": "number"
+                },
+                "radius": {
+                  "description": "Softens the shadow's own edge by blurring the shadow map. Defaults to 1.",
+                  "type": "number"
+                }
+              },
+              "additionalProperties": false
+            },
+            "distance": {
+              "description": "For 'point'/'spot' lights: maximum range of the light, in scene units. 0 (Three.js's own default) means no distance cutoff.",
+              "type": "number"
+            },
+            "decay": {
+              "description": "For 'point'/'spot' lights: how much the light dims over distance. 2 (Three.js's own default) is physically correct inverse-square falloff.",
+              "type": "number"
+            },
+            "angle": {
+              "description": "For 'spot' lights only: the light cone's maximum angle from its own direction, in radians, up to Math.PI / 2. Defaults to Three.js's own Math.PI / 3.",
+              "type": "number"
+            },
+            "penumbra": {
+              "description": "For 'spot' lights only: how much the cone's edge is softened, from 0 to 1. Defaults to 0.",
+              "type": "number"
+            },
+            "width": {
+              "description": "For 'area' lights only: the rectangle's width, in scene units. Defaults to 10.",
+              "type": "number"
+            },
+            "height": {
+              "description": "For 'area' lights only: the rectangle's height, in scene units. Defaults to 10.",
+              "type": "number"
             },
             "children": {
               "type": "array",

@@ -5,7 +5,9 @@ import type {
   GroupNode,
   ImageNode,
   LightNode,
+  LightShadowConfig,
   LightType,
+  MeshMaterialConfig,
   MeshNode,
   SatoriElementKeyframes,
   SatoriLayerFontRef,
@@ -88,12 +90,44 @@ type _CheckSceneNodeKind = AssertTrue<
   AssertEqual<z.infer<typeof sceneNodeKindSchema>, SceneNodeKind>
 >;
 
-/** The kind of light source a light node represents, mirroring `LightType`. */
+/**
+ * The kind of light source a light node represents, mirroring `LightType`.
+ * `"area"` is a rectangular area light; Three.js's own `RectAreaLight` has no
+ * shadow support at all, so `castShadow` is a harmless no-op for it.
+ */
 export const lightTypeSchema = z
-  .enum(["ambient", "directional", "point", "spot"])
+  .enum(["ambient", "directional", "point", "spot", "area"])
   .describe("The kind of light source this light node represents.");
 
 type _CheckLightType = AssertTrue<AssertEqual<z.infer<typeof lightTypeSchema>, LightType>>;
+
+/**
+ * Shadow-map tuning for a light node with `castShadow: true`, mirroring
+ * `LightShadowConfig`. Every field is structural, not a keyframe-track
+ * property: shadow-map quality is a rendering-configuration concern, not
+ * continuously animated content. Omitted fields fall back to Three.js's own
+ * already-reasonable defaults.
+ */
+export const lightShadowConfigSchema = z.strictObject({
+  mapSize: z
+    .number()
+    .optional()
+    .describe(
+      "Shadow map resolution (both width and height), in pixels; must be a power of two. Defaults to 512.",
+    ),
+  bias: z
+    .number()
+    .optional()
+    .describe("Shadow map depth bias; small adjustments (around 0.0001) can reduce shadow acne. Defaults to 0."),
+  radius: z
+    .number()
+    .optional()
+    .describe("Softens the shadow's own edge by blurring the shadow map. Defaults to 1."),
+});
+
+type _CheckLightShadowConfig = AssertTrue<
+  AssertEqual<z.infer<typeof lightShadowConfigSchema>, LightShadowConfig>
+>;
 
 /**
  * How a video node's source video is fitted into its plane, mirroring
@@ -166,6 +200,48 @@ export const groupNodeSchema = z.strictObject({
 type _CheckGroupNode = AssertTrue<AssertEqual<z.infer<typeof groupNodeSchema>, GroupNode>>;
 
 /**
+ * A physically based material, in the metalness/roughness workflow,
+ * mirroring `MeshMaterialConfig`. Every color/scalar channel accepts either a
+ * plain value or a keyframe track, via `propertySchema`; only the two
+ * texture references are plain strings, matching `TextFill`'s own
+ * `assetRef`.
+ */
+export const meshMaterialConfigSchema = z.strictObject({
+  baseColor: propertySchema(colorRgbaSchema)
+    .optional()
+    .describe("The surface's own albedo color. Defaults to a neutral, cinematic 70% gray."),
+  metalness: propertySchema(z.number())
+    .optional()
+    .describe("0 (fully dielectric) to 1 (fully metallic). Defaults to 0."),
+  roughness: propertySchema(z.number())
+    .optional()
+    .describe("0 (mirror-smooth) to 1 (fully matte). Defaults to a cinematic 0.5."),
+  emissive: propertySchema(colorRgbaSchema)
+    .optional()
+    .describe("Self-illumination color, added on top of lit shading. Defaults to black (no emission)."),
+  emissiveIntensity: propertySchema(z.number()).optional().describe("Multiplies emissive. Defaults to 1."),
+  clearcoat: propertySchema(z.number())
+    .optional()
+    .describe("A second, thin reflective layer over the base surface, 0 to 1. Defaults to 0."),
+  clearcoatRoughness: propertySchema(z.number())
+    .optional()
+    .describe("The clearcoat layer's own roughness, independent of the base surface's roughness. Defaults to 0."),
+  opacity: propertySchema(z.number()).optional().describe("Overall opacity, 0 to 1. Defaults to 1."),
+  normalMapRef: z
+    .string()
+    .optional()
+    .describe("Id of a normal map texture asset, resolved against a texture registry by the renderer."),
+  aoMapRef: z
+    .string()
+    .optional()
+    .describe("Id of an ambient-occlusion map texture asset, resolved against a texture registry by the renderer."),
+});
+
+type _CheckMeshMaterialConfig = AssertTrue<
+  AssertEqual<z.infer<typeof meshMaterialConfigSchema>, MeshMaterialConfig>
+>;
+
+/**
  * A renderable mesh. `geometryRef` and `materialRef` are ids resolved
  * against a geometry and material registry by a later phase; the scene DSL
  * itself stays agnostic to how those registries are populated.
@@ -189,6 +265,17 @@ export const meshNodeSchema = z.strictObject({
   materialRef: z
     .string()
     .describe("Id of a material asset, resolved against a material registry by the renderer."),
+  material: meshMaterialConfigSchema
+    .optional()
+    .describe("A physically based material, taking over from materialRef entirely when present."),
+  castShadow: z
+    .boolean()
+    .optional()
+    .describe("Whether this mesh casts a shadow onto other shadow-receiving surfaces. Defaults to false."),
+  receiveShadow: z
+    .boolean()
+    .optional()
+    .describe("Whether this mesh receives shadows cast by shadow-casting lights. Defaults to false."),
   get children(): z.ZodArray<typeof sceneNodeSchema> {
     return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
   },
@@ -263,6 +350,49 @@ export const lightNodeSchema = z.strictObject({
   intensity: propertySchema(z.number()).describe(
     "The brightness of this light source. A plain number or a keyframe track.",
   ),
+  castShadow: z
+    .boolean()
+    .optional()
+    .describe(
+      "Whether this light casts shadows onto shadow-receiving meshes. Defaults to false. A harmless " +
+        "no-op for lightType 'area', since Three.js's RectAreaLight has no shadow support at all.",
+    ),
+  shadow: lightShadowConfigSchema
+    .optional()
+    .describe("Shadow-map quality tuning, only meaningful when castShadow is true. Omitted means Three.js's own defaults."),
+  distance: z
+    .number()
+    .optional()
+    .describe(
+      "For 'point'/'spot' lights: maximum range of the light, in scene units. 0 (Three.js's own default) " +
+        "means no distance cutoff.",
+    ),
+  decay: z
+    .number()
+    .optional()
+    .describe(
+      "For 'point'/'spot' lights: how much the light dims over distance. 2 (Three.js's own default) is " +
+        "physically correct inverse-square falloff.",
+    ),
+  angle: z
+    .number()
+    .optional()
+    .describe(
+      "For 'spot' lights only: the light cone's maximum angle from its own direction, in radians, up to " +
+        "Math.PI / 2. Defaults to Three.js's own Math.PI / 3.",
+    ),
+  penumbra: z
+    .number()
+    .optional()
+    .describe("For 'spot' lights only: how much the cone's edge is softened, from 0 to 1. Defaults to 0."),
+  width: z
+    .number()
+    .optional()
+    .describe("For 'area' lights only: the rectangle's width, in scene units. Defaults to 10."),
+  height: z
+    .number()
+    .optional()
+    .describe("For 'area' lights only: the rectangle's height, in scene units. Defaults to 10."),
   get children(): z.ZodArray<typeof sceneNodeSchema> {
     return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
   },
