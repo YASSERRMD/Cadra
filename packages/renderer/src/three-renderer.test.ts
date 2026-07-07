@@ -9,8 +9,10 @@ import {
   type SceneState,
 } from "@cadra/core";
 import * as THREE from "three";
+import { GroundedSkybox } from "three/addons/objects/GroundedSkybox.js";
 import { describe, expect, it, vi } from "vitest";
 
+import type { EnvironmentRegistry } from "./environment/environment-registry.js";
 import type { RenderSize, RenderTarget } from "./renderer.js";
 import type { ThreeRendererDependencies, ThreeRendererFactory } from "./three-renderer.js";
 import { ThreeRenderer } from "./three-renderer.js";
@@ -24,6 +26,10 @@ function createFakeThreeRenderer() {
     dispose: vi.fn(),
     capabilities: { maxTextureSize: 4096 },
     toneMappingExposure: 1,
+    // Identity passthrough: real PMREM prefiltering is not testable without
+    // a GPU, so tests assert on which input texture reached this call and
+    // that its output (here, itself) ends up on scene.environment/.background.
+    createEnvironmentMap: vi.fn((equirectangular: THREE.Texture) => equirectangular),
   };
 }
 
@@ -128,6 +134,19 @@ function makeSceneState(overrides: Partial<SceneState> = {}): SceneState {
 
 function makeFrameContext(frame = 3): FrameContext {
   return createFrameContext({ frame, fps: 30, durationInFrames: 90, seed: "det-seed" });
+}
+
+/** A distinguishable, real `THREE.Texture` for environment tests, tagged via `.name` so a resolved value can be traced back to the ref that produced it. */
+function makeEnvironmentTexture(name: string): THREE.Texture {
+  const texture = new THREE.Texture();
+  texture.name = name;
+  return texture;
+}
+
+/** A fake `EnvironmentRegistry` resolving exactly the given refs, each to its own distinguishable texture. */
+function fakeEnvironmentRegistry(refs: readonly string[]): EnvironmentRegistry {
+  const textures = new Map(refs.map((ref) => [ref, makeEnvironmentTexture(ref)]));
+  return { resolve: (ref: string) => textures.get(ref) };
 }
 
 describe("ThreeRenderer backend selection", () => {
@@ -729,5 +748,221 @@ describe("ThreeRenderer.renderFrame: color workflow", () => {
 
     expect(secondExposure).toBe(firstExposure);
     expect(secondColor.toArray()).toEqual(firstColor.toArray());
+  });
+});
+
+describe("ThreeRenderer.renderFrame: image-based lighting environment (Phase 56)", () => {
+  it("resolves envMapRef, prefilters it, and sets scene.environment", async () => {
+    const { deps, webGpuRenderer } = createFakeDeps();
+    const environmentRegistry = fakeEnvironmentRegistry(["studio"]);
+    const renderer = new ThreeRenderer(deps, environmentRegistry);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(makeSceneState({ environment: { envMapRef: "studio" } }), makeFrameContext());
+
+    expect(webGpuRenderer.createEnvironmentMap).toHaveBeenCalledTimes(1);
+    expect(renderer.getScene().environment?.name).toBe("studio");
+  });
+
+  it("leaves scene.background null when showBackground is omitted, even though environment is set", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps, fakeEnvironmentRegistry(["studio"]));
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(makeSceneState({ environment: { envMapRef: "studio" } }), makeFrameContext());
+
+    expect(renderer.getScene().environment).not.toBeNull();
+    expect(renderer.getScene().background).toBeNull();
+  });
+
+  it("sets scene.background to the same prefiltered environment when showBackground is true", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps, fakeEnvironmentRegistry(["studio"]));
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({ environment: { envMapRef: "studio", showBackground: true } }),
+      makeFrameContext(),
+    );
+
+    const scene = renderer.getScene();
+    expect(scene.background).toBe(scene.environment);
+  });
+
+  it("applies rotation and intensity from the composition's own environment config", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps, fakeEnvironmentRegistry(["studio"]));
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({
+        environment: {
+          envMapRef: "studio",
+          rotation: Math.PI / 2,
+          intensity: 2.5,
+          showBackground: true,
+          backgroundIntensity: 0.4,
+        },
+      }),
+      makeFrameContext(),
+    );
+
+    const scene = renderer.getScene();
+    expect(scene.environmentRotation.y).toBeCloseTo(Math.PI / 2);
+    expect(scene.backgroundRotation.y).toBeCloseTo(Math.PI / 2);
+    expect(scene.environmentIntensity).toBe(2.5);
+    expect(scene.backgroundIntensity).toBe(0.4);
+  });
+
+  it("defaults rotation to 0, intensity to 1, and backgroundIntensity to 1 when omitted", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps, fakeEnvironmentRegistry(["studio"]));
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(makeSceneState({ environment: { envMapRef: "studio" } }), makeFrameContext());
+
+    const scene = renderer.getScene();
+    expect(scene.environmentRotation.y).toBe(0);
+    expect(scene.environmentIntensity).toBe(1);
+    expect(scene.backgroundIntensity).toBe(1);
+  });
+
+  it("does not re-prefilter on a later call with the same envMapRef (caching)", async () => {
+    const { deps, webGpuRenderer } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps, fakeEnvironmentRegistry(["studio"]));
+    await renderer.init(htmlCanvasLikeTarget, size);
+    const sceneState = makeSceneState({ environment: { envMapRef: "studio" } });
+
+    renderer.renderFrame(sceneState, makeFrameContext(1));
+    renderer.renderFrame(sceneState, makeFrameContext(2));
+
+    expect(webGpuRenderer.createEnvironmentMap).toHaveBeenCalledTimes(1);
+  });
+
+  it("updates rotation on a later call without re-prefiltering (rotation is a scene property, not baked into the cached texture)", async () => {
+    const { deps, webGpuRenderer } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps, fakeEnvironmentRegistry(["studio"]));
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({ environment: { envMapRef: "studio", rotation: 0 } }),
+      makeFrameContext(1),
+    );
+    renderer.renderFrame(
+      makeSceneState({ environment: { envMapRef: "studio", rotation: Math.PI } }),
+      makeFrameContext(2),
+    );
+
+    expect(webGpuRenderer.createEnvironmentMap).toHaveBeenCalledTimes(1);
+    expect(renderer.getScene().environmentRotation.y).toBeCloseTo(Math.PI);
+  });
+
+  it("re-prefilters and disposes the old cached texture when envMapRef changes", async () => {
+    const { deps, webGpuRenderer } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps, fakeEnvironmentRegistry(["studio", "outdoor"]));
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(makeSceneState({ environment: { envMapRef: "studio" } }), makeFrameContext(1));
+    const firstEnvironment = renderer.getScene().environment;
+    const disposeSpy = vi.spyOn(firstEnvironment as THREE.Texture, "dispose");
+
+    renderer.renderFrame(makeSceneState({ environment: { envMapRef: "outdoor" } }), makeFrameContext(2));
+
+    expect(webGpuRenderer.createEnvironmentMap).toHaveBeenCalledTimes(2);
+    expect(renderer.getScene().environment?.name).toBe("outdoor");
+    expect(disposeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears scene.environment/.background and disposes the cached texture when environment is later omitted", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps, fakeEnvironmentRegistry(["studio"]));
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({ environment: { envMapRef: "studio", showBackground: true } }),
+      makeFrameContext(1),
+    );
+    const disposeSpy = vi.spyOn(renderer.getScene().environment as THREE.Texture, "dispose");
+
+    renderer.renderFrame(makeSceneState(), makeFrameContext(2));
+
+    expect(renderer.getScene().environment).toBeNull();
+    expect(renderer.getScene().background).toBeNull();
+    expect(disposeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves scene.environment/.background null when no composition has ever set an environment", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps, fakeEnvironmentRegistry(["studio"]));
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(makeSceneState(), makeFrameContext());
+
+    expect(renderer.getScene().environment).toBeNull();
+    expect(renderer.getScene().background).toBeNull();
+  });
+
+  it("leaves scene.environment null when envMapRef does not resolve in the registry", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps, fakeEnvironmentRegistry([]));
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(makeSceneState({ environment: { envMapRef: "does-not-exist" } }), makeFrameContext());
+
+    expect(renderer.getScene().environment).toBeNull();
+  });
+
+  it("adds a real GroundedSkybox mesh to the scene, positioned at y = height, when groundProjection is set", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps, fakeEnvironmentRegistry(["studio"]));
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({ environment: { envMapRef: "studio", groundProjection: { height: 10, radius: 50 } } }),
+      makeFrameContext(),
+    );
+
+    const skybox = renderer.getScene().children.find((child) => child instanceof GroundedSkybox);
+    expect(skybox).toBeInstanceOf(GroundedSkybox);
+    expect(skybox?.position.y).toBe(10);
+  });
+
+  it("removes the GroundedSkybox mesh once groundProjection is later omitted", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps, fakeEnvironmentRegistry(["studio"]));
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({ environment: { envMapRef: "studio", groundProjection: { height: 5 } } }),
+      makeFrameContext(1),
+    );
+    expect(renderer.getScene().children.some((child) => child instanceof GroundedSkybox)).toBe(true);
+
+    renderer.renderFrame(makeSceneState({ environment: { envMapRef: "studio" } }), makeFrameContext(2));
+
+    expect(renderer.getScene().children.some((child) => child instanceof GroundedSkybox)).toBe(false);
+  });
+
+  it("is deterministic: identical environment config produces identical scene.environment identity and rotation/intensity across repeated calls", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps, fakeEnvironmentRegistry(["studio"]));
+    await renderer.init(htmlCanvasLikeTarget, size);
+    const sceneState = makeSceneState({
+      environment: { envMapRef: "studio", rotation: 1.1, intensity: 1.3 },
+    });
+
+    renderer.renderFrame(sceneState, makeFrameContext(1));
+    const firstEnvironment = renderer.getScene().environment;
+    const firstRotation = renderer.getScene().environmentRotation.y;
+    const firstIntensity = renderer.getScene().environmentIntensity;
+
+    renderer.renderFrame(sceneState, makeFrameContext(2));
+    const secondEnvironment = renderer.getScene().environment;
+    const secondRotation = renderer.getScene().environmentRotation.y;
+    const secondIntensity = renderer.getScene().environmentIntensity;
+
+    expect(secondEnvironment).toBe(firstEnvironment);
+    expect(secondRotation).toBe(firstRotation);
+    expect(secondIntensity).toBe(firstIntensity);
   });
 });

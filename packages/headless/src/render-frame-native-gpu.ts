@@ -1,6 +1,7 @@
 import type { PixelReadableRenderer, RenderSize, RenderTarget, ThreeRendererDependencies } from "@cadra/renderer";
 import { ThreeRenderer } from "@cadra/renderer";
-import { WebGPURenderer } from "three/webgpu";
+import type { Texture } from "three";
+import { PMREMGenerator, WebGPURenderer } from "three/webgpu";
 
 /**
  * Phase 24 research spike: an experimental, opt-in, Chromium-free headless
@@ -445,7 +446,21 @@ export function createNativeGpuHeadlessRenderer(
       // never a caller-supplied real HTMLCanvasElement: this experimental
       // renderer's own `init()` ignores whatever `target` a caller passes
       // in (see its own doc) and always draws into its own headless target.
-      return new WebGPURenderer({ device, canvas: target, antialias: false });
+      const renderer = new WebGPURenderer({ device, canvas: target, antialias: false });
+      // Minimal Phase 56 conformance: `ThreeRendererDependencies`'s
+      // `ThreeRendererLike` now requires `createEnvironmentMap` (PMREM
+      // prefiltering support), which no real Three.js renderer class
+      // provides natively. This experimental spike does not otherwise apply
+      // `@cadra/renderer`'s own `applyColorWorkflowDefaults`/area-light setup
+      // (both pre-existing, orthogonal gaps in this ADR-scoped research path,
+      // not introduced here), so this is scoped to exactly the one method
+      // needed to satisfy the type.
+      const pmremGenerator = new PMREMGenerator(renderer);
+      return Object.assign(renderer, {
+        createEnvironmentMap(equirectangular: Texture): Texture {
+          return pmremGenerator.fromEquirectangular(equirectangular).texture;
+        },
+      });
     },
     createWebGl2Renderer: () => {
       // Never actually reachable: detectWebGpuSupport always returns true

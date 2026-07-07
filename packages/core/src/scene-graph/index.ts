@@ -54,6 +54,8 @@ export type {
   Clip,
   Composition,
   CompositionColorGrading,
+  CompositionEnvironment,
+  EnvironmentGroundProjection,
   Project,
   Track,
   Transition,
