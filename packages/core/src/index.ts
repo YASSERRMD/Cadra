@@ -40,6 +40,7 @@ export type {
   ImageProps,
   LightProps,
   ResolvedSatoriElementStyle,
+  ResolvedTextUnitState,
   SatoriProps,
   SequenceFrameResolution,
   SequenceProps,
@@ -53,6 +54,7 @@ export type {
 export {
   Camera,
   CAMERA_ANIMATABLE_PROPERTIES,
+  computeStaggerRanks,
   createComposition,
   deriveSequenceRootId,
   Image,
@@ -61,6 +63,7 @@ export {
   LIGHT_ANIMATABLE_PROPERTIES,
   resolveSatoriElementStyles,
   resolveSequenceFrame,
+  resolveTextUnitState,
   resolveVideoSourceFrame,
   Satori,
   SATORI_ANIMATABLE_PROPERTIES,

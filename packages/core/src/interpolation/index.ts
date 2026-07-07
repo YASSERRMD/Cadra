@@ -21,5 +21,7 @@ export {
   NonMonotonicInputRangeError,
 } from "./interpolate.js";
 export { interpolateColor, interpolateVector2, interpolateVector3, lerp } from "./lerp.js";
+export type { EasingName } from "./named-easing.js";
+export { resolveEasingFunction } from "./named-easing.js";
 export type { SpringConfig } from "./spring.js";
 export { spring } from "./spring.js";
