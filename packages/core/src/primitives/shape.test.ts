@@ -24,6 +24,14 @@ describe("Shape", () => {
     expect("name" in node).toBe(false);
   });
 
+  it("does not set material, castShadow, or receiveShadow keys when omitted", () => {
+    const node = Shape({ id: "shape-1" });
+
+    expect("material" in node).toBe(false);
+    expect("castShadow" in node).toBe(false);
+    expect("receiveShadow" in node).toBe(false);
+  });
+
   it("overrides every default when props are given", () => {
     const transform: Transform = { position: [1, 2, 3], rotation: [0, 0, 0], scale: [2, 2, 2] };
     const child = Shape({ id: "child" });
@@ -36,6 +44,9 @@ describe("Shape", () => {
       children: [child],
       geometryRef: "sphere",
       materialRef: "glass",
+      material: { baseColor: [0.8, 0.2, 0.2, 1], metalness: 1, roughness: 0.3 },
+      castShadow: true,
+      receiveShadow: true,
     });
 
     expect(node).toEqual({
@@ -47,6 +58,9 @@ describe("Shape", () => {
       children: [child],
       geometryRef: "sphere",
       materialRef: "glass",
+      material: { baseColor: [0.8, 0.2, 0.2, 1], metalness: 1, roughness: 0.3 },
+      castShadow: true,
+      receiveShadow: true,
     });
   });
 

@@ -1,5 +1,8 @@
 import {
   createIdentityTransform,
+  type LightNode,
+  type LightType,
+  type MeshMaterialConfig,
   type SatoriNode,
   type SceneNode,
   type TextPhysicsConfig,
@@ -841,5 +844,211 @@ describe("node-factory: text materials (Phase 53)", () => {
     expect(built.owned?.text?.setOutline).toBeUndefined();
     expect(built.owned?.text?.setGlow).toBeUndefined();
     expect(built.owned?.text?.setShadow).toBeUndefined();
+  });
+});
+
+/** A mesh node with an inline PBR `material`, defaulting `geometryRef`/`materialRef` to the same placeholders `meshNode` uses. */
+function meshNodeWithMaterial(material: MeshMaterialConfig): SceneNode {
+  return {
+    id: "m",
+    kind: "mesh",
+    transform: createIdentityTransform(),
+    visible: true,
+    children: [],
+    geometryRef: "box",
+    materialRef: "default",
+    material,
+  };
+}
+
+describe("node-factory: PBR mesh materials (Phase 55)", () => {
+  it("builds a real MeshPhysicalMaterial from an inline material config, owned for disposal", () => {
+    const ctx = makeCtx();
+    const node = meshNodeWithMaterial({ baseColor: [1, 1, 1, 1], metalness: 0.8, roughness: 0.3 });
+    const built = createThreeObject(node, ctx);
+    const mesh = built.object3D as THREE.Mesh;
+
+    expect(mesh.material).toBeInstanceOf(THREE.MeshPhysicalMaterial);
+    expect(built.owned?.material).toBe(mesh.material);
+  });
+
+  it("resolves metalness and roughness onto the constructed material", () => {
+    const ctx = makeCtx();
+    const node = meshNodeWithMaterial({ metalness: 0.9, roughness: 0.15 });
+    const built = createThreeObject(node, ctx);
+    const material = (built.object3D as THREE.Mesh).material as THREE.MeshPhysicalMaterial;
+
+    expect(material.metalness).toBe(0.9);
+    expect(material.roughness).toBe(0.15);
+  });
+
+  it("resolves baseColor through the sRGB-to-linear scene color pipeline, matching a light's own color", () => {
+    const ctx = makeCtx();
+    const node = meshNodeWithMaterial({ baseColor: [0.5, 0.5, 0.5, 1] });
+    const built = createThreeObject(node, ctx);
+    const material = (built.object3D as THREE.Mesh).material as THREE.MeshPhysicalMaterial;
+
+    expect([material.color.r, material.color.g, material.color.b]).toEqual([
+      0.2140411404715882, 0.2140411404715882, 0.2140411404715882,
+    ]);
+  });
+
+  it("falls back to materialRef's registry-resolved material when no inline material is given (pre-Phase-55 behavior)", () => {
+    const ctx = makeCtx();
+    const node = meshNode("box", "default");
+    const built = createThreeObject(node, ctx);
+
+    expect(built.object3D).toBeInstanceOf(THREE.Mesh);
+    expect((built.object3D as THREE.Mesh).material).toBe(ctx.materialRegistry.resolve("default"));
+    expect(built.owned).toBeUndefined();
+  });
+
+  it("re-resolves keyframed metalness/roughness per frame, mutating the same owned material instance in place", () => {
+    const ctx = makeCtx();
+    const node = meshNodeWithMaterial({
+      metalness: { type: "keyframeTrack", keyframes: [{ frame: 0, value: 0 }, { frame: 10, value: 1 }] },
+      roughness: { type: "keyframeTrack", keyframes: [{ frame: 0, value: 1 }, { frame: 10, value: 0 }] },
+    });
+    const built = createThreeObject(node, ctx);
+    const mesh = built.object3D as THREE.Mesh;
+    const materialBeforeUpdate = mesh.material;
+
+    applyNodeProperties(node, mesh, ctx, 0, built.owned);
+    expect((mesh.material as THREE.MeshPhysicalMaterial).metalness).toBe(0);
+    expect((mesh.material as THREE.MeshPhysicalMaterial).roughness).toBe(1);
+
+    applyNodeProperties(node, mesh, ctx, 10, built.owned);
+    expect((mesh.material as THREE.MeshPhysicalMaterial).metalness).toBe(1);
+    expect((mesh.material as THREE.MeshPhysicalMaterial).roughness).toBe(0);
+
+    // Identity is preserved across frames: no reconstruction, no shader
+    // recompile from scratch every frame.
+    expect(mesh.material).toBe(materialBeforeUpdate);
+  });
+
+  it("defaults castShadow and receiveShadow to false, and applies them when set", () => {
+    const ctx = makeCtx();
+    const plainMesh = createThreeObject(meshNode("box", "default"), ctx).object3D as THREE.Mesh;
+    expect(plainMesh.castShadow).toBe(false);
+    expect(plainMesh.receiveShadow).toBe(false);
+
+    const shadowedNode: SceneNode = {
+      id: "m2",
+      kind: "mesh",
+      transform: createIdentityTransform(),
+      visible: true,
+      children: [],
+      geometryRef: "box",
+      materialRef: "default",
+      castShadow: true,
+      receiveShadow: true,
+    };
+    const shadowedMesh = createThreeObject(shadowedNode, ctx).object3D as THREE.Mesh;
+    expect(shadowedMesh.castShadow).toBe(true);
+    expect(shadowedMesh.receiveShadow).toBe(true);
+  });
+});
+
+/** A light node of the given type, with optional Phase 55 shadow/falloff/area overrides. */
+function lightNodeWith(
+  lightType: LightType,
+  overrides: Omit<
+    LightNode,
+    "id" | "kind" | "lightType" | "transform" | "visible" | "children" | "color" | "intensity"
+  > = {},
+): SceneNode {
+  return {
+    id: "l",
+    kind: "light",
+    transform: createIdentityTransform(),
+    visible: true,
+    children: [],
+    lightType,
+    color: [1, 1, 1, 1],
+    intensity: 1,
+    ...overrides,
+  };
+}
+
+describe("node-factory: light shadows, falloff, and area lights (Phase 55)", () => {
+  it("maps lightType 'area' to a real THREE.RectAreaLight", () => {
+    const ctx = makeCtx();
+    const built = createThreeObject(lightNodeWith("area"), ctx);
+    expect(built.object3D).toBeInstanceOf(THREE.RectAreaLight);
+  });
+
+  it("applies width/height to an area light", () => {
+    const ctx = makeCtx();
+    const node = lightNodeWith("area", { width: 4, height: 2 });
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0);
+    const light = built.object3D as THREE.RectAreaLight;
+    expect(light.width).toBe(4);
+    expect(light.height).toBe(2);
+  });
+
+  it("defaults castShadow to false and applies it when set, configuring a directional light's own shadow object", () => {
+    const ctx = makeCtx();
+    const plain = createThreeObject(lightNodeWith("directional"), ctx).object3D as THREE.DirectionalLight;
+    expect(plain.castShadow).toBe(false);
+
+    const node = lightNodeWith("directional", {
+      castShadow: true,
+      shadow: { mapSize: 2048, bias: -0.0004, radius: 3 },
+    });
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0);
+    const light = built.object3D as THREE.DirectionalLight;
+
+    expect(light.castShadow).toBe(true);
+    expect(light.shadow.mapSize.x).toBe(2048);
+    expect(light.shadow.mapSize.y).toBe(2048);
+    expect(light.shadow.bias).toBe(-0.0004);
+    expect(light.shadow.radius).toBe(3);
+  });
+
+  it("does not throw when castShadow is set on an ambient or area light, which have no shadow object at all", () => {
+    const ctx = makeCtx();
+    for (const lightType of ["ambient", "area"] as const satisfies readonly LightType[]) {
+      const node = lightNodeWith(lightType, { castShadow: true, shadow: { mapSize: 1024 } });
+      const built = createThreeObject(node, ctx);
+      expect(() => applyNodeProperties(node, built.object3D, ctx, 0)).not.toThrow();
+      expect(built.object3D.castShadow).toBe(true);
+    }
+  });
+
+  it("applies distance and decay to point and spot lights", () => {
+    const ctx = makeCtx();
+    for (const lightType of ["point", "spot"] as const satisfies readonly LightType[]) {
+      const node = lightNodeWith(lightType, { distance: 15, decay: 1.5 });
+      const built = createThreeObject(node, ctx);
+      applyNodeProperties(node, built.object3D, ctx, 0);
+      const light = built.object3D as THREE.PointLight | THREE.SpotLight;
+      expect(light.distance).toBe(15);
+      expect(light.decay).toBe(1.5);
+    }
+  });
+
+  it("applies angle and penumbra to spot lights only", () => {
+    const ctx = makeCtx();
+    const node = lightNodeWith("spot", { angle: Math.PI / 8, penumbra: 0.6 });
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0);
+    const light = built.object3D as THREE.SpotLight;
+    expect(light.angle).toBe(Math.PI / 8);
+    expect(light.penumbra).toBe(0.6);
+  });
+
+  it("leaves distance/decay/angle/penumbra/width/height at Three.js's own defaults when omitted", () => {
+    const ctx = makeCtx();
+    const node = lightNodeWith("spot");
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0);
+    const light = built.object3D as THREE.SpotLight;
+    // Three.js's own SpotLight constructor defaults, untouched.
+    expect(light.distance).toBe(0);
+    expect(light.decay).toBe(2);
+    expect(light.angle).toBe(Math.PI / 3);
+    expect(light.penumbra).toBe(0);
   });
 });

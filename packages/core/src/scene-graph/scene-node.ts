@@ -47,6 +47,44 @@ interface SceneNodeBase<Kind extends SceneNodeKind> {
 export type GroupNode = SceneNodeBase<"group">;
 
 /**
+ * A physically based material, in the metalness/roughness workflow: the same
+ * model real-time PBR renderers (and glTF) use, chosen so this scene graph's
+ * own material authoring maps directly onto Three.js's `MeshPhysicalMaterial`
+ * with no lossy translation. Every color/scalar channel is `Property<T>`
+ * (mirroring `TextOutlineConfig.width`'s own precedent that even
+ * structural-feeling numeric fields animate smoothly in this scene graph);
+ * only the two texture references are plain strings, matching `TextFill`'s
+ * own `assetRef` (a texture asset is a discrete swap, never a smooth blend).
+ *
+ * Omitted entirely (`MeshNode.material` left `undefined`) means this mesh
+ * keeps using `MeshNode.materialRef`'s registry-resolved material instead,
+ * exactly the pre-Phase-55 behavior; every mesh authored before Phase 55
+ * keeps behaving identically.
+ */
+export interface MeshMaterialConfig {
+  /** The surface's own albedo color. Defaults to a neutral, cinematic 70% gray: readable under any lighting, without the "flat plastic white" look pure white gives under a strong key light. */
+  baseColor?: Property<ColorRGBA>;
+  /** `0` (fully dielectric - plastic, wood, skin) to `1` (fully metallic - gold, steel, copper). Defaults to `0`. */
+  metalness?: Property<number>;
+  /** `0` (mirror-smooth) to `1` (fully matte). Defaults to a cinematic `0.5`, avoiding both an unlit-mirror look at `0` and a flat, lifeless surface at `1`. */
+  roughness?: Property<number>;
+  /** Self-illumination color, added on top of lit shading (visible even where no light reaches the surface). Defaults to black (no emission). */
+  emissive?: Property<ColorRGBA>;
+  /** Multiplies `emissive`. Defaults to `1`. */
+  emissiveIntensity?: Property<number>;
+  /** A second, thin reflective layer over the base surface (car paint, lacquered wood, wet surfaces), `0` to `1`. Defaults to `0` (no clearcoat, matching every material authored before Phase 55). */
+  clearcoat?: Property<number>;
+  /** The clearcoat layer's own roughness, independent of the base surface's `roughness`. Defaults to `0` (a glassy-smooth clearcoat). */
+  clearcoatRoughness?: Property<number>;
+  /** Overall opacity, `0` to `1`. Defaults to `1` (fully opaque). */
+  opacity?: Property<number>;
+  /** Id of a normal map texture asset, resolved against a texture registry by the renderer. Omitted means a geometrically flat surface (no bump detail). */
+  normalMapRef?: string;
+  /** Id of an ambient-occlusion map texture asset, resolved against a texture registry by the renderer. Omitted means no baked-in occlusion darkening. */
+  aoMapRef?: string;
+}
+
+/**
  * A renderable mesh. `geometryRef` and `materialRef` are ids resolved
  * against a geometry and material registry by a later phase (the renderer's
  * scene-graph-to-Three.js mapping); the scene graph itself stays agnostic to
@@ -55,6 +93,12 @@ export type GroupNode = SceneNodeBase<"group">;
 export interface MeshNode extends SceneNodeBase<"mesh"> {
   geometryRef: string;
   materialRef: string;
+  /** A physically based material, taking over from `materialRef` entirely when present. Omitted means `materialRef`'s registry-resolved material (the pre-Phase-55 behavior). */
+  material?: MeshMaterialConfig;
+  /** Whether this mesh casts a shadow onto other shadow-receiving surfaces. Defaults to `false`. */
+  castShadow?: boolean;
+  /** Whether this mesh receives shadows cast by shadow-casting lights. Defaults to `false`. */
+  receiveShadow?: boolean;
 }
 
 /**
@@ -72,14 +116,51 @@ export interface CameraNode extends SceneNodeBase<"camera"> {
   target: Property<Vector3>;
 }
 
-/** The kind of light source a `LightNode` represents. */
-export type LightType = "ambient" | "directional" | "point" | "spot";
+/**
+ * The kind of light source a `LightNode` represents. `"area"` is a
+ * rectangular area light (see `LightNode.width`/`.height`); Three.js's own
+ * `RectAreaLight` has no shadow support at all, so `LightNode.castShadow` is
+ * a harmless no-op for it.
+ */
+export type LightType = "ambient" | "directional" | "point" | "spot" | "area";
+
+/**
+ * Shadow-map tuning for a `LightNode` with `castShadow: true`. Every field is
+ * structural, not `Property<T>` (mirroring `TextShadowConfig.steps`'s own
+ * precedent): shadow-map quality is a rendering-configuration concern, not
+ * continuously animated content. Omitted fields fall back to Three.js's own
+ * already-reasonable defaults.
+ */
+export interface LightShadowConfig {
+  /** Shadow map resolution (both width and height), in pixels; must be a power of two. Higher values give crisper shadows at a higher render cost. Defaults to Three.js's own `512`. */
+  mapSize?: number;
+  /** Shadow map depth bias; small adjustments (around `0.0001`) can reduce shadow acne. Defaults to Three.js's own `0`. */
+  bias?: number;
+  /** Softens the shadow's own edge by blurring the shadow map. Defaults to Three.js's own `1` (a mild default softness). */
+  radius?: number;
+}
 
 /** A light source. */
 export interface LightNode extends SceneNodeBase<"light"> {
   lightType: LightType;
   color: Property<ColorRGBA>;
   intensity: Property<number>;
+  /** Whether this light casts shadows onto shadow-receiving meshes. Defaults to `false` (matches every light authored before Phase 55). A harmless no-op for `lightType: "area"`, since Three.js's `RectAreaLight` has no shadow support at all. */
+  castShadow?: boolean;
+  /** Shadow-map quality tuning, only meaningful when `castShadow` is `true`. Omitted means Three.js's own defaults. */
+  shadow?: LightShadowConfig;
+  /** For `"point"`/`"spot"` lights: maximum range of the light, in scene units. `0` (Three.js's own default) means no distance cutoff (physically correct inverse-square falloff to infinity). */
+  distance?: number;
+  /** For `"point"`/`"spot"` lights: how much the light dims over `distance`. `2` (Three.js's own default) is physically correct inverse-square falloff. */
+  decay?: number;
+  /** For `"spot"` lights only: the light cone's maximum angle from its own direction, in radians, up to `Math.PI / 2`. Defaults to Three.js's own `Math.PI / 3`. */
+  angle?: number;
+  /** For `"spot"` lights only: how much the cone's edge is softened, from `0` (a hard edge) to `1`. Defaults to Three.js's own `0`. */
+  penumbra?: number;
+  /** For `"area"` lights only: the rectangle's width, in scene units. Defaults to Three.js's own `10`. */
+  width?: number;
+  /** For `"area"` lights only: the rectangle's height, in scene units. Defaults to Three.js's own `10`. */
+  height?: number;
 }
 
 /**

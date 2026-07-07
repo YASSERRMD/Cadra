@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   createDefaultGeometryRegistry,
   createDefaultMaterialRegistry,
+  createDefaultTextureRegistry,
   DEFAULT_GEOMETRY_REFS,
   DEFAULT_MATERIAL_REFS,
 } from "./registries.js";
@@ -55,5 +56,19 @@ describe("createDefaultMaterialRegistry", () => {
   it("returns the exact same instance across repeated resolves of the same ref", () => {
     const registry = createDefaultMaterialRegistry();
     expect(registry.resolve("default")).toBe(registry.resolve("default"));
+  });
+
+  it("gives 'default' a cinematic roughness rather than Three.js's own fully-matte default", () => {
+    const registry = createDefaultMaterialRegistry();
+    const material = registry.resolve("default") as THREE.MeshStandardMaterial;
+    expect(material.roughness).toBe(0.7);
+  });
+});
+
+describe("createDefaultTextureRegistry", () => {
+  it("resolves every ref to undefined (no texture asset pipeline seeded yet)", () => {
+    const registry = createDefaultTextureRegistry();
+    expect(registry.resolve("normal-1")).toBeUndefined();
+    expect(registry.resolve("does-not-exist")).toBeUndefined();
   });
 });

@@ -22,6 +22,24 @@ export interface MaterialRegistry {
   resolve(ref: string): THREE.Material | undefined;
 }
 
+/**
+ * Resolves a `MeshMaterialConfig.normalMapRef`/`.aoMapRef` to a shared
+ * `THREE.Texture` instance. Same pooling and non-disposal contract as
+ * `GeometryRegistry`: a texture resolved here is never disposed by the
+ * reconciler (see `node-factory.ts`'s own PBR material construction), only
+ * whatever populated the registry owns that lifetime.
+ *
+ * Phase 12's asset pipeline is the intended long-term implementation of this
+ * interface, same as `GeometryRegistry`/`MaterialRegistry`;
+ * `createDefaultTextureRegistry` below seeds nothing at all (no texture
+ * asset exists to seed it with yet), so every `resolve` call returns
+ * `undefined` until a real registry is injected - a harmless, documented
+ * no-op (a mesh's `normalMap`/`aoMap` simply stay unset), not an error.
+ */
+export interface TextureRegistry {
+  resolve(ref: string): THREE.Texture | undefined;
+}
+
 /** Ids the default geometry registry seeds itself with. */
 export const DEFAULT_GEOMETRY_REFS = ["box", "sphere"] as const;
 
@@ -49,17 +67,33 @@ export function createDefaultGeometryRegistry(): GeometryRegistry {
 
 /**
  * A simple in-memory `MaterialRegistry` seeded with a couple of basic
- * materials, mirroring `createDefaultGeometryRegistry`'s purpose.
+ * materials, mirroring `createDefaultGeometryRegistry`'s purpose. `"default"`
+ * uses a cinematic `roughness: 0.7` (Three.js's own `MeshStandardMaterial`
+ * default is a fully matte `1`) so an unstyled mesh already reads as a
+ * plausible surface, not a flat, lifeless one.
  */
 export function createDefaultMaterialRegistry(): MaterialRegistry {
   const materials = new Map<string, THREE.Material>([
-    ["default", new THREE.MeshStandardMaterial({ color: 0xcccccc })],
+    ["default", new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.7 })],
     ["wireframe", new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true })],
   ]);
 
   return {
     resolve(ref: string): THREE.Material | undefined {
       return materials.get(ref);
+    },
+  };
+}
+
+/**
+ * A `TextureRegistry` that resolves nothing at all: the default when no real
+ * texture registry is injected. See `TextureRegistry`'s own doc for why an
+ * always-empty default is a safe, documented no-op rather than an error.
+ */
+export function createDefaultTextureRegistry(): TextureRegistry {
+  return {
+    resolve(): THREE.Texture | undefined {
+      return undefined;
     },
   };
 }
