@@ -5,6 +5,7 @@ import {
   type MeshNode,
   type SceneState,
 } from "@cadra/core";
+import type * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
 
 import { attachTransformGizmo } from "../gizmo/attach-transform-gizmo.js";
@@ -22,6 +23,7 @@ function createFakeThreeRenderer() {
     dispose: vi.fn(),
     capabilities: { maxTextureSize: 4096 },
     toneMappingExposure: 1,
+    createEnvironmentMap: vi.fn((equirectangular: THREE.Texture) => equirectangular),
   };
 }
 

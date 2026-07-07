@@ -1,4 +1,5 @@
 import {
+  type CompositionEnvironment,
   computeWhiteBalanceGain,
   type FrameContext,
   resolveExposureMultiplier,
@@ -8,10 +9,15 @@ import {
 import * as THREE from "three";
 import { RectAreaLightTexturesLib } from "three/addons/lights/RectAreaLightTexturesLib.js";
 import { RectAreaLightUniformsLib } from "three/addons/lights/RectAreaLightUniformsLib.js";
+import { GroundedSkybox } from "three/addons/objects/GroundedSkybox.js";
 import * as ThreeWebGPUInternals from "three/webgpu";
-import { WebGPURenderer, type WebGPURendererParameters } from "three/webgpu";
+import { PMREMGenerator as WebGPUPMREMGenerator, WebGPURenderer, type WebGPURendererParameters } from "three/webgpu";
 
 import { detectWebGpuSupport, type WebGpuDetector } from "./capability-detection.js";
+import {
+  createDefaultEnvironmentRegistry,
+  type EnvironmentRegistry,
+} from "./environment/environment-registry.js";
 import { createReconciler, type Reconciler } from "./reconciler/reconciler.js";
 import type {
   Renderer,
@@ -40,6 +46,19 @@ interface ThreeRendererLike {
   capabilities?: { maxTextureSize?: number };
   /** Set fresh every `renderFrame` call, from the composition's own resolved `colorGrading.exposureStops` - see `resolveExposureMultiplier`. */
   toneMappingExposure: number;
+  /**
+   * Prefilters a raw equirectangular texture (see `EnvironmentRegistry`)
+   * into a PMREM environment map (a mipmap chain pre-blurred per roughness
+   * level) usable as `scene.environment`/`scene.background`, via this
+   * backend's own `PMREMGenerator`. Each backend has a structurally
+   * different `PMREMGenerator` (classic `THREE.PMREMGenerator` needs a
+   * `WebGLRenderer`; `three/webgpu`'s own needs its own `Renderer` base
+   * type), so this method exists specifically so `ThreeRenderer.renderFrame`
+   * never needs to know which one is actually in play - exactly the same
+   * reason `toneMappingExposure` is a plain property here rather than a
+   * `renderer instanceof WebGPURenderer` check at every call site.
+   */
+  createEnvironmentMap: (equirectangular: THREE.Texture) => THREE.Texture;
 }
 
 /** Constructs the underlying Three.js renderer for a given backend and target. */
@@ -131,13 +150,37 @@ function ensureWebGpuAreaLightSupport(): void {
   webGpuInternals.RectAreaLightNode?.setLTC(RectAreaLightTexturesLib.init());
 }
 
+/**
+ * Wraps `renderer` with a `createEnvironmentMap` implementation backed by
+ * `pmremGenerator`, and augments `dispose` to also free the generator's own
+ * GPU resources - `PMREMGenerator.dispose()` is a real, required cleanup
+ * step (see its own `@types/three` doc), not covered by the underlying
+ * renderer's own `dispose()` at all, since the generator is a separate
+ * object this module constructs alongside the renderer, not owned by it.
+ */
+function withEnvironmentMapSupport(
+  renderer: THREE.WebGLRenderer | WebGPURenderer,
+  pmremGenerator: { fromEquirectangular(texture: THREE.Texture): { texture: THREE.Texture }; dispose(): void },
+): ThreeRendererLike {
+  const originalDispose = renderer.dispose.bind(renderer);
+  return Object.assign(renderer, {
+    createEnvironmentMap(equirectangular: THREE.Texture): THREE.Texture {
+      return pmremGenerator.fromEquirectangular(equirectangular).texture;
+    },
+    dispose(): void {
+      pmremGenerator.dispose();
+      originalDispose();
+    },
+  });
+}
+
 /** The real WebGPU constructor path: `three/webgpu`'s `WebGPURenderer`, canvas passed via `canvas`. */
 function createRealWebGpuRenderer(target: RenderTarget, _size: RenderSize): ThreeRendererLike {
   ensureWebGpuAreaLightSupport();
   const parameters: WebGPURendererParameters = { canvas: target };
   const renderer = new WebGPURenderer(parameters);
   applyColorWorkflowDefaults(renderer);
-  return renderer;
+  return withEnvironmentMapSupport(renderer, new WebGPUPMREMGenerator(renderer));
 }
 
 /** The real WebGL2 fallback path: the classic `THREE.WebGLRenderer`, also driven off `canvas`. */
@@ -145,7 +188,7 @@ function createRealWebGl2Renderer(target: RenderTarget, _size: RenderSize): Thre
   ensureWebGl2AreaLightSupport();
   const renderer = new THREE.WebGLRenderer({ canvas: target });
   applyColorWorkflowDefaults(renderer);
-  return renderer;
+  return withEnvironmentMapSupport(renderer, new THREE.PMREMGenerator(renderer));
 }
 
 /** The dependency set a `Renderer` uses when no overrides are supplied, i.e. real Three.js. */
@@ -260,6 +303,7 @@ function findActiveCamera(
  */
 export class ThreeRenderer implements Renderer {
   private readonly deps: ThreeRendererDependencies;
+  private readonly environmentRegistry: EnvironmentRegistry;
   private threeRenderer: ThreeRendererLike | undefined;
   private resolvedBackend: RendererBackend | undefined;
   private wasFallback = false;
@@ -301,8 +345,33 @@ export class ThreeRenderer implements Renderer {
    */
   private lastUsedCamera: THREE.Camera | undefined;
 
-  constructor(deps: ThreeRendererDependencies = defaultThreeRendererDependencies) {
+  /**
+   * The currently-applied image-based lighting environment: which
+   * `envMapRef` it was prefiltered from, and the prefiltered (PMREM) result
+   * itself. `undefined` when no `SceneState.environment` has been applied
+   * yet, or the most recent one resolved to nothing. Re-prefiltering is
+   * real GPU work (a render pass per roughness mip level), so this is
+   * cached and only recomputed when `envMapRef` actually changes across
+   * `renderFrame` calls - `rotation`/`intensity`/`showBackground` are pure
+   * `THREE.Scene` properties applied fresh every call (see `applyEnvironment`
+   * below) and never invalidate this cache on their own.
+   */
+  private cachedEnvironment: { ref: string; prefiltered: THREE.Texture } | undefined;
+  /**
+   * The grounded-skybox mesh currently added to `this.scene`, when
+   * `SceneState.environment.groundProjection` is set. `undefined` when no
+   * ground projection is active. Tracked so a later `renderFrame` call can
+   * remove/replace it (its geometry is fixed at construction time, so a
+   * changed `height`/`radius` needs a fresh instance, not a mutation).
+   */
+  private groundedSkybox: GroundedSkybox | undefined;
+
+  constructor(
+    deps: ThreeRendererDependencies = defaultThreeRendererDependencies,
+    environmentRegistry: EnvironmentRegistry = createDefaultEnvironmentRegistry(),
+  ) {
     this.deps = deps;
+    this.environmentRegistry = environmentRegistry;
     this.defaultCamera.position.set(0, 0, 5);
   }
 
@@ -334,6 +403,8 @@ export class ThreeRenderer implements Renderer {
       colorGrading?.whiteBalanceTemperatureK ?? 6500,
       colorGrading?.whiteBalanceTint ?? 0,
     );
+
+    this.applyEnvironment(renderer, sceneState.environment);
 
     const wrapperRoot = buildSceneStateRoot(sceneState);
     const reconciled = this.reconciler.reconcile(wrapperRoot, frameContext.frame, whiteBalanceGain);
@@ -370,6 +441,90 @@ export class ThreeRenderer implements Renderer {
     renderer.render(this.scene, camera);
   }
 
+  /**
+   * Applies (or clears) `environment` onto `this.scene`: resolves
+   * `envMapRef` against `this.environmentRegistry`, prefilters it (cached;
+   * see `cachedEnvironment`'s own doc), and sets `scene.environment`/
+   * `.background` plus rotation/intensity every call. `environment ===
+   * undefined` clears everything and disposes the cached prefiltered
+   * texture - a composition with no `environment` renders exactly as it did
+   * before Phase 56.
+   */
+  private applyEnvironment(renderer: ThreeRendererLike, environment: CompositionEnvironment | undefined): void {
+    if (environment === undefined) {
+      this.clearCachedEnvironment();
+      this.removeGroundedSkybox();
+      return;
+    }
+
+    if (this.cachedEnvironment?.ref !== environment.envMapRef) {
+      const equirectangular = this.environmentRegistry.resolve(environment.envMapRef);
+      this.cachedEnvironment?.prefiltered.dispose();
+      this.cachedEnvironment =
+        equirectangular !== undefined
+          ? { ref: environment.envMapRef, prefiltered: renderer.createEnvironmentMap(equirectangular) }
+          : undefined;
+    }
+
+    const prefiltered = this.cachedEnvironment?.prefiltered ?? null;
+    this.scene.environment = prefiltered;
+    this.scene.background = environment.showBackground ? prefiltered : null;
+    this.scene.environmentRotation.set(0, environment.rotation ?? 0, 0);
+    this.scene.backgroundRotation.set(0, environment.rotation ?? 0, 0);
+    this.scene.environmentIntensity = environment.intensity ?? 1;
+    this.scene.backgroundIntensity = environment.backgroundIntensity ?? 1;
+
+    this.applyGroundedSkybox(environment.groundProjection, prefiltered);
+  }
+
+  /** Disposes and clears `this.cachedEnvironment`, and blanks `scene.environment`/`.background`. Safe to call when there is nothing cached (a no-op). */
+  private clearCachedEnvironment(): void {
+    if (this.cachedEnvironment === undefined) {
+      return;
+    }
+    this.cachedEnvironment.prefiltered.dispose();
+    this.cachedEnvironment = undefined;
+    this.scene.environment = null;
+    this.scene.background = null;
+  }
+
+  /**
+   * Adds, replaces, or removes `this.groundedSkybox` to match `projection`.
+   * A `GroundedSkybox`'s own geometry is fixed at construction time (see its
+   * own constructor signature), so a changed `height`/`radius` needs a fresh
+   * instance rather than a mutation - this always rebuilds when `projection`
+   * is present, which is cheap relative to the PMREM prefiltering that
+   * already happened to produce `prefiltered`. Positioned at `y =
+   * projection.height`, `GroundedSkybox`'s own documented convention for
+   * making its projected ground plane land at world Y `0` (see
+   * `EnvironmentGroundProjection.height`'s own doc).
+   */
+  private applyGroundedSkybox(
+    projection: CompositionEnvironment["groundProjection"],
+    prefiltered: THREE.Texture | null,
+  ): void {
+    if (projection === undefined || prefiltered === null) {
+      this.removeGroundedSkybox();
+      return;
+    }
+
+    this.removeGroundedSkybox();
+    this.groundedSkybox = new GroundedSkybox(prefiltered, projection.height, projection.radius ?? 100);
+    this.groundedSkybox.position.y = projection.height;
+    this.scene.add(this.groundedSkybox);
+  }
+
+  /** Removes and disposes `this.groundedSkybox`, if one is currently added. Safe to call when there is none (a no-op). */
+  private removeGroundedSkybox(): void {
+    if (this.groundedSkybox === undefined) {
+      return;
+    }
+    this.scene.remove(this.groundedSkybox);
+    this.groundedSkybox.geometry.dispose();
+    this.groundedSkybox.material.dispose();
+    this.groundedSkybox = undefined;
+  }
+
   resize(size: RenderSize): void {
     const renderer = this.requireInitialized();
     // `updateStyle: false`: touching `.style` would throw on an
@@ -378,6 +533,8 @@ export class ThreeRenderer implements Renderer {
   }
 
   dispose(): void {
+    this.clearCachedEnvironment();
+    this.removeGroundedSkybox();
     this.requireInitialized().dispose();
   }
 
