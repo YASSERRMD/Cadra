@@ -93,3 +93,111 @@ body {
 .cadra-studio-panel__label {
   font-size: 0.85rem;
 }
+
+/*
+ * Phase 38's real, interactive timeline. `.cadra-studio-timeline__content`
+ * is rendered exactly `durationInFrames * pixelsPerFrame` pixels wide (set
+ * inline by TimelinePanel.tsx, not here) inside
+ * `.cadra-studio-timeline__scroll-area`'s native `overflow-x: auto`: this is
+ * what makes horizontal scrolling the browser's own scrollbar behavior
+ * rather than a hand-rolled one. Every clip/playhead position within it is
+ * `position: absolute`, with `left`/`width` set inline per-element from the
+ * pixel/frame math in `../timeline/timeline-math.ts`.
+ */
+.cadra-studio-timeline {
+  height: 200px;
+  flex-shrink: 0;
+  border-top: 1px solid #3a3a3a;
+  background: #262626;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cadra-studio-timeline__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  border-bottom: 1px solid #3a3a3a;
+  flex-shrink: 0;
+}
+
+.cadra-studio-timeline__zoom-readout {
+  font-size: 0.75rem;
+  color: #888;
+}
+
+.cadra-studio-timeline__scroll-area {
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: auto;
+  position: relative;
+}
+
+.cadra-studio-timeline__content {
+  position: relative;
+  min-width: 100%;
+}
+
+.cadra-studio-timeline__ruler {
+  height: 20px;
+  position: relative;
+  border-bottom: 1px solid #3a3a3a;
+  cursor: pointer;
+}
+
+.cadra-studio-timeline__playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #ff6b6b;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.cadra-studio-timeline__track {
+  position: relative;
+  border-bottom: 1px solid #333;
+}
+
+.cadra-studio-timeline__clip {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  background: #3a5a8a;
+  border: 1px solid #4a7ac0;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  cursor: grab;
+  user-select: none;
+}
+
+.cadra-studio-timeline__clip-label {
+  font-size: 0.7rem;
+  color: #e0e0e0;
+  padding: 0 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.cadra-studio-timeline__clip-trim-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.cadra-studio-timeline__clip-trim-handle--left {
+  left: 0;
+}
+
+.cadra-studio-timeline__clip-trim-handle--right {
+  right: 0;
+}
