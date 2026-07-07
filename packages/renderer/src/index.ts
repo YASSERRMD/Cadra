@@ -65,6 +65,14 @@
  * even though its *implementation* imports the real, internal `ThreeRenderer`
  * class to do the actual work; see that module's own doc for the full
  * boundary rationale.
+ *
+ * `./picking` additively exports `pickNodeAtPoint` (Phase 40), the inverse
+ * lookup a viewport's own click-to-select handler needs: given a point in
+ * normalized device coordinates, raycasts into the renderer's live scene and
+ * returns the `SceneNode.id` of whatever was hit (or `undefined`), using the
+ * same `Object3D.name`-by-id tagging `attachTransformGizmo` relies on. Same
+ * Three.js-free exported signature, same internal `ThreeRenderer`-narrowing
+ * implementation.
  */
 
 export const VERSION = "0.0.0";
@@ -104,6 +112,11 @@ export type {
   TransformGizmoMode,
 } from "./gizmo/attach-transform-gizmo.js";
 export { attachTransformGizmo } from "./gizmo/attach-transform-gizmo.js";
+export type {
+  NormalizedDeviceCoordinates,
+  PickNodeAtPointOptions,
+} from "./picking/pick-node-at-point.js";
+export { pickNodeAtPoint } from "./picking/pick-node-at-point.js";
 export type { PixelBuffer, PixelReadableRenderer } from "./pixel-readable-renderer.js";
 export type {
   CreatePixelReadableRendererOptions,
