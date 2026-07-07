@@ -1,5 +1,6 @@
-import type { ObserveResizeFn } from "@cadra/player";
+import type { ObserveResizeFn, PreviewHandle } from "@cadra/player";
 import type { JSX } from "react";
+import { useState } from "react";
 
 import { AssetPanel } from "./components/AssetPanel.js";
 import { InspectorPanel } from "./components/InspectorPanel.js";
@@ -36,6 +37,18 @@ export interface AppProps {
  * main central area (usually upper), a full-width timeline along the
  * bottom, a media/asset panel in a left sidebar, and tool/property
  * (inspector) panels in a right sidebar.
+ *
+ * Shared preview handle (Phase 38): `App` is where `Viewport`'s
+ * `PreviewHandle` (see that component's own doc for why it can no longer
+ * stay entirely private to `Viewport`) is lifted into a plain `useState`,
+ * via `Viewport`'s `onHandleChange` callback, and passed down to
+ * `TimelinePanel` as a prop. This is a small, explicit "lift state up to the
+ * nearest common ancestor and pass it down as props" - the same
+ * store-reading/prop-passing style already used for every other piece of
+ * state this component threads to its children - rather than a new React
+ * context, since there is exactly one consumer pair (`Viewport`,
+ * `TimelinePanel`) and no deeper prop-drilling problem a context would
+ * actually solve here.
  */
 export function App({
   useStore = useDocumentStore,
@@ -51,6 +64,11 @@ export function App({
   const newDocument = useStore((state) => state.newDocument);
   const openDocument = useStore((state) => state.openDocument);
   const saveDocument = useStore((state) => state.saveDocument);
+  const commitDocument = useStore((state) => state.commitDocument);
+  const undo = useStore((state) => state.undo);
+  const redo = useStore((state) => state.redo);
+
+  const [previewHandle, setPreviewHandle] = useState<PreviewHandle | undefined>(undefined);
 
   return (
     <div className="cadra-studio-shell">
@@ -69,10 +87,18 @@ export function App({
           <Viewport
             document={document}
             selectedCompositionId={selectedCompositionId}
+            onHandleChange={setPreviewHandle}
             {...(createRenderer !== undefined && { createRenderer })}
             {...(observeResize !== undefined && { observeResize })}
           />
-          <TimelinePanel />
+          <TimelinePanel
+            document={document}
+            selectedCompositionId={selectedCompositionId}
+            commitDocument={commitDocument}
+            previewHandle={previewHandle}
+            onUndo={undo}
+            onRedo={redo}
+          />
         </div>
         <InspectorPanel />
       </div>
