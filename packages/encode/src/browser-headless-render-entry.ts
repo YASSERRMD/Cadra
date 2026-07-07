@@ -131,8 +131,13 @@ export interface BrowserHeadlessRenderRangeConfig {
  * frame of a render calls `getImageData` on it (the exact repeated-readback
  * pattern that hint exists for), avoiding a GPU-to-CPU sync stall on every
  * frame that a default GPU-backed 2D context would otherwise incur.
+ *
+ * Exported (not just called locally) so this exact function is directly
+ * reachable off the bundled entry's `window[BROWSER_ENTRY_GLOBAL_NAME]` for
+ * this module's own regression test, which feeds it synthetic frames
+ * directly rather than driving a full render/encode/mux pass.
  */
-function createRealReadPixels(): (
+export function createRealReadPixels(): (
   target: HTMLCanvasElement | OffscreenCanvas,
   size: { width: number; height: number },
 ) => Promise<PixelBuffer> {
@@ -154,6 +159,17 @@ function createRealReadPixels(): (
       snapshotCanvas.height = size.height;
     }
 
+    // The snapshot canvas is reused across every frame of a render (only
+    // resized, never recreated), and a resize to the *same* size (the
+    // common case once past frame 0) leaves its old pixel content in
+    // place. `target` itself is not guaranteed fully opaque (a WebGL/WebGPU
+    // render target commonly clears to transparent, with only actual
+    // geometry opaque), so an uncleared `drawImage` composites each new
+    // frame's transparent regions over the *previous* frame's opaque
+    // pixels instead of replacing them, accumulating stale geometry frame
+    // over frame. Clearing first guarantees this frame's readback reflects
+    // only `target`'s own current content.
+    snapshotContext.clearRect(0, 0, size.width, size.height);
     // `target` is `HTMLCanvasElement | OffscreenCanvas`; both are valid
     // CanvasImageSource drawImage() arguments.
     snapshotContext.drawImage(target as CanvasImageSource, 0, 0);
