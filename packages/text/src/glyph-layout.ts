@@ -1,5 +1,6 @@
-import type { MsdfAtlas } from "./msdf-atlas.js";
-import type { ShapedTextRun } from "./shaped-run.js";
+import type { MsdfAtlas, MsdfGlyphPlacement } from "./msdf-atlas.js";
+import type { ShapedGlyph, ShapedTextRun } from "./shaped-run.js";
+import { isWhitespaceChar } from "./whitespace.js";
 
 /**
  * One glyph positioned in world-independent "em" space (1 unit = 1 em; a
@@ -42,7 +43,83 @@ export interface GlyphLayoutOptions {
   lineHeight?: number;
 }
 
-const WHITESPACE_PATTERN = /\s/;
+/** The atlas lookup structures `placeGlyphQuad` needs, precomputed once per layout call rather than per glyph. */
+export interface GlyphAtlasLookup {
+  placementsByGlyphId: ReadonlyMap<number, MsdfGlyphPlacement>;
+  pageDimensionsByIndex: readonly { width: number; height: number }[];
+}
+
+/** Builds a `GlyphAtlasLookup` from an `MsdfAtlas`, once per layout call. */
+export function buildGlyphAtlasLookup(atlas: MsdfAtlas): GlyphAtlasLookup {
+  return {
+    placementsByGlyphId: new Map(atlas.glyphs.map((placement) => [placement.glyphId, placement])),
+    pageDimensionsByIndex: atlas.pages.map((page) => ({ width: page.width, height: page.height })),
+  };
+}
+
+/** One glyph's atlas-derived placement, everything `PositionedGlyph` needs beyond what its caller already knows (glyph id, cluster, line/word index). */
+export interface GlyphQuadPlacement {
+  origin: { x: number; y: number };
+  quad: { left: number; right: number; bottom: number; top: number };
+  page: number;
+  uv: { u0: number; v0: number; u1: number; v1: number };
+}
+
+/**
+ * Places one shaped glyph's quad at pen position `(penX, penY)` (already in
+ * em units), looking up its MSDF atlas placement via `lookup`. Returns
+ * `undefined` for a glyph with no visual bitmap (e.g. a space): it still
+ * exists in shaped output to advance the pen, but contributes no quad.
+ *
+ * Shared by `computeGlyphLayout` (single explicit lines, Phase 44) and the
+ * paragraph layout engine (`paragraph-layout.ts`, Phase 45), which need the
+ * same atlas-to-em-space quad math but walk the pen differently (the latter
+ * also applies per-line alignment offsets and per-gap justification spacing),
+ * so this is the one place that math is implemented.
+ */
+export function placeGlyphQuad(
+  glyph: ShapedGlyph,
+  penX: number,
+  penY: number,
+  lookup: GlyphAtlasLookup,
+  unitsPerEm: number,
+): GlyphQuadPlacement | undefined {
+  const originX = penX + glyph.xOffset / unitsPerEm;
+  const originY = penY + glyph.yOffset / unitsPerEm;
+
+  const placement = lookup.placementsByGlyphId.get(glyph.glyphId);
+  if (placement === undefined || placement.width <= 0 || placement.height <= 0) {
+    return undefined;
+  }
+
+  const pageDimensions = lookup.pageDimensionsByIndex[placement.page] ?? { width: 1, height: 1 };
+  // `placement.scale` is the MSDF atlas's own pixels-per-em factor for this
+  // glyph (msdfgen-wasm's `computeGlpyhMsdfData` sets it to exactly the
+  // atlas generation's `size` option), so pixel-space placement converts to
+  // em units without this module needing to know or re-derive what font
+  // size the atlas was generated at.
+  const quadWidth = placement.width / placement.scale;
+  const quadHeight = placement.height / placement.scale;
+  const quadLeft = originX - placement.xTranslate;
+  const quadBottom = originY - placement.yTranslate;
+
+  return {
+    origin: { x: originX, y: originY },
+    quad: {
+      left: quadLeft,
+      right: quadLeft + quadWidth,
+      bottom: quadBottom,
+      top: quadBottom + quadHeight,
+    },
+    page: placement.page,
+    uv: {
+      u0: placement.x / pageDimensions.width,
+      v0: placement.y / pageDimensions.height,
+      u1: (placement.x + placement.width) / pageDimensions.width,
+      v1: (placement.y + placement.height) / pageDimensions.height,
+    },
+  };
+}
 
 /**
  * Computes where every glyph of `shapedLines` (one `shapeText` result per
@@ -58,8 +135,7 @@ export function computeGlyphLayout(
   atlas: MsdfAtlas,
   options: GlyphLayoutOptions,
 ): GlyphLayoutResult {
-  const placementsByGlyphId = new Map(atlas.glyphs.map((placement) => [placement.glyphId, placement]));
-  const pageDimensionsByIndex = atlas.pages.map((page) => ({ width: page.width, height: page.height }));
+  const lookup = buildGlyphAtlasLookup(atlas);
   const lineHeight = options.lineHeight ?? atlas.metrics.lineHeight;
 
   const glyphs: PositionedGlyph[] = [];
@@ -72,10 +148,7 @@ export function computeGlyphLayout(
 
     for (const run of lineRuns) {
       for (const glyph of run.glyphs) {
-        const originX = penX + glyph.xOffset / options.unitsPerEm;
-        const originY = penY + glyph.yOffset / options.unitsPerEm;
-
-        const isWhitespaceCluster = WHITESPACE_PATTERN.test(charAtClusterStart(run, glyph.cluster));
+        const isWhitespaceCluster = isWhitespaceChar(charAtClusterStart(run, glyph.cluster));
         if (isWhitespaceCluster) {
           inWord = false;
         } else {
@@ -85,38 +158,14 @@ export function computeGlyphLayout(
           inWord = true;
         }
 
-        const placement = placementsByGlyphId.get(glyph.glyphId);
-        if (placement !== undefined && placement.width > 0 && placement.height > 0) {
-          const pageDimensions = pageDimensionsByIndex[placement.page] ?? { width: 1, height: 1 };
-          // `placement.scale` is the MSDF atlas's own pixels-per-em factor
-          // for this glyph (msdfgen-wasm's `computeGlpyhMsdfData` sets it to
-          // exactly the atlas generation's `size` option), so pixel-space
-          // placement converts to em units without this module needing to
-          // know or re-derive what font size the atlas was generated at.
-          const quadWidth = placement.width / placement.scale;
-          const quadHeight = placement.height / placement.scale;
-          const quadLeft = originX - placement.xTranslate;
-          const quadBottom = originY - placement.yTranslate;
-
+        const placed = placeGlyphQuad(glyph, penX, penY, lookup, options.unitsPerEm);
+        if (placed !== undefined) {
           glyphs.push({
             glyphId: glyph.glyphId,
             cluster: glyph.cluster,
             lineIndex,
             wordIndex: Math.max(wordIndex, 0),
-            origin: { x: originX, y: originY },
-            quad: {
-              left: quadLeft,
-              right: quadLeft + quadWidth,
-              bottom: quadBottom,
-              top: quadBottom + quadHeight,
-            },
-            page: placement.page,
-            uv: {
-              u0: placement.x / pageDimensions.width,
-              v0: placement.y / pageDimensions.height,
-              u1: (placement.x + placement.width) / pageDimensions.width,
-              v1: (placement.y + placement.height) / pageDimensions.height,
-            },
+            ...placed,
           });
         }
 
@@ -129,7 +178,7 @@ export function computeGlyphLayout(
   return { glyphs, lineCount: shapedLines.length };
 }
 
-/** Looks up the source character a glyph's cluster starts at, to classify whitespace for word grouping. */
-function charAtClusterStart(run: ShapedTextRun, cluster: number): string {
+/** Looks up the source character a glyph's cluster starts at, to classify whitespace for word grouping. Exported for reuse by `paragraph-words.ts`, which needs the identical rule to agree on word boundaries. */
+export function charAtClusterStart(run: Pick<ShapedTextRun, "text" | "start">, cluster: number): string {
   return run.text[cluster - run.start] ?? "";
 }
