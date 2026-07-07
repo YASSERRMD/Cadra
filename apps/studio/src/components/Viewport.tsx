@@ -10,8 +10,7 @@ import {
 import type { JSX } from "react";
 import { useEffect, useRef } from "react";
 
-import { findSelectedClip } from "../inspector/find-selected-clip.js";
-import { replaceNodeInDocument } from "../store/document-edits.js";
+import { commitNodeTransform } from "../store/document-edits.js";
 import type { DocumentStoreState } from "../store/document-store.js";
 
 /** Constructs a `Renderer`, matching `@cadra/renderer`'s own `createRenderer()` signature. */
@@ -77,10 +76,10 @@ export interface ViewportProps {
    * The store's `commitDocument` funnel. The transform gizmo's own
    * `onTransformChange` callback (see `attachTransformGizmo` in
    * `@cadra/renderer`) calls this exactly once per completed drag gesture,
-   * with a candidate `SceneDocument` built via `replaceNodeInDocument` (the
-   * exact same "splice this one node's new value back into the document"
-   * helper `InspectorPanel`'s own property edits already use) - never a
-   * second, parallel way of mutating `document`.
+   * via `commitNodeTransform` (`../store/document-edits.js`) - the exact
+   * same "splice this one node's new value back into the document, via
+   * `replaceNodeInDocument`" shape `InspectorPanel`'s own property edits
+   * already use - never a second, parallel way of mutating `document`.
    */
   commitDocument?: (candidate: unknown) => boolean;
 }
@@ -323,29 +322,22 @@ export function Viewport({
 
     /**
      * Commits one completed drag's final `Transform` back through
-     * `commitDocument`, reading the *latest* `document`/`commitDocument` via
-     * the refs above (not this effect's own closed-over `document`/
-     * `commitDocument` props, which could be stale by the time a drag
-     * actually ends). A no-op if `commitDocument` was never supplied, or if
-     * `selectedNodeId` no longer resolves to any node in the latest
-     * document (e.g. it was deleted by an edit that landed while this gizmo
-     * was attached): `findSelectedClip` returning `undefined` covers both of
-     * `replaceNodeInDocument`'s own thrown-error preconditions, so this
-     * checks for that itself rather than let a stale selection's edit throw.
+     * `commitDocument`, via `commitNodeTransform` (see that function's own
+     * doc in `../store/document-edits.js` for why it is a standalone,
+     * exported function rather than staying inline here: the same splice
+     * this app's own convergence test calls directly, proving a gizmo edit
+     * and a DSL panel edit commit identical documents). Reads the *latest*
+     * `document`/`commitDocument` via the refs above (not this effect's own
+     * closed-over `document`/`commitDocument` props, which could be stale by
+     * the time a drag actually ends): a no-op if `commitDocument` was never
+     * supplied.
      */
     function commitTransform(transform: Transform): void {
-      const currentDocument = latestDocumentRef.current;
       const currentCommitDocument = latestCommitDocumentRef.current;
       if (currentCommitDocument === undefined) {
         return;
       }
-      const match = findSelectedClip(currentDocument, nodeId);
-      if (match === undefined) {
-        return;
-      }
-      const nextNode = { ...match.node, transform };
-      const candidate = replaceNodeInDocument(currentDocument, match, nextNode);
-      currentCommitDocument(candidate);
+      commitNodeTransform(latestDocumentRef.current, nodeId, transform, currentCommitDocument);
     }
 
     function tryAttach(): void {
