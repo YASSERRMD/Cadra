@@ -26,6 +26,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import type { ContentHash } from "@cadra/core";
+import { hashAssetBytes } from "@cadra/core";
 
 /** Subdirectory under `workspaceRoot` asset files are persisted in. */
 const ASSETS_SUBDIRECTORY = "assets";
@@ -118,12 +119,17 @@ function extensionFromUrl(sourceUrl: string): string | undefined {
  * Mirrors `scene-store.ts`'s `sanitizeSceneId` structure exactly, applied to
  * this module's own narrower "just an extension" path segment.
  */
-export function sanitizeAssetExtension(extension: string): { valid: true; extension: string } | { valid: false; reason: string } {
+export function sanitizeAssetExtension(
+  extension: string,
+): { valid: true; extension: string } | { valid: false; reason: string } {
   if (extension.length === 0) {
     return { valid: false, reason: "Extension must not be empty." };
   }
   if (extension.length > MAX_EXTENSION_LENGTH) {
-    return { valid: false, reason: `Extension must be at most ${MAX_EXTENSION_LENGTH} characters long.` };
+    return {
+      valid: false,
+      reason: `Extension must be at most ${MAX_EXTENSION_LENGTH} characters long.`,
+    };
   }
   if (!VALID_EXTENSION_PATTERN.test(extension)) {
     return {
@@ -142,8 +148,12 @@ export function sanitizeAssetExtension(extension: string): { valid: true; extens
  * not is silently replaced with the default instead of ever propagating an
  * unsafe value into a filename).
  */
-export function resolveAssetExtension(contentType: string | undefined, sourceUrl: string | undefined): string {
-  const fromContentType = contentType !== undefined ? CONTENT_TYPE_EXTENSIONS[contentType.toLowerCase()] : undefined;
+export function resolveAssetExtension(
+  contentType: string | undefined,
+  sourceUrl: string | undefined,
+): string {
+  const fromContentType =
+    contentType !== undefined ? CONTENT_TYPE_EXTENSIONS[contentType.toLowerCase()] : undefined;
   const fromUrl = sourceUrl !== undefined ? extensionFromUrl(sourceUrl) : undefined;
   const candidate = fromContentType ?? fromUrl ?? DEFAULT_ASSET_EXTENSION;
 
@@ -168,7 +178,9 @@ function resolveAssetFilePath(workspaceRoot: string, hash: ContentHash, extensio
   const filePath = resolve(assetsDirectory, `${hash}.${extension}`);
 
   if (filePath !== join(assetsDirectory, `${hash}.${extension}`)) {
-    throw new Error(`Refusing to resolve asset hash "${hash}" to a path outside the assets directory.`);
+    throw new Error(
+      `Refusing to resolve asset hash "${hash}" to a path outside the assets directory.`,
+    );
   }
 
   return filePath;
@@ -180,7 +192,9 @@ function resolveAssetMetaFilePath(workspaceRoot: string, hash: ContentHash): str
   const filePath = resolve(assetsDirectory, `${hash}${ASSET_META_SUFFIX}`);
 
   if (filePath !== join(assetsDirectory, `${hash}${ASSET_META_SUFFIX}`)) {
-    throw new Error(`Refusing to resolve asset hash "${hash}" to a metadata path outside the assets directory.`);
+    throw new Error(
+      `Refusing to resolve asset hash "${hash}" to a metadata path outside the assets directory.`,
+    );
   }
 
   return filePath;
@@ -253,8 +267,78 @@ export async function writeAssetFile(
   return fullMetadata;
 }
 
+/**
+ * Fetches `sourceUrl` with Node's built-in `fetch` and returns its bytes
+ * plus, if present, its response's own `Content-Type` header (stripped of
+ * any `; charset=...` parameter, since {@link resolveAssetExtension}'s
+ * lookup table is keyed on the bare MIME type).
+ *
+ * Extracted as its own function so both `upload_asset`
+ * (`./asset-tools.ts`) and any other caller ingesting a URL into this same
+ * durable, content-addressed store (e.g. `./generation-asset-binding.ts`,
+ * binding a finished generation job's `outputUrl` onto a scene node) fetch
+ * bytes exactly the same way, rather than one of them re-implementing this
+ * URL-to-bytes step independently.
+ */
+async function fetchBytesFromUrl(
+  sourceUrl: string,
+): Promise<{ bytes: Uint8Array; contentType: string | undefined }> {
+  const response = await fetch(sourceUrl);
+  if (!response.ok) {
+    throw new Error(`Fetching "${sourceUrl}" failed with status ${response.status}.`);
+  }
+  const arrayBuffer = await response.arrayBuffer();
+  const rawContentType = response.headers.get("content-type") ?? undefined;
+  const contentType = rawContentType?.split(";")[0]?.trim();
+  return { bytes: new Uint8Array(arrayBuffer), contentType };
+}
+
+/**
+ * Ingests `sourceUrl` into this workspace's durable, content-addressed asset
+ * store in one step: fetches its bytes ({@link fetchBytesFromUrl}), hashes
+ * them (`@cadra/core`'s `hashAssetBytes`, this codebase's sole standardized
+ * content-hashing primitive), derives a safe extension
+ * ({@link resolveAssetExtension}), and persists them ({@link writeAssetFile}),
+ * deduplicating automatically exactly like every other write through this
+ * module.
+ *
+ * This is the one real "ingest a URL into the asset store" code path in this
+ * package: `upload_asset`'s "by URL" tool input (`./asset-tools.ts`) calls
+ * this directly rather than duplicating the fetch/hash/extension/write
+ * sequence, and `./generation-asset-binding.ts` (Phase 36) calls it too, to
+ * turn a finished generation job's vendor-hosted `outputUrl` into a real,
+ * durable `cadra-asset://<hash>` ref the same way a human-uploaded URL
+ * becomes one.
+ *
+ * `contentType`, if given, overrides whatever the URL response's own
+ * `Content-Type` header reports (matching `upload_asset`'s own precedence);
+ * omit it to trust the response header (falling back to sniffing
+ * `sourceUrl`'s own extension, then a generic default, if the response has
+ * no `Content-Type` either).
+ */
+export async function ingestAssetFromUrl(
+  workspaceRoot: string,
+  sourceUrl: string,
+  contentType?: string,
+): Promise<StoredAssetSummary> {
+  const fetched = await fetchBytesFromUrl(sourceUrl);
+  const resolvedContentType = contentType ?? fetched.contentType;
+  const hash = hashAssetBytes(fetched.bytes);
+  const extension = resolveAssetExtension(resolvedContentType, sourceUrl);
+
+  const metadata = await writeAssetFile(workspaceRoot, hash, extension, fetched.bytes, {
+    ...(resolvedContentType !== undefined ? { contentType: resolvedContentType } : {}),
+    sourceUrl,
+  });
+
+  return { ...metadata, assetRef: buildAssetRef(metadata.hash) };
+}
+
 /** Reads back `hash`'s metadata sidecar, or `undefined` if no asset with this hash has been stored yet. Does not read the asset's own bytes; see {@link readAssetBytes} for that. */
-export async function readAssetMetadata(workspaceRoot: string, hash: ContentHash): Promise<AssetMetadata | undefined> {
+export async function readAssetMetadata(
+  workspaceRoot: string,
+  hash: ContentHash,
+): Promise<AssetMetadata | undefined> {
   const assetsDirectory = resolve(workspaceRoot, ASSETS_SUBDIRECTORY);
 
   let entries;
@@ -284,7 +368,10 @@ export async function readAssetMetadata(workspaceRoot: string, hash: ContentHash
  * sidecar first (an asset's own extension is not otherwise derivable from
  * its hash alone).
  */
-export async function readAssetBytes(workspaceRoot: string, hash: ContentHash): Promise<Uint8Array | undefined> {
+export async function readAssetBytes(
+  workspaceRoot: string,
+  hash: ContentHash,
+): Promise<Uint8Array | undefined> {
   const metadata = await readAssetMetadata(workspaceRoot, hash);
   if (metadata === undefined) {
     return undefined;
@@ -348,4 +435,3 @@ function isNotFoundError(error: unknown): boolean {
     (error as { code: unknown }).code === "ENOENT"
   );
 }
-

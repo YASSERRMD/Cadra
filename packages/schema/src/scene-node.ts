@@ -9,6 +9,7 @@ import type {
   SceneNode,
   SceneNodeKind,
   TextNode,
+  VideoBlendMode,
   VideoFitMode,
   VideoNode,
   VideoOutOfRangeBehavior,
@@ -101,6 +102,23 @@ export const videoOutOfRangeBehaviorSchema = z
 
 type _CheckVideoOutOfRangeBehavior = AssertTrue<
   AssertEqual<z.infer<typeof videoOutOfRangeBehaviorSchema>, VideoOutOfRangeBehavior>
+>;
+
+/**
+ * How a video node's pixels combine with whatever composites beneath it,
+ * mirroring `VideoBlendMode`. See `VideoBlendMode`'s own doc comment in
+ * `@cadra/core` for what each keyword means.
+ */
+export const videoBlendModeSchema = z
+  .enum(["normal", "add", "multiply", "screen"])
+  .describe(
+    "How this video layer's pixels combine with whatever renders beneath it, mirroring a " +
+      "small subset of the CSS/Canvas blend-mode keywords of the same names. Defaults to 'normal' " +
+      "(plain alpha compositing).",
+  );
+
+type _CheckVideoBlendMode = AssertTrue<
+  AssertEqual<z.infer<typeof videoBlendModeSchema>, VideoBlendMode>
 >;
 
 /** A plain container node. Groups exist only to organize their children. */
@@ -294,11 +312,17 @@ type _CheckImageNode = AssertTrue<AssertEqual<z.infer<typeof imageNodeSchema>, I
 /**
  * An external video file placed as a layer, mirroring `VideoNode` in
  * `@cadra/core`. `assetRef` is resolved against an asset registry, exactly
- * like `imageNodeSchema.assetRef`.
+ * like `imageNodeSchema.assetRef`; it may also (transiently, until an
+ * `@cadra/mcp-server` caller binds it) hold a `cadra-generation://<slotId>`
+ * placeholder ref instead of a real one, per `VideoNode.assetRef`'s own doc.
  *
  * `opacity` accepts either a plain value or a keyframe track, via
  * `propertySchema` (mirroring `Property<number>` on `VideoNode`), same as
- * every other Phase 26 keyframeable field on other node kinds.
+ * every other Phase 26 keyframeable field on other node kinds. `blendMode`
+ * and `maskRef` (Phase 36) are plain, non-keyframeable optional fields,
+ * mirroring `VideoNode.blendMode`/`VideoNode.maskRef` exactly; see that
+ * doc comment for why validating and round-tripping them here does not
+ * require the renderer to already implement the corresponding GPU math.
  *
  * `.superRefine` enforces two cross-field rules `@cadra/core`'s own types
  * cannot express structurally: `outFrame` (when both `inFrame` and
@@ -325,15 +349,29 @@ export const videoNodeSchema = z
     ),
     assetRef: z
       .string()
-      .describe("Id of a video asset, resolved against an asset registry by the renderer."),
+      .describe(
+        "Id of a video asset, resolved against an asset registry by the renderer. May " +
+          "transiently be a cadra-generation://<slotId> placeholder ref for a not-yet-finished " +
+          "generation job, rewritten to a real ref once that job completes.",
+      ),
+    blendMode: videoBlendModeSchema
+      .optional()
+      .describe(
+        "How this video layer's pixels combine with whatever renders beneath it. Defaults to 'normal'.",
+      ),
+    maskRef: z
+      .string()
+      .optional()
+      .describe(
+        "Optional reference to a mask asset restricting which pixels of this video layer are " +
+          "visible. Omitted means no masking.",
+      ),
     inFrame: z
       .number()
       .int()
       .min(0)
       .optional()
-      .describe(
-        "Source-video-local frame the trimmed range starts at, inclusive. Defaults to 0.",
-      ),
+      .describe("Source-video-local frame the trimmed range starts at, inclusive. Defaults to 0."),
     outFrame: z
       .number()
       .int()

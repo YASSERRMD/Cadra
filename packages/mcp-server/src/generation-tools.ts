@@ -18,13 +18,30 @@
  * Tests inject their own pre-populated store (built with a fake
  * `VideoProvider`, never a real network call) to exercise every status
  * outcome.
+ *
+ * Phase 36 adds one optional input, `sceneId`: when given (a caller knows
+ * the slot it is checking belongs to a specific scene, e.g. one
+ * `add_generated_clip` returned), this call also runs
+ * `./generation-asset-binding.ts`'s `bindReadyGenerationsForScene` for that
+ * scene before returning, rewriting any of its `VideoNode`s whose
+ * generation slot is now `"ready"` from a `cadra-generation://` placeholder
+ * ref to a real `cadra-asset://` ref and persisting that change. This makes
+ * "check a slot's status" and "bind that scene's now-ready generations onto
+ * their nodes" the same call for the common case, per this phase's
+ * "automatically on completion" design (see that module's own doc): the
+ * very next `get_generation_status` call naming a scene id performs the
+ * rewrite, with no separate tool or background process needed for it to
+ * happen. Omitting `sceneId` preserves this tool's exact original,
+ * scene-agnostic, read-only behavior.
  */
 import { createGenerationStore, type GenerationStore } from "@cadra/providers";
 import type { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import type { CadraMcpServerConfig } from "./config.js";
+import { bindReadyGenerationsForScene } from "./generation-asset-binding.js";
 import type { Logger } from "./logger.js";
+import { sanitizeSceneId } from "./scene-store.js";
 
 /** Registered tool name for checking a generation slot's status. */
 export const GET_GENERATION_STATUS_TOOL_NAME = "get_generation_status";
@@ -52,11 +69,12 @@ interface GenerationToolFailurePayload {
   message: string;
 }
 
-/** `get_generation_status`'s success payload: the slot id echoed back plus its current resolved status, exactly as `GenerationStore.getSlotStatus` returns it (a placeholder while generating, the ready `outputUrl`, or the failed `error`). */
+/** `get_generation_status`'s success payload: the slot id echoed back plus its current resolved status, exactly as `GenerationStore.getSlotStatus` returns it (a placeholder while generating, the ready `outputUrl`, or the failed `error`). `bound` (Phase 36) reports whether this call's `sceneId` binding pass (if `sceneId` was given) actually rewrote this slot's node to a real asset ref just now; `undefined` when no `sceneId` was given. */
 interface GenerationStatusSuccessPayload {
   success: true;
   slotId: string;
   resolution: ReturnType<GenerationStore["getSlotStatus"]>;
+  bound?: boolean;
 }
 
 /**
@@ -68,7 +86,7 @@ interface GenerationStatusSuccessPayload {
  */
 export function registerCadraGenerationTools(
   server: McpServer,
-  _config: CadraMcpServerConfig,
+  config: CadraMcpServerConfig,
   logger: Logger,
   options: RegisterCadraGenerationToolsOptions = {},
 ): RegisteredTool[] {
@@ -83,8 +101,10 @@ export function registerCadraGenerationTools(
         "Reports a generative-video slot's current status: a placeholder descriptor " +
         "(solid/spinner/lastKnownFrame) while its current generation request is still pending or " +
         "running, the finished clip's outputUrl once the vendor reports success, or the failure " +
-        "reason once it terminally fails. Does not itself submit or regenerate anything; it only " +
-        "reads whatever this server's generation store currently knows about the named slot.",
+        "reason once it terminally fails. If sceneId is given, also binds any of that scene's " +
+        "VideoNodes whose generation slot is now ready onto a real cadra-asset:// ref (rewriting " +
+        "and persisting the scene document) before returning, so checking a slot you know belongs " +
+        "to a scene also resolves that scene's placeholder ref automatically.",
       inputSchema: {
         slotId: z
           .string()
@@ -92,9 +112,17 @@ export function registerCadraGenerationTools(
             "Id of the generation slot to check, e.g. a VideoNode's own id in a scene, or any " +
               "other caller-chosen slot key previously submitted against this server's generation store.",
           ),
+        sceneId: z
+          .string()
+          .optional()
+          .describe(
+            "Optional id of the scene this slot's VideoNode belongs to (as persisted by " +
+              "create_scene/update_scene/add_generated_clip). When given, also binds that scene's " +
+              "now-ready generation slots onto their real asset refs before returning.",
+          ),
       },
     },
-    ({ slotId }) => {
+    async ({ slotId, sceneId }) => {
       let resolution;
       try {
         resolution = store.getSlotStatus(slotId);
@@ -104,10 +132,32 @@ export function registerCadraGenerationTools(
         return jsonResult({ success: false, message } satisfies GenerationToolFailurePayload);
       }
 
+      let bound: boolean | undefined;
+      if (sceneId !== undefined) {
+        const idValidation = sanitizeSceneId(sceneId);
+        if (!idValidation.valid) {
+          return jsonResult({
+            success: false,
+            message: idValidation.reason,
+          } satisfies GenerationToolFailurePayload);
+        }
+        const bindingResult = await bindReadyGenerationsForScene(
+          config.workspaceRoot,
+          idValidation.sceneId,
+          store,
+          toolLogger,
+        );
+        bound =
+          bindingResult?.outcomes.some(
+            (outcome) => outcome.slotId === slotId && outcome.outcome === "bound",
+          ) ?? false;
+      }
+
       return jsonResult({
         success: true,
         slotId,
         resolution,
+        ...(bound !== undefined ? { bound } : {}),
       } satisfies GenerationStatusSuccessPayload);
     },
   );

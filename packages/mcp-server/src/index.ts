@@ -39,9 +39,30 @@
  * against a `@cadra/providers` `GenerationStore` (a content-hash-keyed dedup
  * cache plus caller-named generation slots) - a placeholder descriptor while
  * generating, the finished clip's `outputUrl` once ready, or a failure
- * reason. This phase's MCP surface is read-only (status-checking only); a
- * tool that submits a generation and inserts it into a scene is a later
- * phase's job.
+ * reason.
+ *
+ * Phase 36 closes the generative-video loop: `add_generated_clip`
+ * (`./generation-clip-tools.ts`) submits a generation and inserts a new
+ * `VideoNode`-bearing `Clip` (with the placeholder
+ * `cadra-generation://<slotId>` ref, and an optional `transitionIn`) onto an
+ * existing scene's timeline in one step, returning immediately without
+ * blocking on generation completion. `./generation-asset-binding.ts` binds a
+ * ready generation's output onto its waiting node automatically: the very
+ * next time `get_generation_status` or `render_scene` checks that slot's
+ * status, its `outputUrl` is ingested into the durable asset store (reusing
+ * `./asset-store.ts`'s `ingestAssetFromUrl`, the same function `upload_asset`
+ * itself calls) and the node's `assetRef` is rewritten from the generation
+ * ref to a real `cadra-asset://<hash>` ref. `render_scene` also refuses to
+ * submit a render whose composition still has a not-yet-ready
+ * generation-backed node, rather than rendering against a broken placeholder
+ * ref; `./generation-pending-assets.ts`'s `createGenerationPendingAssets`
+ * additionally wires this same readiness gate into `@cadra/headless`'s
+ * `renderComposition` `getPendingAssets` option directly, for any caller
+ * driving that lower-level render loop itself. `VideoNode` also gained
+ * optional `blendMode`/`maskRef` fields (Phase 36), so a generated layer can
+ * express a blend or mask against a synthetic one; the scene DSL validates
+ * and round-trips them even though `packages/renderer`'s `"video"` node
+ * handling remains a placeholder plane (unchanged since Phase 33).
  *
  * Entry points:
  *   - `createCadraMcpServer` (`./server.ts`): builds an `McpServer` with no
@@ -73,7 +94,11 @@ export {
   sanitizeAssetExtension,
   writeAssetFile,
 } from "./asset-store.js";
-export { LIST_ASSETS_TOOL_NAME, registerCadraAssetTools, UPLOAD_ASSET_TOOL_NAME } from "./asset-tools.js";
+export {
+  LIST_ASSETS_TOOL_NAME,
+  registerCadraAssetTools,
+  UPLOAD_ASSET_TOOL_NAME,
+} from "./asset-tools.js";
 export type { CadraMcpServerConfig, CadraMcpServerConfigInput, ProviderKeys } from "./config.js";
 export {
   OUTPUT_DIRECTORY_ENV_VAR,
@@ -82,8 +107,29 @@ export {
   WORKSPACE_ROOT_ENV_VAR,
 } from "./config.js";
 export { CADRA_CONTRACT_RESOURCE_NAME, CADRA_CONTRACT_RESOURCE_URI } from "./contract-resource.js";
+export type {
+  GenerationBindingOutcome,
+  PendingGenerationNode,
+} from "./generation-asset-binding.js";
+export {
+  bindReadyGenerations,
+  bindReadyGenerationsForScene,
+  buildGenerationRef,
+  findPendingGenerationNodes,
+  GENERATION_REF_SCHEME,
+  parseGenerationRef,
+} from "./generation-asset-binding.js";
+export type { RegisterCadraGenerationClipToolsOptions } from "./generation-clip-tools.js";
+export {
+  ADD_GENERATED_CLIP_TOOL_NAME,
+  registerCadraGenerationClipTools,
+} from "./generation-clip-tools.js";
+export { createGenerationPendingAssets } from "./generation-pending-assets.js";
 export type { RegisterCadraGenerationToolsOptions } from "./generation-tools.js";
-export { GET_GENERATION_STATUS_TOOL_NAME, registerCadraGenerationTools } from "./generation-tools.js";
+export {
+  GET_GENERATION_STATUS_TOOL_NAME,
+  registerCadraGenerationTools,
+} from "./generation-tools.js";
 export type {
   CadraMcpHttpServer,
   HealthCheckPayload,
@@ -119,6 +165,7 @@ export {
   applyScenePatchOperations,
   DuplicateNodeIdError,
   PatchNodeNotFoundError,
+  projectContainsNodeId,
 } from "./scene-patch.js";
 export {
   addNodeOperationSchema,

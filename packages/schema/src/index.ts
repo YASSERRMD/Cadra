@@ -73,6 +73,7 @@ export {
   sceneNodeKindSchema,
   sceneNodeSchema,
   textNodeSchema,
+  videoBlendModeSchema,
   videoFitModeSchema,
   videoNodeSchema,
   videoOutOfRangeBehaviorSchema,

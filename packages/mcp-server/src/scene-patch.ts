@@ -53,7 +53,11 @@ function locateClipContainingNode(
   project: Project,
   nodeId: string,
 ): { compositionIndex: number; trackIndex: number; clipIndex: number } | undefined {
-  for (let compositionIndex = 0; compositionIndex < project.compositions.length; compositionIndex += 1) {
+  for (
+    let compositionIndex = 0;
+    compositionIndex < project.compositions.length;
+    compositionIndex += 1
+  ) {
     const composition = project.compositions[compositionIndex]!;
     for (let trackIndex = 0; trackIndex < composition.tracks.length; trackIndex += 1) {
       const track = composition.tracks[trackIndex]!;
@@ -68,8 +72,16 @@ function locateClipContainingNode(
   return undefined;
 }
 
-/** True if any clip's node tree anywhere in `project` contains a node with id `nodeId`. */
-function projectContainsNodeId(project: Project, nodeId: string): boolean {
+/**
+ * True if any clip's node tree anywhere in `project` contains a node with id
+ * `nodeId`. Exported (beyond this module's own `addNode` duplicate-id check)
+ * so any other caller minting a brand-new node id against an existing
+ * project - e.g. `generation-clip-tools.ts`'s `add_generated_clip`,
+ * inserting a whole new `Clip`/`VideoNode` outside this module's own
+ * node-level patch operations - can check for a collision the exact same
+ * way, rather than re-deriving this same traversal independently.
+ */
+export function projectContainsNodeId(project: Project, nodeId: string): boolean {
   return locateClipContainingNode(project, nodeId) !== undefined;
 }
 
@@ -162,7 +174,10 @@ function mergeNodeFields(node: SceneNode, fields: Record<string, unknown>): Scen
  * @throws {DuplicateNodeIdError} if an `addNode` operation's new node id
  *   already exists somewhere in the project.
  */
-export function applyScenePatchOperation(project: Project, operation: ScenePatchOperation): Project {
+export function applyScenePatchOperation(
+  project: Project,
+  operation: ScenePatchOperation,
+): Project {
   switch (operation.type) {
     case "addNode": {
       if (projectContainsNodeId(project, operation.node.id)) {

@@ -14,6 +14,7 @@ export type {
   SceneNode,
   SceneNodeKind,
   TextNode,
+  VideoBlendMode,
   VideoFitMode,
   VideoNode,
   VideoOutOfRangeBehavior,

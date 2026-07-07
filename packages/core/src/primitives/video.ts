@@ -1,6 +1,7 @@
 import type { Property } from "../keyframes/keyframe-track.js";
 import { type AnimatableTransform, createIdentityTransform } from "../scene-graph/primitives.js";
 import type {
+  VideoBlendMode,
   VideoFitMode,
   VideoNode,
   VideoOutOfRangeBehavior,
@@ -12,6 +13,9 @@ import type {
  * `transform`, `visible`, and `opacity` each accept either a plain value or
  * a `KeyframeTrack` (Phase 10's `Property<T>`); passing a plain value, as
  * every existing primitive's caller does, keeps working unchanged.
+ *
+ * `blendMode`/`maskRef` (Phase 36) mirror `VideoNode.blendMode`/
+ * `VideoNode.maskRef` exactly; see those fields' own doc comments.
  */
 export interface VideoProps {
   id: string;
@@ -20,6 +24,8 @@ export interface VideoProps {
   visible?: Property<boolean>;
   children?: VideoNode["children"];
   assetRef?: string;
+  blendMode?: VideoBlendMode;
+  maskRef?: string;
   inFrame?: number;
   outFrame?: number;
   playbackRate?: number;
@@ -32,7 +38,8 @@ export interface VideoProps {
  * Creates a `VideoNode`: an external video file placed as a layer.
  *
  * Defaults: identity transform, `visible: true`, no children,
- * `assetRef: "default"`, `inFrame`/`outFrame` omitted (play the whole
+ * `assetRef: "default"`, no `blendMode` (renders as `'normal'`), no
+ * `maskRef` (unmasked), `inFrame`/`outFrame` omitted (play the whole
  * source), `playbackRate: 1`, `fitMode: "cover"`,
  * `outOfRangeBehavior: "hold"`, `opacity: 1`.
  */
@@ -45,6 +52,8 @@ export function Video(props: VideoProps): VideoNode {
     visible: props.visible ?? true,
     children: props.children ?? [],
     assetRef: props.assetRef ?? "default",
+    ...(props.blendMode !== undefined && { blendMode: props.blendMode }),
+    ...(props.maskRef !== undefined && { maskRef: props.maskRef }),
     ...(props.inFrame !== undefined && { inFrame: props.inFrame }),
     ...(props.outFrame !== undefined && { outFrame: props.outFrame }),
     ...(props.playbackRate !== undefined && { playbackRate: props.playbackRate }),
