@@ -149,3 +149,47 @@ describe("animate() is restricted at the type level to fields a given node kind 
     expect(builder.node.kind).toBe("mesh");
   });
 });
+
+describe("Text builder exposes stagger (Phase 50)", () => {
+  it("passes stagger through to the built node", () => {
+    const builder = Text({
+      id: "text-1",
+      content: "Hello",
+      stagger: {
+        preset: "typewriter",
+        grouping: "character",
+        startFrame: 0,
+        delayFrames: 2,
+        durationFrames: 1,
+      },
+    });
+    expect(builder.node.kind).toBe("text");
+    expect(builder.node.kind === "text" && builder.node.stagger).toEqual({
+      preset: "typewriter",
+      grouping: "character",
+      startFrame: 0,
+      delayFrames: 2,
+      durationFrames: 1,
+    });
+  });
+
+  it("a built document with stagger passes parseScene", () => {
+    const document = buildWithOnePlacement(
+      Text({
+        id: "text-1",
+        content: "Hello",
+        stagger: {
+          preset: "fadeInUp",
+          grouping: "word",
+          startFrame: 0,
+          delayFrames: 3,
+          durationFrames: 15,
+          direction: "centerOut",
+          easing: "easeOutCubic",
+        },
+      }).at(0, 30),
+    );
+    const result = parseScene(document);
+    expect(result.success).toBe(true);
+  });
+});
