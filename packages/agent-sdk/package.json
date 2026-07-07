@@ -25,6 +25,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
     "@cadra/core": "workspace:*",
+    "@cadra/providers": "workspace:*",
     "@cadra/schema": "workspace:*"
   },
   "devDependencies": {
