@@ -66,6 +66,7 @@ export { colorRgbaSchema, transformSchema, vector2Schema, vector3Schema } from "
 export {
   cameraNodeSchema,
   compositionRefNodeSchema,
+  easingNameSchema,
   groupNodeSchema,
   imageNodeSchema,
   lightNodeSchema,
@@ -77,6 +78,10 @@ export {
   sceneNodeKindSchema,
   sceneNodeSchema,
   textNodeSchema,
+  textStaggerConfigSchema,
+  textStaggerDirectionSchema,
+  textStaggerGroupingSchema,
+  textStaggerPresetSchema,
   videoBlendModeSchema,
   videoFitModeSchema,
   videoNodeSchema,
