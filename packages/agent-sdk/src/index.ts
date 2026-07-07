@@ -101,6 +101,33 @@
  * `text`'s `color`/`fontSize`. Animating a field a given node kind does not
  * support (e.g. `fontSize` on a `Shape`) is a compile error, not a silently
  * ignored call.
+ *
+ * ## Generating a scene from a natural-language brief
+ *
+ * `createTextToSceneAdapter()` (Phase 32) turns a free-text brief into a
+ * validated `SceneDocument` via an LLM, with a self-correcting retry loop
+ * that feeds `parseScene`'s exact diagnostics back to the model on failure:
+ *
+ * ```ts
+ * import { createTextToSceneAdapter } from "@cadra/agent-sdk";
+ *
+ * const adapter = createTextToSceneAdapter(); // defaults to a real @anthropic-ai/sdk-backed completion function
+ * const result = await adapter.generate({
+ *   brief: "A 3-second title card: the word 'Cadra' fades in over black.",
+ *   constraints: { durationInFrames: 90, fps: 30, size: { width: 1920, height: 1080 } },
+ * });
+ *
+ * if (result.success) {
+ *   console.log(result.document, result.rationale, result.attempts);
+ * } else {
+ *   console.error(result.diagnostics);
+ * }
+ * ```
+ *
+ * The underlying model call is always injectable via `completionFn`, a
+ * minimal `(prompt: string) => Promise<string>` seam (`LlmCompletionFn`)
+ * with no vendor-specific shape, so a test (or a caller preferring a
+ * different provider) never needs to touch `@anthropic-ai/sdk` at all.
  */
 
 export type { Addable, CompositionBuilderProps, CompositionSize } from "./composition-builder.js";
@@ -117,6 +144,28 @@ export type {
 export { NodeBuilder } from "./node-builder.js";
 export { Camera, Image, Light, Shape, Text } from "./primitives.js";
 export { scene, SceneBuilder, type SceneBuilderProps } from "./scene-builder.js";
+export {
+  type AnthropicLlmCompletionOptions,
+  buildTextToScenePrompt,
+  createAnthropicLlmCompletionFn,
+  createTextToSceneAdapter,
+  type CreateTextToSceneAdapterOptions,
+  DEFAULT_ANTHROPIC_MODEL,
+  DEFAULT_MAX_ATTEMPTS,
+  DEFAULT_MAX_TOKENS,
+  extractJsonFromLlmResponse,
+  type JsonExtractionFailure,
+  type JsonExtractionResult,
+  type JsonExtractionSuccess,
+  type LlmCompletionFn,
+  type PriorAttempt,
+  type TextToScene,
+  type TextToSceneConstraints,
+  type TextToSceneFailure,
+  type TextToSceneRequest,
+  type TextToSceneResult,
+  type TextToSceneSuccess,
+} from "./text-to-scene/index.js";
 export type {
   SequenceFrameResolution,
   SequenceProps,
