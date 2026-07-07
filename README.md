@@ -13,7 +13,7 @@
   <a href="#getting-started"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-1B2A4A?style=flat-square" /></a>
   <a href="#the-model-context-protocol-server"><img alt="MCP" src="https://img.shields.io/badge/MCP-server-C5A55A?style=flat-square" /></a>
   <a href="#rendering"><img alt="WebGPU" src="https://img.shields.io/badge/WebGPU-WebGL2%20fallback-C5A55A?style=flat-square" /></a>
-  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-666666?style=flat-square" /></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-666666?style=flat-square" /></a>
 </p>
 
 ---
@@ -127,7 +127,7 @@ directly in the studio.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Apache License 2.0. See [LICENSE](LICENSE).
 
 ---
 
