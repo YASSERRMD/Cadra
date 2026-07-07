@@ -47,4 +47,15 @@ export type { ParagraphLineMetrics } from "./paragraph-layout.js";
 export type { ParagraphRenderData } from "./paragraph-render-data.js";
 export type { FontParseBackend, ParsedFont } from "./parsed-font.js";
 export type { ShapedGlyph, ShapedTextRun } from "./shaped-run.js";
+export type { GlyphStaggerState } from "./text-stagger-glyphs.js";
+// Value export, not type-only: pure computation (Intl.Segmenter, a
+// standard browser-available API, plus @cadra/core's own already-
+// browser-safe stagger math), needed at actual per-frame render time
+// inside the browser-bundled headless render page itself (Phase 50's own
+// stagger application runs there, not ahead of time like shaping/atlas
+// generation do), so unlike shapeText/generateMsdfAtlas above, this
+// cannot stay type-only.
 export type { PrepareTextRenderDataOptions, TextRenderData } from "./text-render-data.js";
+export { resolveGlyphStaggerStates } from "./text-stagger-glyphs.js";
+export type { TextUnit, TextUnitGranularity } from "./text-units.js";
+export { splitTextUnits } from "./text-units.js";
