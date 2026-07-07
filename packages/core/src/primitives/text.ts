@@ -4,7 +4,7 @@ import {
   type ColorRGBA,
   createIdentityTransform,
 } from "../scene-graph/primitives.js";
-import type { TextNode } from "../scene-graph/scene-node.js";
+import type { TextNode, TextStaggerConfig } from "../scene-graph/scene-node.js";
 
 /**
  * Props for `Text`. Only `id` is required; everything else defaults.
@@ -24,6 +24,7 @@ export interface TextProps {
   fontSize?: Property<number>;
   color?: Property<ColorRGBA>;
   extrudeDepth?: Property<number>;
+  stagger?: TextStaggerConfig;
 }
 
 /**
@@ -33,7 +34,9 @@ export interface TextProps {
  * `content`, `fontSize: 24`, opaque white `color`. `fontRef` is left
  * `undefined` unless supplied, matching `TextNode`'s "omitted means the
  * renderer's default" convention; `extrudeDepth` is likewise left
- * `undefined` unless supplied, matching its own "omitted means flat" default.
+ * `undefined` unless supplied, matching its own "omitted means flat" default;
+ * `stagger` is left `undefined` unless supplied, matching its own "omitted
+ * means no staggering" default.
  */
 export function Text(props: TextProps): TextNode {
   return {
@@ -48,5 +51,6 @@ export function Text(props: TextProps): TextNode {
     fontSize: props.fontSize ?? 24,
     color: props.color ?? [1, 1, 1, 1],
     ...(props.extrudeDepth !== undefined && { extrudeDepth: props.extrudeDepth }),
+    ...(props.stagger !== undefined && { stagger: props.stagger }),
   };
 }

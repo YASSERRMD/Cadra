@@ -1,3 +1,4 @@
+import type { EasingName } from "../interpolation/named-easing.js";
 import type { Property } from "../keyframes/keyframe-track.js";
 import type { LayerElement } from "./layer-element.js";
 import type { AnimatableTransform, ColorRGBA, Vector3 } from "./primitives.js";
@@ -81,6 +82,68 @@ export interface LightNode extends SceneNodeBase<"light"> {
   intensity: Property<number>;
 }
 
+/**
+ * Which unit a `TextStaggerConfig` splits a `TextNode`'s own content into:
+ * `"grapheme"` (one user-perceived character, e.g. a base letter plus its
+ * combining marks, or a ZWJ emoji sequence, kept together even when
+ * HarfBuzz shapes it as more than one cluster), `"character"` (one
+ * HarfBuzz shaping cluster - coarser than a raw code point whenever
+ * shaping fuses several into one, e.g. a ligature), `"word"` (a maximal
+ * run of non-whitespace clusters), or `"line"` (one rendered line). See
+ * `@cadra/text`'s `splitTextUnits`, the function that actually computes
+ * these boundaries from shaped glyph data.
+ */
+export type TextStaggerGrouping = "grapheme" | "character" | "word" | "line";
+
+/**
+ * The order a `TextStaggerConfig`'s units start their own reveal in,
+ * relative to each unit's own *reading*-order rank (never raw visual/array
+ * order - see `TextUnit`'s own doc in `@cadra/text`): `"forward"` starts
+ * with the first-read unit; `"backward"` starts with the last-read one;
+ * `"centerOut"` starts with the unit(s) nearest the middle of the reading-
+ * order sequence, rippling outward toward both ends.
+ */
+export type TextStaggerDirection = "forward" | "backward" | "centerOut";
+
+/**
+ * A starter kinetic-typography preset: `"typewriter"` (each unit snaps
+ * from invisible to visible, no fade), `"fadeInUp"` (each unit fades in
+ * while sliding up from `distance` below its own natural position),
+ * `"lineReveal"` (each unit fades in in place, no positional offset), and
+ * `"wave"` (every unit continuously bobs up and down, phase-shifted by its
+ * own stagger rank, rather than settling into a final revealed state).
+ */
+export type TextStaggerPreset = "typewriter" | "fadeInUp" | "lineReveal" | "wave";
+
+/**
+ * Drives a deterministic, per-unit staggered animation across a
+ * `TextNode`'s own content, split into `grouping`-sized units. Every field
+ * here is a plain value, not a `Property<T>` keyframe track: a stagger is
+ * one deterministic function of `frame` given these fixed parameters
+ * (rank, delay, duration, easing), not itself something a caller keyframes
+ * mid-animation - see `@cadra/core`'s `resolveTextStagger`.
+ */
+export interface TextStaggerConfig {
+  preset: TextStaggerPreset;
+  grouping: TextStaggerGrouping;
+  /** The frame the very first unit (in stagger order) begins revealing at. */
+  startFrame: number;
+  /** Frames between each consecutive unit's own reveal start, in stagger order. */
+  delayFrames: number;
+  /** How many frames one unit's own reveal takes, once it starts. Ignored by `"wave"` (continuous, never settles). */
+  durationFrames: number;
+  /** Defaults to `"forward"`. */
+  direction?: TextStaggerDirection;
+  /** Defaults to `"linear"`. */
+  easing?: EasingName;
+  /** `"fadeInUp"` only: how far below its natural position a unit starts, in `fontSize`-relative em units. Defaults to `0.5`. */
+  distance?: number;
+  /** `"wave"` only: peak vertical offset, in `fontSize`-relative em units. Defaults to `0.1`. */
+  amplitude?: number;
+  /** `"wave"` only: frames per full oscillation. Defaults to `30`. */
+  periodFrames?: number;
+}
+
 /** A block of rendered text. */
 export interface TextNode extends SceneNodeBase<"text"> {
   content: string;
@@ -96,6 +159,8 @@ export interface TextNode extends SceneNodeBase<"text"> {
    * and shadowed like any other mesh.
    */
   extrudeDepth?: Property<number>;
+  /** A deterministic per-unit staggered reveal animation across this node's own content. Omitted means no staggering: every glyph renders exactly as laid out, unaffected. */
+  stagger?: TextStaggerConfig;
 }
 
 /** A 2D image plane. `assetRef` is resolved against an asset registry. */

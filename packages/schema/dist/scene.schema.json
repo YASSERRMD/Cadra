@@ -3013,6 +3013,92 @@
                 }
               ]
             },
+            "stagger": {
+              "description": "A deterministic per-unit staggered reveal animation across this node's own content. Omitted means no staggering.",
+              "type": "object",
+              "properties": {
+                "preset": {
+                  "type": "string",
+                  "enum": [
+                    "typewriter",
+                    "fadeInUp",
+                    "lineReveal",
+                    "wave"
+                  ],
+                  "description": "A starter kinetic-typography preset."
+                },
+                "grouping": {
+                  "type": "string",
+                  "enum": [
+                    "grapheme",
+                    "character",
+                    "word",
+                    "line"
+                  ],
+                  "description": "Which unit a TextStaggerConfig splits the node's own content into."
+                },
+                "startFrame": {
+                  "type": "number",
+                  "description": "The frame the very first unit (in stagger order) begins revealing at."
+                },
+                "delayFrames": {
+                  "type": "number",
+                  "description": "Frames between each consecutive unit's own reveal start, in stagger order."
+                },
+                "durationFrames": {
+                  "type": "number",
+                  "description": "How many frames one unit's own reveal takes, once it starts. Ignored by \"wave\"."
+                },
+                "direction": {
+                  "description": "Defaults to \"forward\".",
+                  "type": "string",
+                  "enum": [
+                    "forward",
+                    "backward",
+                    "centerOut"
+                  ]
+                },
+                "easing": {
+                  "description": "Defaults to \"linear\".",
+                  "type": "string",
+                  "enum": [
+                    "linear",
+                    "easeInCubic",
+                    "easeOutCubic",
+                    "easeInOutCubic",
+                    "easeInExpo",
+                    "easeOutExpo",
+                    "easeInOutExpo",
+                    "easeInBack",
+                    "easeOutBack",
+                    "easeInOutBack",
+                    "easeInElastic",
+                    "easeOutElastic",
+                    "easeInOutElastic"
+                  ]
+                },
+                "distance": {
+                  "description": "\"fadeInUp\" only: how far below its natural position a unit starts, in fontSize-relative em units. Defaults to 0.5.",
+                  "type": "number"
+                },
+                "amplitude": {
+                  "description": "\"wave\" only: peak vertical offset, in fontSize-relative em units. Defaults to 0.1.",
+                  "type": "number"
+                },
+                "periodFrames": {
+                  "description": "\"wave\" only: frames per full oscillation. Defaults to 30.",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "preset",
+                "grouping",
+                "startFrame",
+                "delayFrames",
+                "durationFrames"
+              ],
+              "additionalProperties": false
+            },
             "children": {
               "type": "array",
               "items": {

@@ -31,5 +31,7 @@ export type { ShapeProps } from "./shape.js";
 export { Shape } from "./shape.js";
 export type { TextProps } from "./text.js";
 export { Text } from "./text.js";
+export type { ResolvedTextUnitState } from "./text-stagger.js";
+export { computeStaggerRanks, resolveTextUnitState } from "./text-stagger.js";
 export type { VideoFrameMapping, VideoProps } from "./video.js";
 export { resolveVideoSourceFrame, Video } from "./video.js";

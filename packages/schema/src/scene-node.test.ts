@@ -262,6 +262,171 @@ describe("sceneNodeSchema: text", () => {
     });
     expect(result.success).toBe(true);
   });
+
+  it("accepts a text node with a minimal stagger config", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      stagger: {
+        preset: "typewriter",
+        grouping: "character",
+        startFrame: 0,
+        delayFrames: 2,
+        durationFrames: 1,
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a stagger config with every optional field set", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      stagger: {
+        preset: "fadeInUp",
+        grouping: "word",
+        startFrame: 10,
+        delayFrames: 3,
+        durationFrames: 15,
+        direction: "centerOut",
+        easing: "easeOutCubic",
+        distance: 0.5,
+        amplitude: 0.2,
+        periodFrames: 30,
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts every known stagger preset, grouping, direction, and easing name", () => {
+    for (const preset of ["typewriter", "fadeInUp", "lineReveal", "wave"]) {
+      for (const grouping of ["grapheme", "character", "word", "line"]) {
+        const result = sceneNodeSchema.safeParse({
+          ...baseFields(),
+          kind: "text",
+          content: "Hello",
+          fontSize: 24,
+          color: [1, 1, 1, 1],
+          stagger: { preset, grouping, startFrame: 0, delayFrames: 1, durationFrames: 1 },
+        });
+        expect(result.success).toBe(true);
+      }
+    }
+    for (const direction of ["forward", "backward", "centerOut"]) {
+      const result = sceneNodeSchema.safeParse({
+        ...baseFields(),
+        kind: "text",
+        content: "Hello",
+        fontSize: 24,
+        color: [1, 1, 1, 1],
+        stagger: {
+          preset: "wave",
+          grouping: "line",
+          startFrame: 0,
+          delayFrames: 1,
+          durationFrames: 1,
+          direction,
+        },
+      });
+      expect(result.success).toBe(true);
+    }
+    for (const easing of ["linear", "easeInOutElastic", "easeOutBack"]) {
+      const result = sceneNodeSchema.safeParse({
+        ...baseFields(),
+        kind: "text",
+        content: "Hello",
+        fontSize: 24,
+        color: [1, 1, 1, 1],
+        stagger: { preset: "wave", grouping: "line", startFrame: 0, delayFrames: 1, durationFrames: 1, easing },
+      });
+      expect(result.success).toBe(true);
+    }
+  });
+
+  it("rejects an unknown stagger preset, grouping, direction, or easing", () => {
+    const base = {
+      ...baseFields(),
+      kind: "text" as const,
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1] as const,
+    };
+    expect(
+      sceneNodeSchema.safeParse({
+        ...base,
+        stagger: { preset: "bounce", grouping: "word", startFrame: 0, delayFrames: 1, durationFrames: 1 },
+      }).success,
+    ).toBe(false);
+    expect(
+      sceneNodeSchema.safeParse({
+        ...base,
+        stagger: { preset: "wave", grouping: "sentence", startFrame: 0, delayFrames: 1, durationFrames: 1 },
+      }).success,
+    ).toBe(false);
+    expect(
+      sceneNodeSchema.safeParse({
+        ...base,
+        stagger: {
+          preset: "wave",
+          grouping: "word",
+          startFrame: 0,
+          delayFrames: 1,
+          durationFrames: 1,
+          direction: "outsideIn",
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      sceneNodeSchema.safeParse({
+        ...base,
+        stagger: {
+          preset: "wave",
+          grouping: "word",
+          startFrame: 0,
+          delayFrames: 1,
+          durationFrames: 1,
+          easing: "easeInSine",
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a stagger config missing a required field", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      stagger: { preset: "typewriter", grouping: "character", startFrame: 0, delayFrames: 2 },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a stray, unrecognized field on the stagger config (strict object)", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      stagger: {
+        preset: "typewriter",
+        grouping: "character",
+        startFrame: 0,
+        delayFrames: 2,
+        durationFrames: 1,
+        unknownField: true,
+      },
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 describe("sceneNodeSchema: transform and visible are Property<T> for every node kind (Phase 26)", () => {

@@ -1,6 +1,7 @@
 import type {
   CameraNode,
   CompositionRefNode,
+  EasingName,
   GroupNode,
   ImageNode,
   LightNode,
@@ -12,6 +13,10 @@ import type {
   SceneNode,
   SceneNodeKind,
   TextNode,
+  TextStaggerConfig,
+  TextStaggerDirection,
+  TextStaggerGrouping,
+  TextStaggerPreset,
   VideoBlendMode,
   VideoFitMode,
   VideoNode,
@@ -251,6 +256,78 @@ export const lightNodeSchema = z.strictObject({
 
 type _CheckLightNode = AssertTrue<AssertEqual<z.infer<typeof lightNodeSchema>, LightNode>>;
 
+/** Mirrors `EasingName`: every named curve `@cadra/core`'s `easing.ts` exports, excluding `cubicBezier` (a factory, not a ready-made curve). */
+export const easingNameSchema = z
+  .enum([
+    "linear",
+    "easeInCubic",
+    "easeOutCubic",
+    "easeInOutCubic",
+    "easeInExpo",
+    "easeOutExpo",
+    "easeInOutExpo",
+    "easeInBack",
+    "easeOutBack",
+    "easeInOutBack",
+    "easeInElastic",
+    "easeOutElastic",
+    "easeInOutElastic",
+  ])
+  .describe("Which named easing curve to apply.");
+
+type _CheckEasingName = AssertTrue<AssertEqual<z.infer<typeof easingNameSchema>, EasingName>>;
+
+/** Mirrors `TextStaggerGrouping`. */
+export const textStaggerGroupingSchema = z
+  .enum(["grapheme", "character", "word", "line"])
+  .describe("Which unit a TextStaggerConfig splits the node's own content into.");
+
+type _CheckTextStaggerGrouping = AssertTrue<
+  AssertEqual<z.infer<typeof textStaggerGroupingSchema>, TextStaggerGrouping>
+>;
+
+/** Mirrors `TextStaggerDirection`. */
+export const textStaggerDirectionSchema = z
+  .enum(["forward", "backward", "centerOut"])
+  .describe("The order units start their own reveal in, relative to their reading-order rank.");
+
+type _CheckTextStaggerDirection = AssertTrue<
+  AssertEqual<z.infer<typeof textStaggerDirectionSchema>, TextStaggerDirection>
+>;
+
+/** Mirrors `TextStaggerPreset`. */
+export const textStaggerPresetSchema = z
+  .enum(["typewriter", "fadeInUp", "lineReveal", "wave"])
+  .describe("A starter kinetic-typography preset.");
+
+type _CheckTextStaggerPreset = AssertTrue<AssertEqual<z.infer<typeof textStaggerPresetSchema>, TextStaggerPreset>>;
+
+/** Mirrors `TextStaggerConfig`. */
+export const textStaggerConfigSchema = z.strictObject({
+  preset: textStaggerPresetSchema,
+  grouping: textStaggerGroupingSchema,
+  startFrame: z.number().describe("The frame the very first unit (in stagger order) begins revealing at."),
+  delayFrames: z.number().describe("Frames between each consecutive unit's own reveal start, in stagger order."),
+  durationFrames: z
+    .number()
+    .describe("How many frames one unit's own reveal takes, once it starts. Ignored by \"wave\"."),
+  direction: textStaggerDirectionSchema.optional().describe("Defaults to \"forward\"."),
+  easing: easingNameSchema.optional().describe("Defaults to \"linear\"."),
+  distance: z
+    .number()
+    .optional()
+    .describe(
+      "\"fadeInUp\" only: how far below its natural position a unit starts, in fontSize-relative em units. Defaults to 0.5.",
+    ),
+  amplitude: z
+    .number()
+    .optional()
+    .describe("\"wave\" only: peak vertical offset, in fontSize-relative em units. Defaults to 0.1."),
+  periodFrames: z.number().optional().describe("\"wave\" only: frames per full oscillation. Defaults to 30."),
+});
+
+type _CheckTextStaggerConfig = AssertTrue<AssertEqual<z.infer<typeof textStaggerConfigSchema>, TextStaggerConfig>>;
+
 /**
  * A block of rendered text.
  *
@@ -286,6 +363,11 @@ export const textNodeSchema = z.strictObject({
     .optional()
     .describe(
       "How far to extrude each glyph along its own local Z axis, in fontSize units. Omitted or 0 renders flat MSDF quads; a positive value builds solid 3D glyph geometry instead. A plain number or a keyframe track.",
+    ),
+  stagger: textStaggerConfigSchema
+    .optional()
+    .describe(
+      "A deterministic per-unit staggered reveal animation across this node's own content. Omitted means no staggering.",
     ),
   get children(): z.ZodArray<typeof sceneNodeSchema> {
     return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
