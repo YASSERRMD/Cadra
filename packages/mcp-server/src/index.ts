@@ -93,6 +93,7 @@ export {
   registerCadraRenderTools,
   RENDER_SCENE_TOOL_NAME,
 } from "./render-tools.js";
+export { registerCadraRepairSceneTool, REPAIR_SCENE_TOOL_NAME } from "./repair-scene-tools.js";
 export {
   applyScenePatchOperation,
   applyScenePatchOperations,
