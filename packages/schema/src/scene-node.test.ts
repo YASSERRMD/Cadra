@@ -633,6 +633,25 @@ describe("sceneNodeSchema: satori", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("accepts an icon layer element with a name, size, and recoloring style", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...minimalSatoriFields(),
+      layer: {
+        type: "div",
+        children: [{ type: "icon", icon: "arrow-right", width: 32, height: 32, style: { color: "#ff0000" } }],
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts an icon layer element with no explicit width/height/style at all", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...minimalSatoriFields(),
+      layer: { type: "div", children: [{ type: "icon", icon: "arrow-right" }] },
+    });
+    expect(result.success).toBe(true);
+  });
 });
 
 describe("sceneNodeSchema: discriminant enforcement", () => {
