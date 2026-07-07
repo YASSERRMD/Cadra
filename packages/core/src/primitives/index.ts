@@ -4,6 +4,7 @@ export {
   LIGHT_ANIMATABLE_PROPERTIES,
   SHAPE_ANIMATABLE_PROPERTIES,
   TEXT_ANIMATABLE_PROPERTIES,
+  VIDEO_ANIMATABLE_PROPERTIES,
 } from "./animatable-properties.js";
 export type { CameraProps } from "./camera.js";
 export { Camera } from "./camera.js";
@@ -25,3 +26,5 @@ export type { ShapeProps } from "./shape.js";
 export { Shape } from "./shape.js";
 export type { TextProps } from "./text.js";
 export { Text } from "./text.js";
+export type { VideoFrameMapping, VideoProps } from "./video.js";
+export { resolveVideoSourceFrame, Video } from "./video.js";
