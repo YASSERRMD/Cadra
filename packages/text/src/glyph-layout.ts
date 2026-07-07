@@ -71,6 +71,14 @@ export interface GlyphQuadPlacement {
  * `undefined` for a glyph with no visual bitmap (e.g. a space): it still
  * exists in shaped output to advance the pen, but contributes no quad.
  *
+ * `scale` (default `1`) multiplies the atlas-derived quad's size and its
+ * offset from `(penX, penY)`, for a glyph whose *advance* was already
+ * normalized to a different effective font size than the atlas it samples
+ * (the paragraph layout engine's per-span `fontSizeScale`, Phase 45): the
+ * atlas's own placement data has no notion of that scale (it is fixed at
+ * atlas-generation time), so unlike `glyph.xOffset`/`xAdvance` it is never
+ * pre-scaled before reaching here and must be scaled at this step instead.
+ *
  * Shared by `computeGlyphLayout` (single explicit lines, Phase 44) and the
  * paragraph layout engine (`paragraph-layout.ts`, Phase 45), which need the
  * same atlas-to-em-space quad math but walk the pen differently (the latter
@@ -83,6 +91,7 @@ export function placeGlyphQuad(
   penY: number,
   lookup: GlyphAtlasLookup,
   unitsPerEm: number,
+  scale = 1,
 ): GlyphQuadPlacement | undefined {
   const originX = penX + glyph.xOffset / unitsPerEm;
   const originY = penY + glyph.yOffset / unitsPerEm;
@@ -98,10 +107,10 @@ export function placeGlyphQuad(
   // atlas generation's `size` option), so pixel-space placement converts to
   // em units without this module needing to know or re-derive what font
   // size the atlas was generated at.
-  const quadWidth = placement.width / placement.scale;
-  const quadHeight = placement.height / placement.scale;
-  const quadLeft = originX - placement.xTranslate;
-  const quadBottom = originY - placement.yTranslate;
+  const quadWidth = (placement.width / placement.scale) * scale;
+  const quadHeight = (placement.height / placement.scale) * scale;
+  const quadLeft = originX - placement.xTranslate * scale;
+  const quadBottom = originY - placement.yTranslate * scale;
 
   return {
     origin: { x: originX, y: originY },
