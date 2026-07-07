@@ -207,3 +207,154 @@ body {
 .cadra-studio-timeline__clip-trim-handle--right {
   right: 0;
 }
+
+/*
+ * Phase 39's real, populated inspector (InspectorPanel.tsx once a node is
+ * selected; the stub "No node selected" fallback still uses the plain
+ * .cadra-studio-panel--inspector class above). Scrollable, since a node
+ * with many animatable properties (e.g. camera) can outgrow the fixed
+ * right-sidebar width.
+ */
+.cadra-studio-inspector {
+  width: 280px;
+  flex-shrink: 0;
+  border-left: 1px solid #3a3a3a;
+  overflow-y: auto;
+  padding: 0.5rem;
+  box-sizing: border-box;
+}
+
+.cadra-studio-inspector__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid #3a3a3a;
+}
+
+.cadra-studio-inspector__node-label {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.cadra-studio-inspector__node-kind {
+  font-size: 0.75rem;
+  color: #888;
+  text-transform: uppercase;
+}
+
+.cadra-inspector__property {
+  padding: 0.4rem 0;
+  border-bottom: 1px solid #333;
+}
+
+.cadra-inspector__property-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+
+.cadra-inspector__property-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.cadra-inspector__property-value {
+  display: flex;
+}
+
+.cadra-inspector__property-diagnostics {
+  margin-top: 0.3rem;
+  font-size: 0.75rem;
+  color: #ff6b6b;
+}
+
+.cadra-inspector__number-input {
+  width: 100%;
+  min-width: 0;
+  background: #1e1e1e;
+  color: #e0e0e0;
+  border: 1px solid #3a3a3a;
+  border-radius: 3px;
+  padding: 0.2rem 0.35rem;
+  font-size: 0.8rem;
+}
+
+.cadra-inspector__vector3-input {
+  display: flex;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.cadra-inspector__vector3-component {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.cadra-inspector__vector3-component-label {
+  font-size: 0.7rem;
+  color: #888;
+}
+
+.cadra-inspector__color-input {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.cadra-inspector__color-input input[type="color"] {
+  width: 2rem;
+  height: 1.6rem;
+  padding: 0;
+  border: 1px solid #3a3a3a;
+  border-radius: 3px;
+  background: none;
+}
+
+.cadra-inspector__easing-picker {
+  background: #1e1e1e;
+  color: #e0e0e0;
+  border: 1px solid #3a3a3a;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  padding: 0.15rem;
+}
+
+.cadra-inspector__keyframe-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.cadra-inspector__keyframe-row {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+/*
+ * A keyframe row packs several inputs of very different natural sizes
+ * (frame, value, easing) into one line; without an explicit basis, a flex
+ * child sizing its input to `width: 100%` collapses toward its
+ * content-based `min-width: auto` instead of actually filling its share of
+ * the row (a bare `<input>` and a `<select>` both default to a small
+ * intrinsic min-width, well under what a real value like "8.5" or
+ * "easeInOutCubic" needs to render without clipping).
+ */
+.cadra-inspector__keyframe-row > .cadra-inspector__number-input,
+.cadra-inspector__keyframe-row > .cadra-inspector__color-input,
+.cadra-inspector__keyframe-row > .cadra-inspector__easing-picker {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.cadra-inspector__keyframe-seek {
+  flex-shrink: 0;
+}
