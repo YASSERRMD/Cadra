@@ -25,6 +25,13 @@
  * L2. Every shaped glyph carries a `cluster` mapping back to the original
  * string, for later phases' per-glyph animation and grapheme-safe
  * splitting.
+ *
+ * Phase 43: MSDF glyph atlases. `generateMsdfAtlas` (via `msdfgen-wasm`,
+ * a real wasm build of Chlumsky's msdfgen) packs exactly the glyphs a
+ * scene's shaped runs use into a multi-channel signed distance field
+ * atlas, so text stays crisp under arbitrary 2D or 3D scale.
+ * `createMsdfAtlasCache` content-hashes a request (font, glyph set,
+ * options) so the same glyphs are only ever generated once.
  */
 
 export const VERSION = "0.0.0";
@@ -47,6 +54,16 @@ export type { FontSubsetOptions } from "./font-subset.js";
 export { codePointSetKey, subsetFontToCodePoints } from "./font-subset.js";
 export type { ShapeRunOptions } from "./harfbuzz-shaping.js";
 export { shapeRun } from "./harfbuzz-shaping.js";
+export type {
+  MsdfAtlas,
+  MsdfAtlasOptions,
+  MsdfAtlasPage,
+  MsdfFontMetrics,
+  MsdfGlyphPlacement,
+} from "./msdf-atlas.js";
+export { generateMsdfAtlas } from "./msdf-atlas.js";
+export type { MsdfAtlasCache } from "./msdf-atlas-cache.js";
+export { computeMsdfAtlasCacheKey, createMsdfAtlasCache } from "./msdf-atlas-cache.js";
 export type { FontParseBackend, ParsedFont } from "./parsed-font.js";
 export type { ItemizedRun } from "./script-runs.js";
 export { computeItemizedRuns } from "./script-runs.js";
