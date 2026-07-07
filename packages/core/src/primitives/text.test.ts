@@ -63,6 +63,35 @@ describe("Text", () => {
     expect(node.physics).toEqual(physics);
   });
 
+  it("does not set path when omitted", () => {
+    const node = Text({ id: "text-1" });
+
+    expect("path" in node).toBe(false);
+  });
+
+  it("sets path when provided", () => {
+    const path = {
+      start: [0, 0, 0] as const,
+      segments: [{ type: "line" as const, to: [10, 0, 0] as const }],
+    };
+    const node = Text({ id: "text-1", path });
+
+    expect(node.path).toEqual(path);
+  });
+
+  it("does not set morph when omitted", () => {
+    const node = Text({ id: "text-1" });
+
+    expect("morph" in node).toBe(false);
+  });
+
+  it("sets morph when provided", () => {
+    const morph = { from: "Hello", grouping: "character" as const, progress: 0.5 };
+    const node = Text({ id: "text-1", morph });
+
+    expect(node.morph).toEqual(morph);
+  });
+
   it("overrides every default when props are given", () => {
     const node = Text({
       id: "text-1",
