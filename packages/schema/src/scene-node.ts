@@ -9,6 +9,9 @@ import type {
   SceneNode,
   SceneNodeKind,
   TextNode,
+  VideoFitMode,
+  VideoNode,
+  VideoOutOfRangeBehavior,
 } from "@cadra/core";
 import { z } from "zod";
 
@@ -54,7 +57,7 @@ type AssertTrue<T extends true> = T;
 
 /** Every kind of node the scene graph can represent, mirroring `SceneNodeKind`. */
 export const sceneNodeKindSchema = z
-  .enum(["group", "mesh", "camera", "light", "text", "image", "compositionRef"])
+  .enum(["group", "mesh", "camera", "light", "text", "image", "video", "compositionRef"])
   .describe("Which of the fixed set of scene node kinds this node is.");
 
 type _CheckSceneNodeKind = AssertTrue<
@@ -67,6 +70,38 @@ export const lightTypeSchema = z
   .describe("The kind of light source this light node represents.");
 
 type _CheckLightType = AssertTrue<AssertEqual<z.infer<typeof lightTypeSchema>, LightType>>;
+
+/**
+ * How a video node's source video is fitted into its plane, mirroring
+ * `VideoFitMode`. See `VideoFitMode`'s own doc comment in `@cadra/core` for
+ * what each keyword means.
+ */
+export const videoFitModeSchema = z
+  .enum(["cover", "contain", "fill", "none"])
+  .describe(
+    "How the source video is fitted into this node's plane when aspect ratios differ, " +
+      "mirroring the CSS object-fit keywords of the same names.",
+  );
+
+type _CheckVideoFitMode = AssertTrue<AssertEqual<z.infer<typeof videoFitModeSchema>, VideoFitMode>>;
+
+/**
+ * What a video node does once its clip-local frame maps past its trimmed
+ * source range's natural end, mirroring `VideoOutOfRangeBehavior`. See
+ * `VideoOutOfRangeBehavior`'s own doc comment in `@cadra/core` for the exact
+ * boundary semantics of each option.
+ */
+export const videoOutOfRangeBehaviorSchema = z
+  .enum(["hold", "loop"])
+  .describe(
+    "What happens once the clip-local frame maps past the trimmed source range's natural " +
+      "end (only relevant when the source is shorter than this node's placement). 'hold' " +
+      "freezes on the trimmed range's last frame; 'loop' wraps back to its first frame.",
+  );
+
+type _CheckVideoOutOfRangeBehavior = AssertTrue<
+  AssertEqual<z.infer<typeof videoOutOfRangeBehaviorSchema>, VideoOutOfRangeBehavior>
+>;
 
 /** A plain container node. Groups exist only to organize their children. */
 export const groupNodeSchema = z.strictObject({
@@ -257,6 +292,101 @@ export const imageNodeSchema = z.strictObject({
 type _CheckImageNode = AssertTrue<AssertEqual<z.infer<typeof imageNodeSchema>, ImageNode>>;
 
 /**
+ * An external video file placed as a layer, mirroring `VideoNode` in
+ * `@cadra/core`. `assetRef` is resolved against an asset registry, exactly
+ * like `imageNodeSchema.assetRef`.
+ *
+ * `opacity` accepts either a plain value or a keyframe track, via
+ * `propertySchema` (mirroring `Property<number>` on `VideoNode`), same as
+ * every other Phase 26 keyframeable field on other node kinds.
+ *
+ * `.superRefine` enforces two cross-field rules `@cadra/core`'s own types
+ * cannot express structurally: `outFrame` (when both `inFrame` and
+ * `outFrame` are given) must be strictly greater than `inFrame`, since a
+ * trimmed range that ends at or before where it starts has no frames in it;
+ * and `playbackRate` (when given) must be positive, since a zero or
+ * negative playback rate has no well-defined "how fast the source advances"
+ * meaning (a negative rate would mean playing backward, which
+ * `resolveVideoSourceFrame` does not model).
+ */
+export const videoNodeSchema = z
+  .strictObject({
+    id: z.string().describe("Unique identifier for this scene node within the project."),
+    kind: z.literal("video").describe("Discriminant identifying this node as a video."),
+    name: z
+      .string()
+      .optional()
+      .describe("Optional human-readable label, purely for authoring and debugging."),
+    transform: animatableTransformSchema.describe(
+      "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track.",
+    ),
+    visible: propertySchema(z.boolean()).describe(
+      "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track.",
+    ),
+    assetRef: z
+      .string()
+      .describe("Id of a video asset, resolved against an asset registry by the renderer."),
+    inFrame: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe(
+        "Source-video-local frame the trimmed range starts at, inclusive. Defaults to 0.",
+      ),
+    outFrame: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe(
+        "Source-video-local frame the trimmed range ends at, inclusive. Defaults to the " +
+          "source's own last frame.",
+      ),
+    playbackRate: z
+      .number()
+      .positive()
+      .optional()
+      .describe(
+        "How fast the source advances relative to composition time. Must be positive. Defaults to 1.",
+      ),
+    fitMode: videoFitModeSchema
+      .optional()
+      .describe(
+        "How the source video is fitted into this node's plane when aspect ratios differ. " +
+          "Defaults to 'cover'.",
+      ),
+    outOfRangeBehavior: videoOutOfRangeBehaviorSchema
+      .optional()
+      .describe(
+        "What happens once the clip-local frame maps past the trimmed range's natural end. " +
+          "Defaults to 'hold'.",
+      ),
+    opacity: propertySchema(z.number()).describe(
+      "Opacity this video layer is composited at, 0 to 1. A plain number or a keyframe track. " +
+        "Defaults to 1.",
+    ),
+    get children(): z.ZodArray<typeof sceneNodeSchema> {
+      return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
+    },
+  })
+  .superRefine((node, ctx) => {
+    if (
+      node.inFrame !== undefined &&
+      node.outFrame !== undefined &&
+      node.outFrame <= node.inFrame
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: `outFrame (${node.outFrame}) must be greater than inFrame (${node.inFrame}).`,
+        path: ["outFrame"],
+      });
+    }
+  });
+
+type _CheckVideoNode = AssertTrue<AssertEqual<z.infer<typeof videoNodeSchema>, VideoNode>>;
+
+/**
  * A reference to another composition, embedded by id. Carries no content of
  * its own; a timeline resolver replaces it with the referenced composition's
  * resolved output.
@@ -291,7 +421,7 @@ type _CheckCompositionRefNode = AssertTrue<
 /**
  * A node in the scene graph, discriminated on `kind`. Mirrors the `SceneNode`
  * union in `@cadra/core` exactly: every variant is a strict, closed shape,
- * and an object whose `kind` does not match one of the seven known literals
+ * and an object whose `kind` does not match one of the eight known literals
  * is rejected rather than coerced into the closest variant.
  */
 export const sceneNodeSchema: z.ZodDiscriminatedUnion<
@@ -302,6 +432,7 @@ export const sceneNodeSchema: z.ZodDiscriminatedUnion<
     typeof lightNodeSchema,
     typeof textNodeSchema,
     typeof imageNodeSchema,
+    typeof videoNodeSchema,
     typeof compositionRefNodeSchema,
   ]
 > = z.discriminatedUnion("kind", [
@@ -311,6 +442,7 @@ export const sceneNodeSchema: z.ZodDiscriminatedUnion<
   lightNodeSchema,
   textNodeSchema,
   imageNodeSchema,
+  videoNodeSchema,
   compositionRefNodeSchema,
 ]);
 

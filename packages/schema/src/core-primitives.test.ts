@@ -7,6 +7,7 @@ import {
   Series,
   Shape,
   Text,
+  Video,
 } from "@cadra/core";
 import { describe, expect, it } from "vitest";
 
@@ -16,6 +17,7 @@ import {
   lightNodeSchema,
   meshNodeSchema,
   textNodeSchema,
+  videoNodeSchema,
 } from "./scene-node.js";
 import { clipSchema, compositionSchema } from "./timeline.js";
 
@@ -64,6 +66,28 @@ describe("Image output validates against imageNodeSchema", () => {
   });
 });
 
+describe("Video output validates against videoNodeSchema", () => {
+  it("validates a minimal Video", () => {
+    const result = videoNodeSchema.safeParse(Video({ id: "video-1" }));
+    expect(result.success, JSON.stringify(!result.success && result.error.issues)).toBe(true);
+  });
+
+  it("validates a fully overridden Video", () => {
+    const node = Video({
+      id: "video-1",
+      name: "Intro Clip",
+      assetRef: "intro.mp4",
+      inFrame: 10,
+      outFrame: 100,
+      playbackRate: 2,
+      fitMode: "contain",
+      outOfRangeBehavior: "loop",
+      opacity: 0.5,
+    });
+    expect(videoNodeSchema.safeParse(node).success).toBe(true);
+  });
+});
+
 describe("Camera output validates against cameraNodeSchema", () => {
   it("validates a minimal Camera", () => {
     const result = cameraNodeSchema.safeParse(Camera({ id: "camera-1" }));
@@ -108,6 +132,7 @@ describe("Series output validates against clipSchema for every produced clip", (
       { id: "clip-1", durationInFrames: 10, content: Shape({ id: "s1" }) },
       { id: "clip-2", durationInFrames: 20, content: Text({ id: "t1" }) },
       { id: "clip-3", durationInFrames: 15, content: Image({ id: "i1" }) },
+      { id: "clip-4", durationInFrames: 25, content: Video({ id: "v1" }) },
     ]);
 
     for (const clip of clips) {

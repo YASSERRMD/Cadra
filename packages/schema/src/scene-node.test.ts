@@ -14,7 +14,7 @@ function baseFields() {
 
 describe("sceneNodeKindSchema", () => {
   it("accepts every known kind", () => {
-    const kinds = ["group", "mesh", "camera", "light", "text", "image", "compositionRef"];
+    const kinds = ["group", "mesh", "camera", "light", "text", "image", "video", "compositionRef"];
     for (const kind of kinds) {
       expect(sceneNodeKindSchema.safeParse(kind).success).toBe(true);
     }
@@ -331,6 +331,163 @@ describe("sceneNodeSchema: transform and visible are Property<T> for every node 
 describe("sceneNodeSchema: image", () => {
   it("accepts an image node with assetRef", () => {
     const result = sceneNodeSchema.safeParse({ ...baseFields(), kind: "image", assetRef: "img-1" });
+    expect(result.success).toBe(true);
+  });
+});
+
+describe("sceneNodeSchema: video", () => {
+  it("accepts a minimal video node with only assetRef and opacity", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "video",
+      assetRef: "clip-1",
+      opacity: 1,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a video node with every optional field given", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "video",
+      assetRef: "clip-1",
+      inFrame: 10,
+      outFrame: 100,
+      playbackRate: 2,
+      fitMode: "contain",
+      outOfRangeBehavior: "loop",
+      opacity: 0.5,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a video node with a keyframe track for opacity", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "video",
+      assetRef: "clip-1",
+      opacity: {
+        type: "keyframeTrack",
+        keyframes: [
+          { frame: 0, value: 0 },
+          { frame: 30, value: 1 },
+        ],
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a video node missing assetRef", () => {
+    const result = sceneNodeSchema.safeParse({ ...baseFields(), kind: "video", opacity: 1 });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a video node missing opacity", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "video",
+      assetRef: "clip-1",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an invalid fitMode", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "video",
+      assetRef: "clip-1",
+      fitMode: "stretch",
+      opacity: 1,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an invalid outOfRangeBehavior", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "video",
+      assetRef: "clip-1",
+      outOfRangeBehavior: "freeze",
+      opacity: 1,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a non-positive playbackRate", () => {
+    for (const playbackRate of [0, -1]) {
+      const result = sceneNodeSchema.safeParse({
+        ...baseFields(),
+        kind: "video",
+        assetRef: "clip-1",
+        playbackRate,
+        opacity: 1,
+      });
+      expect(result.success).toBe(false);
+    }
+  });
+
+  it("accepts outFrame strictly greater than inFrame", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "video",
+      assetRef: "clip-1",
+      inFrame: 10,
+      outFrame: 11,
+      opacity: 1,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects outFrame equal to inFrame, with a precise diagnostic", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "video",
+      assetRef: "clip-1",
+      inFrame: 10,
+      outFrame: 10,
+      opacity: 1,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((candidate) =>
+        candidate.path.join(".").includes("outFrame"),
+      );
+      expect(issue).toBeDefined();
+      expect(issue?.message).toMatch(/must be greater than inFrame/);
+    }
+  });
+
+  it("rejects outFrame less than inFrame", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "video",
+      assetRef: "clip-1",
+      inFrame: 10,
+      outFrame: 5,
+      opacity: 1,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts inFrame alone, without outFrame", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "video",
+      assetRef: "clip-1",
+      inFrame: 10,
+      opacity: 1,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts outFrame alone, without inFrame", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "video",
+      assetRef: "clip-1",
+      outFrame: 100,
+      opacity: 1,
+    });
     expect(result.success).toBe(true);
   });
 });

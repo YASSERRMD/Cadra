@@ -5,6 +5,7 @@ import {
   LIGHT_ANIMATABLE_PROPERTIES,
   SHAPE_ANIMATABLE_PROPERTIES,
   TEXT_ANIMATABLE_PROPERTIES,
+  VIDEO_ANIMATABLE_PROPERTIES,
 } from "@cadra/core";
 
 import { CURRENT_SCHEMA_VERSION } from "./envelope.js";
@@ -109,6 +110,7 @@ const PRIMITIVE_ANIMATABLE_PROPERTIES: Record<string, readonly string[]> = {
   light: LIGHT_ANIMATABLE_PROPERTIES,
   text: TEXT_ANIMATABLE_PROPERTIES,
   image: IMAGE_ANIMATABLE_PROPERTIES,
+  video: VIDEO_ANIMATABLE_PROPERTIES,
   compositionRef: ["transform.position", "transform.rotation", "transform.scale", "visible"],
 };
 

@@ -73,6 +73,9 @@ export {
   sceneNodeKindSchema,
   sceneNodeSchema,
   textNodeSchema,
+  videoFitModeSchema,
+  videoNodeSchema,
+  videoOutOfRangeBehaviorSchema,
 } from "./scene-node.js";
 export {
   activeCameraEntrySchema,
