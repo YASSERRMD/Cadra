@@ -3,18 +3,11 @@ import { describe, expect, it } from "vitest";
 
 import { parseFontWithFontkit } from "./font-parser-fontkit.js";
 import { layoutParagraphLines } from "./paragraph-layout.js";
-import { segmentParagraphWords } from "./paragraph-words.js";
-import { shapeLogicalRuns } from "./shape-text.js";
 import { loadFixtureFont } from "./test-support/load-fixture-font.js";
+import { measureUnwrappedWidth } from "./test-support/measure-unwrapped-width.js";
 
 const ROBOTO_FLEX = parseFontWithFontkit(loadFixtureFont("RobotoFlex-Variable"));
 const NOTO_SANS_ARABIC = parseFontWithFontkit(loadFixtureFont("NotoSansArabic-Variable"));
-
-/** The total natural width (in em units) of `text` shaped with `font`, words plus every gap: what layoutParagraphLines would need for the whole thing to fit on one line. */
-function measureUnwrappedWidth(font: typeof ROBOTO_FLEX, text: string): number {
-  const words = segmentParagraphWords(text, shapeLogicalRuns(font, text), font.metrics.unitsPerEm);
-  return words.reduce((sum, word) => sum + word.advance + word.trailingWhitespace, 0);
-}
 
 function rightEdge(glyphs: ReadonlyArray<{ penX: number; xAdvance: number }>): number {
   return Math.max(...glyphs.map((g) => g.penX + g.xAdvance));

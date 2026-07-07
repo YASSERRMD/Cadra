@@ -86,7 +86,7 @@ export interface GlyphQuadPlacement {
  * so this is the one place that math is implemented.
  */
 export function placeGlyphQuad(
-  glyph: ShapedGlyph,
+  glyph: Pick<ShapedGlyph, "glyphId" | "xOffset" | "yOffset">,
   penX: number,
   penY: number,
   lookup: GlyphAtlasLookup,
