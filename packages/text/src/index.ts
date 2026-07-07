@@ -107,7 +107,7 @@ export type {
   PrePlacedGlyph,
 } from "./paragraph-layout.js";
 export { layoutParagraphLines } from "./paragraph-layout.js";
-export type { ParagraphRenderData, PrepareParagraphRenderDataOptions, StyledPositionedGlyph } from "./paragraph-render-data.js";
+export type { ParagraphRenderData, PrepareParagraphRenderDataOptions } from "./paragraph-render-data.js";
 export { prepareParagraphRenderData } from "./paragraph-render-data.js";
 export type { ParagraphWord, WordRange } from "./paragraph-words.js";
 export { computeLineWidth, segmentParagraphWords } from "./paragraph-words.js";

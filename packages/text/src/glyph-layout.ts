@@ -1,3 +1,5 @@
+import type { ColorRGBA } from "@cadra/core";
+
 import type { MsdfAtlas, MsdfGlyphPlacement } from "./msdf-atlas.js";
 import type { ShapedGlyph, ShapedTextRun } from "./shaped-run.js";
 import { isWhitespaceChar } from "./whitespace.js";
@@ -28,6 +30,13 @@ export interface PositionedGlyph {
   page: number;
   /** Normalized (0-1) texture coordinates into that atlas page, raw pixel row order (row 0 = top of the PNG). */
   uv: { u0: number; v0: number; u1: number; v1: number };
+  /**
+   * This glyph's own inline-style-span color override (`paragraph-layout.ts`,
+   * Phase 45), when it has one. `computeGlyphLayout` (Phase 44, no
+   * inline-style concept) never sets this; a renderer with no per-glyph
+   * styling need can ignore it and fall back to its own uniform color.
+   */
+  color?: ColorRGBA;
 }
 
 export interface GlyphLayoutResult {

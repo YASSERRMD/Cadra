@@ -1,5 +1,3 @@
-import type { ColorRGBA } from "@cadra/core";
-
 import { buildGlyphAtlasLookup, placeGlyphQuad, type PositionedGlyph } from "./glyph-layout.js";
 import type { ParagraphSpan } from "./inline-text-style.js";
 import type { MsdfAtlasOptions, MsdfAtlasPage } from "./msdf-atlas.js";
@@ -8,19 +6,14 @@ import { layoutParagraphLines, type ParagraphLayoutOptions, type ParagraphLineMe
 import type { ParsedFont } from "./parsed-font.js";
 import { sharedAtlasCache } from "./shared-atlas-cache.js";
 
-/** A `PositionedGlyph` with its inline style span's resolved color attached, when it has one (a plain, unstyled paragraph never sets this - a renderer with no per-glyph styling need can ignore it and fall back to its own uniform color, same as Phase 44's plain text path). */
-export interface StyledPositionedGlyph extends PositionedGlyph {
-  color?: ColorRGBA;
-}
-
 export interface PrepareParagraphRenderDataOptions extends ParagraphLayoutOptions {
   atlasOptions?: MsdfAtlasOptions;
 }
 
-/** Everything a renderer needs to draw a laid-out paragraph: every distinct font's atlas pages merged into one flat list, plus every glyph's em-space position, UVs, resolved style, and line metrics. */
+/** Everything a renderer needs to draw a laid-out paragraph: every distinct font's atlas pages merged into one flat list, plus every glyph's em-space position, UVs, resolved style (via `PositionedGlyph.color`), and line metrics. Structurally a superset of Phase 44's `TextRenderData` (adds `lines`), so the same renderer code path can consume either. */
 export interface ParagraphRenderData {
   readonly atlasPages: readonly MsdfAtlasPage[];
-  readonly glyphs: readonly StyledPositionedGlyph[];
+  readonly glyphs: readonly PositionedGlyph[];
   readonly lineCount: number;
   readonly lines: readonly ParagraphLineMetrics[];
 }
@@ -62,7 +55,7 @@ export async function prepareParagraphRenderData(
     lookupByFont.set(contentHash, buildGlyphAtlasLookup(atlas));
   }
 
-  const glyphs: StyledPositionedGlyph[] = [];
+  const glyphs: PositionedGlyph[] = [];
   for (const glyph of linesLayout.glyphs) {
     const lookup = lookupByFont.get(glyph.font.contentHash);
     if (lookup === undefined) {
