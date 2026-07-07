@@ -285,6 +285,84 @@ export interface TextMorphConfig {
   progress: Property<number>;
 }
 
+/**
+ * One color stop of a `TextFill` gradient. `offset` (`0` at the gradient's
+ * own start, `1` at its own end) is structural, not `Property<number>` -
+ * like a stagger/physics config's own `distance`/`amplitude`, it shapes the
+ * gradient itself rather than being a value that changes over the
+ * animation's own timeline - `color` is the part actually meant to be
+ * keyframed (e.g. a color-cycling gradient).
+ */
+export interface TextGradientStop {
+  offset: number;
+  color: Property<ColorRGBA>;
+}
+
+/**
+ * How a `TextNode` colors its own glyphs. `"solid"` matches `TextNode.color`
+ * exactly (in fact `TextNode.color` alone is exactly a `{type: "solid"}`
+ * fill; `fill` is an opt-in escape hatch that, when present, takes over
+ * from `color` entirely). `"linearGradient"`/`"radialGradient"` blend
+ * between `stops` across the text's own whole rendered block (every glyph
+ * together, not each glyph independently) - see
+ * `packages/renderer/src/text/msdf-material.ts` for exactly how `angle`
+ * and stop `offset`s map onto that block.
+ *
+ * `"texture"`/`"video"` name a registered asset to sample as the fill
+ * instead of a flat/gradient color. Real per-pixel image/video sampling
+ * needs the same asset-loading and texture-upload pipeline `ImageNode`/
+ * `VideoNode` themselves are still waiting on (both are still placeholder
+ * planes - see `node-factory.ts`), so a `TextNode` using either renders
+ * the same documented placeholder those two node kinds already do, not a
+ * broken/silent no-op: this is an existing, shared architectural
+ * dependency, not a shortcut specific to text.
+ */
+export type TextFill =
+  | { type: "solid"; color: Property<ColorRGBA> }
+  | { type: "linearGradient"; angle?: Property<number>; stops: readonly TextGradientStop[] }
+  | { type: "radialGradient"; stops: readonly TextGradientStop[] }
+  | { type: "texture"; assetRef: string }
+  | { type: "video"; assetRef: string };
+
+/** An MSDF-based outline (stroke) drawn around each glyph's own edge, outside its fill. */
+export interface TextOutlineConfig {
+  /** In the same fontSize-relative em units as `TextStaggerConfig.distance`. */
+  width: Property<number>;
+  color: Property<ColorRGBA>;
+}
+
+/** Whether a `TextGlowConfig` extends outward from a glyph's own edge (`"outer"`, the typical neon/emissive look) or fades inward from it (`"inner"`). */
+export type TextGlowDirection = "outer" | "inner";
+
+/** A soft MSDF-based glow, cheap to compute since it reuses the same signed-distance field the base fill/anti-aliasing already samples. */
+export interface TextGlowConfig {
+  /** Defaults to `"outer"`. */
+  direction?: TextGlowDirection;
+  /** How far the glow extends, in fontSize-relative em units. */
+  radius: Property<number>;
+  color: Property<ColorRGBA>;
+  /** Multiplies the glow's own peak opacity. Defaults to `1`. */
+  intensity?: Property<number>;
+}
+
+/**
+ * A drop shadow (or, via `steps` greater than `1`, a repeated-offset "long
+ * shadow" - a common kinetic-typography look, an inexpensive approximation
+ * of a true extruded/stretched shadow) rendered behind each glyph, sampling
+ * the same MSDF atlas at an offset position rather than needing separate
+ * shadow geometry.
+ */
+export interface TextShadowConfig {
+  /** In fontSize-relative em units. */
+  offsetX: Property<number>;
+  offsetY: Property<number>;
+  /** Softens the shadow's own edge, in fontSize-relative em units. Defaults to `0` (a hard shadow). */
+  blur?: Property<number>;
+  color: Property<ColorRGBA>;
+  /** Structural, not `Property<number>` (mirrors `TextShadowConfig`'s own sibling configs' `periodFrames`-style tuning fields): repeats `offsetX`/`offsetY` this many times, stepping further out each repetition, approximating a long shadow. Defaults to `1` (a single ordinary drop shadow). */
+  steps?: number;
+}
+
 /** A block of rendered text. */
 export interface TextNode extends SceneNodeBase<"text"> {
   content: string;
@@ -308,6 +386,26 @@ export interface TextNode extends SceneNodeBase<"text"> {
   path?: TextPathConfig;
   /** Crossfade-morphs this node's own content from another string. Omitted means no morphing: `content` renders as-is. */
   morph?: TextMorphConfig;
+  /** A richer fill than a flat color: gradient, texture, or video. Omitted means a plain `color` fill (only meaningful for the flat MSDF path, not the extruded one - see `msdf-material.ts`). */
+  fill?: TextFill;
+  /** An MSDF-based outline around each glyph. Omitted means no outline. */
+  outline?: TextOutlineConfig;
+  /** A soft glow around each glyph. Omitted means no glow. */
+  glow?: TextGlowConfig;
+  /** A drop or long shadow behind each glyph. Omitted means no shadow. */
+  shadow?: TextShadowConfig;
+  /**
+   * This node's own variable-font axis coordinates (e.g. `{wght: 700}`),
+   * resolved fresh at whatever frame the text is rendered - unlike
+   * `content`/`fontRef`, animating this smoothly means a genuinely
+   * different resolved instance (different glyph outlines, not just a
+   * different advance width) at each distinct sampled frame, so it is
+   * folded into the same render-key/registry mechanism `content`/`fontRef`
+   * already use (see `computeTextNodeRenderKey`), at the same
+   * ahead-of-render-time cost a keyframed `content` would already pay.
+   * Omitted means the font's own default instance.
+   */
+  variationAxes?: Property<Readonly<Record<string, number>>>;
 }
 
 /** A 2D image plane. `assetRef` is resolved against an asset registry. */
