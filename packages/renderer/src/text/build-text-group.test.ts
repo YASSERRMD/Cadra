@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { hashAssetBytes } from "@cadra/core";
-import { parseFontWithFontkit, prepareTextRenderData, shapeText } from "@cadra/text";
+import { parseFontWithFontkit, prepareParagraphRenderData, prepareTextRenderData, shapeText } from "@cadra/text";
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 
@@ -48,6 +48,57 @@ describe("buildTextGroup: flat MSDF path", () => {
 
     expect(() => resources.setColor(0, 1, 0, 0.5)).not.toThrow();
     expect(resources.geometries[0]).toBe(geometryBeforeSetColor);
+  });
+
+  it("renders a glyph with its own inline-style color on a distinct material from the node's base color", async () => {
+    const data = await prepareParagraphRenderData(
+      [{ text: "A" }, { text: "B", style: { color: [0, 0, 1, 1] } }],
+      { font: ROBOTO_FLEX, maxWidth: 1000 },
+    );
+    const resources = buildTextGroup(data, { color: [1, 1, 1, 1] });
+
+    const lineGroup = resources.group.children[0] as THREE.Group;
+    const wordGroup = lineGroup.children[0] as THREE.Group;
+    const [meshA, meshB] = wordGroup.children as THREE.Mesh[];
+
+    expect(meshA?.material).not.toBe(meshB?.material);
+    // Exactly these two distinct materials should exist for one atlas page.
+    expect(resources.materials).toHaveLength(2);
+  });
+
+  it("setColor updates only the node's base-color material, leaving an inline-style override untouched", async () => {
+    const data = await prepareParagraphRenderData(
+      [{ text: "A" }, { text: "B", style: { color: [0, 0, 1, 1] } }],
+      { font: ROBOTO_FLEX, maxWidth: 1000 },
+    );
+    const resources = buildTextGroup(data, { color: [1, 1, 1, 1] });
+
+    const lineGroup = resources.group.children[0] as THREE.Group;
+    const wordGroup = lineGroup.children[0] as THREE.Group;
+    const [meshA, meshB] = wordGroup.children as THREE.Mesh[];
+    const overrideMaterial = meshB?.material;
+
+    expect(() => resources.setColor(0, 1, 0, 0.5)).not.toThrow();
+    // The base-color mesh's own material is unaffected in *identity* (no
+    // rebuild), and the override mesh's material must still be the exact
+    // same object it started as (setColor never touches it at all).
+    expect(meshA?.material).toBeDefined();
+    expect(meshB?.material).toBe(overrideMaterial);
+  });
+
+  it("shares one material across every glyph resolving to the same page and color", async () => {
+    const data = await prepareParagraphRenderData([{ text: "AAB" }], {
+      font: ROBOTO_FLEX,
+      maxWidth: 1000,
+    });
+    const resources = buildTextGroup(data, { color: [1, 1, 1, 1] });
+
+    const lineGroup = resources.group.children[0] as THREE.Group;
+    const wordGroup = lineGroup.children[0] as THREE.Group;
+    const materialsUsed = new Set((wordGroup.children as THREE.Mesh[]).map((mesh) => mesh.material));
+
+    expect(materialsUsed.size).toBe(1);
+    expect(resources.materials).toHaveLength(1);
   });
 });
 
@@ -111,5 +162,48 @@ describe("buildTextGroup: extruded path", () => {
 
     expect(flat.geometries).toHaveLength(glyphCount);
     expect(extruded.geometries).toHaveLength(glyphCount);
+  });
+
+  it("renders a glyph with its own inline-style color on a distinct extrusion material from the node's base color", async () => {
+    const data = await prepareParagraphRenderData(
+      [{ text: "A" }, { text: "B", style: { color: [0, 0, 1, 1] } }],
+      { font: ROBOTO_FLEX, maxWidth: 1000 },
+    );
+    const resources = buildTextGroup(data, {
+      color: [1, 1, 1, 1],
+      extrudeDepth: 0.2,
+      font: { bytes: ROBOTO_FLEX_BYTES, contentHash: hashAssetBytes(ROBOTO_FLEX_BYTES) },
+    });
+
+    const lineGroup = resources.group.children[0] as THREE.Group;
+    const wordGroup = lineGroup.children[0] as THREE.Group;
+    const [meshA, meshB] = wordGroup.children as THREE.Mesh[];
+
+    expect(meshA?.material).not.toBe(meshB?.material);
+    expect(resources.materials).toHaveLength(2);
+  });
+
+  it("setColor updates only the extrusion path's base-color material, leaving an inline-style override untouched", async () => {
+    const data = await prepareParagraphRenderData(
+      [{ text: "A" }, { text: "B", style: { color: [0, 0, 1, 1] } }],
+      { font: ROBOTO_FLEX, maxWidth: 1000 },
+    );
+    const resources = buildTextGroup(data, {
+      color: [1, 1, 1, 1],
+      extrudeDepth: 0.2,
+      font: { bytes: ROBOTO_FLEX_BYTES, contentHash: hashAssetBytes(ROBOTO_FLEX_BYTES) },
+    });
+
+    const lineGroup = resources.group.children[0] as THREE.Group;
+    const wordGroup = lineGroup.children[0] as THREE.Group;
+    const [meshA, meshB] = wordGroup.children as THREE.Mesh[];
+    const overrideMaterial = meshB?.material as THREE.MeshStandardMaterial;
+    const baseMaterial = meshA?.material as THREE.MeshStandardMaterial;
+
+    resources.setColor(0, 1, 0, 0.5);
+
+    expect(baseMaterial.color.g).toBeCloseTo(1, 5);
+    expect(overrideMaterial.color.b).toBeCloseTo(1, 5);
+    expect(overrideMaterial.color.g).toBeCloseTo(0, 5);
   });
 });

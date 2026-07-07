@@ -8,7 +8,7 @@ import type { ColorRGBA } from "@cadra/core";
 import { getGlyphPathCommands, type GlyphPathCommand, type TextRenderData } from "@cadra/text/browser";
 import * as THREE from "three";
 
-import { createMsdfTextMaterial } from "./msdf-material.js";
+import { createMsdfTextMaterial, type MsdfTextMaterialHandle } from "./msdf-material.js";
 
 /** Everything `buildTextGroup` allocated, so the reconciler can dispose exactly these resources (and no shared/pooled ones) when a text node's content changes or is removed. */
 export interface TextGroupResources {
@@ -92,12 +92,32 @@ export function buildTextGroup(
 
   if (useExtrusion) {
     const font = options.font as ExtrusionFontSource;
-    const material = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(options.color[0], options.color[1], options.color[2]),
-      transparent: options.color[3] < 1,
-      opacity: options.color[3],
-    });
-    materials.push(material);
+    const materialsByColorKey = new Map<string, THREE.MeshStandardMaterial>();
+    // Every glyph resolving to the node's own base color (no inline-style
+    // override) shares one tracked material, so setColor can still update
+    // it live without rebuilding geometry; a glyph with its own resolved
+    // color (Phase 45's inline style spans, see PositionedGlyph.color's own
+    // doc) gets its own material instead, fixed at that color regardless
+    // of the node's own animated color.
+    const baseMaterials = new Set<THREE.MeshStandardMaterial>();
+
+    function getExtrusionMaterial(color: ColorRGBA, isBaseColor: boolean): THREE.MeshStandardMaterial {
+      const key = colorKey(color);
+      let material = materialsByColorKey.get(key);
+      if (material === undefined) {
+        material = new THREE.MeshStandardMaterial({
+          color: new THREE.Color(color[0], color[1], color[2]),
+          transparent: color[3] < 1,
+          opacity: color[3],
+        });
+        materialsByColorKey.set(key, material);
+        materials.push(material);
+      }
+      if (isBaseColor) {
+        baseMaterials.add(material);
+      }
+      return material;
+    }
 
     for (const glyph of data.glyphs) {
       const commands = getGlyphPathCommands(font.bytes, font.contentHash, glyph.glyphId);
@@ -107,6 +127,7 @@ export function buildTextGroup(
       }
       const geometry = new THREE.ExtrudeGeometry(shape, { depth: extrudeDepth, bevelEnabled: false });
       geometries.push(geometry);
+      const material = getExtrusionMaterial(glyph.color ?? options.color, glyph.color === undefined);
       const mesh = new THREE.Mesh(geometry, material);
       mesh.name = `glyph-${glyph.cluster}-${glyph.glyphId}`;
       mesh.position.set(glyph.origin.x, glyph.origin.y, -extrudeDepth / 2);
@@ -120,26 +141,47 @@ export function buildTextGroup(
       materials,
       textures,
       setColor: (r, g, b, a) => {
-        material.color.setRGB(r, g, b);
-        material.opacity = a;
-        material.transparent = a < 1;
+        for (const material of baseMaterials) {
+          material.color.setRGB(r, g, b);
+          material.opacity = a;
+          material.transparent = a < 1;
+        }
       },
     };
   }
 
-  const materialHandlesByPage = data.atlasPages.map((page) => {
+  const texturesByPage = data.atlasPages.map((page) => {
     const texture = new THREE.DataTexture(page.pixels, page.width, page.height, THREE.RGBAFormat);
     texture.flipY = false;
     texture.needsUpdate = true;
     textures.push(texture);
-    const handle = createMsdfTextMaterial(texture);
-    handle.setColor(options.color[0], options.color[1], options.color[2], options.color[3]);
-    materials.push(handle.material);
-    return handle;
+    return texture;
   });
 
+  const materialHandlesByKey = new Map<string, MsdfTextMaterialHandle>();
+  const baseMaterialHandles = new Set<MsdfTextMaterialHandle>();
+
+  function getMsdfMaterialHandle(page: number, color: ColorRGBA, isBaseColor: boolean): MsdfTextMaterialHandle | undefined {
+    const texture = texturesByPage[page];
+    if (texture === undefined) {
+      return undefined;
+    }
+    const key = `${page}:${colorKey(color)}`;
+    let handle = materialHandlesByKey.get(key);
+    if (handle === undefined) {
+      handle = createMsdfTextMaterial(texture);
+      handle.setColor(color[0], color[1], color[2], color[3]);
+      materials.push(handle.material);
+      materialHandlesByKey.set(key, handle);
+    }
+    if (isBaseColor) {
+      baseMaterialHandles.add(handle);
+    }
+    return handle;
+  }
+
   for (const glyph of data.glyphs) {
-    const handle = materialHandlesByPage[glyph.page];
+    const handle = getMsdfMaterialHandle(glyph.page, glyph.color ?? options.color, glyph.color === undefined);
     if (handle === undefined) {
       continue;
     }
@@ -165,11 +207,16 @@ export function buildTextGroup(
     materials,
     textures,
     setColor: (r, g, b, a) => {
-      for (const handle of materialHandlesByPage) {
+      for (const handle of baseMaterialHandles) {
         handle.setColor(r, g, b, a);
       }
     },
   };
+}
+
+/** A stable string key for a color, so glyphs resolving to the same color (whether both defaulting to the node's own base color, or coincidentally equal overrides) correctly share one material instead of each allocating its own. */
+function colorKey(color: ColorRGBA): string {
+  return color.join(",");
 }
 
 /** Rewrites a `PlaneGeometry`'s default full-`[0,1]` UVs to sample exactly one glyph's rectangle in the atlas. */
