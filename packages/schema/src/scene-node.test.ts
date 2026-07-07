@@ -750,6 +750,260 @@ describe("sceneNodeSchema: text morph (Phase 52)", () => {
   });
 });
 
+describe("sceneNodeSchema: text fill (Phase 53)", () => {
+  it("accepts a solid fill", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      fill: { type: "solid", color: [1, 0, 0, 1] },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a linearGradient fill with every optional field set", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      fill: {
+        type: "linearGradient",
+        angle: 45,
+        stops: [
+          { offset: 0, color: [1, 0, 0, 1] },
+          { offset: 1, color: [0, 0, 1, 1] },
+        ],
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a radialGradient fill with a keyframed stop color", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      fill: {
+        type: "radialGradient",
+        stops: [
+          {
+            offset: 0,
+            color: {
+              type: "keyframeTrack",
+              keyframes: [
+                { frame: 0, value: [1, 1, 1, 1] },
+                { frame: 10, value: [0, 0, 0, 1] },
+              ],
+            },
+          },
+          { offset: 1, color: [0, 0, 0, 1] },
+        ],
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a texture fill and a video fill", () => {
+    const texture = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      fill: { type: "texture", assetRef: "asset-1" },
+    });
+    expect(texture.success).toBe(true);
+
+    const video = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      fill: { type: "video", assetRef: "asset-2" },
+    });
+    expect(video.success).toBe(true);
+  });
+
+  it("rejects an unknown fill type", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      fill: { type: "conicGradient", stops: [] },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a stray, unrecognized field on the fill (strict object)", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      fill: { type: "solid", color: [1, 0, 0, 1], unknownField: true },
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("sceneNodeSchema: text outline, glow, and shadow (Phase 53)", () => {
+  it("accepts an outline config", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      outline: { width: 0.05, color: [0, 0, 0, 1] },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts an outer and an inner glow config", () => {
+    const outer = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      glow: { direction: "outer", radius: 0.2, color: [1, 1, 0, 1], intensity: 1.5 },
+    });
+    expect(outer.success).toBe(true);
+
+    const inner = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      glow: { direction: "inner", radius: 0.1, color: [1, 1, 1, 1] },
+    });
+    expect(inner.success).toBe(true);
+  });
+
+  it("rejects an unknown glow direction", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      glow: { direction: "sideways", radius: 0.2, color: [1, 1, 0, 1] },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts a shadow config with every optional field set, for a long shadow", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      shadow: { offsetX: 0.05, offsetY: -0.05, blur: 0.02, color: [0, 0, 0, 0.5], steps: 6 },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a shadow config missing a required field", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      shadow: { offsetX: 0.05, color: [0, 0, 0, 0.5] },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a stray, unrecognized field on the outline/glow/shadow configs (strict object)", () => {
+    const onOutline = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      outline: { width: 0.05, color: [0, 0, 0, 1], unknownField: true },
+    });
+    expect(onOutline.success).toBe(false);
+
+    const onGlow = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      glow: { radius: 0.1, color: [1, 1, 1, 1], unknownField: true },
+    });
+    expect(onGlow.success).toBe(false);
+
+    const onShadow = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      shadow: { offsetX: 0, offsetY: 0, color: [0, 0, 0, 1], unknownField: true },
+    });
+    expect(onShadow.success).toBe(false);
+  });
+});
+
+describe("sceneNodeSchema: text variationAxes (Phase 53)", () => {
+  it("accepts a plain variationAxes record", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      variationAxes: { wght: 700, wdth: 100 },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a keyframe track for variationAxes", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      variationAxes: {
+        type: "keyframeTrack",
+        keyframes: [
+          { frame: 0, value: { wght: 400 } },
+          { frame: 30, value: { wght: 700 } },
+        ],
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a variationAxes record with a non-numeric value", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "text",
+      content: "Hello",
+      fontSize: 24,
+      color: [1, 1, 1, 1],
+      variationAxes: { wght: "bold" },
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
 describe("sceneNodeSchema: transform and visible are Property<T> for every node kind (Phase 26)", () => {
   it("accepts a keyframe track for transform.position, transform.rotation, and transform.scale independently", () => {
     const result = sceneNodeSchema.safeParse({
