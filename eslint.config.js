@@ -111,6 +111,7 @@ export default tseslint.config(
       "packages/renderer/src/**/*.ts",
       "packages/headless/src/**/*.ts",
       "packages/encode/src/**/*.ts",
+      "packages/text/src/**/*.ts",
     ],
     ignores: ["**/*.test.ts"],
     rules: {
