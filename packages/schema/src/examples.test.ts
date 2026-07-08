@@ -29,6 +29,9 @@ const EXAMPLE_NAMES = [
   "moving-shape",
   "camera-pan",
   "multi-track-transition",
+  "kinetic-title-sequence",
+  "product-shot-ibl-dof",
+  "rtl-latin-lower-third",
 ] as const;
 
 function loadExample(name: (typeof EXAMPLE_NAMES)[number]): unknown {

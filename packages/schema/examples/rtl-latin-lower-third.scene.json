@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "id": "project-rtl-latin-lower-third",
+    "name": "Arabic and Latin Lower Third Example",
+    "compositions": [
+      {
+        "id": "comp-rtl-latin-lower-third",
+        "name": "Main",
+        "fps": 30,
+        "durationInFrames": 90,
+        "width": 1920,
+        "height": 1080,
+        "tracks": [
+          {
+            "id": "track-lower-third-arabic",
+            "name": "Lower Third (Arabic)",
+            "clips": [
+              {
+                "id": "clip-lower-third-arabic",
+                "startFrame": 0,
+                "durationInFrames": 90,
+                "node": {
+                  "id": "lower-third-arabic-text",
+                  "kind": "text",
+                  "name": "Lower Third (Arabic)",
+                  "transform": {
+                    "position": [-6, -3, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1]
+                  },
+                  "visible": true,
+                  "content": "مرحبا بالعالم",
+                  "fontRef": "font-noto-sans-arabic",
+                  "fontSize": 64,
+                  "color": [1, 1, 1, 1],
+                  "stagger": {
+                    "preset": "fadeInUp",
+                    "grouping": "word",
+                    "startFrame": 0,
+                    "delayFrames": 6,
+                    "durationFrames": 20,
+                    "direction": "forward"
+                  },
+                  "children": []
+                }
+              }
+            ]
+          },
+          {
+            "id": "track-lower-third-latin",
+            "name": "Lower Third (Latin)",
+            "clips": [
+              {
+                "id": "clip-lower-third-latin",
+                "startFrame": 10,
+                "durationInFrames": 80,
+                "node": {
+                  "id": "lower-third-latin-text",
+                  "kind": "text",
+                  "name": "Lower Third (Latin)",
+                  "transform": {
+                    "position": [-6, -3.8, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1]
+                  },
+                  "visible": true,
+                  "content": "Hello, World",
+                  "fontRef": "font-inter-bold",
+                  "fontSize": 40,
+                  "color": [0.85, 0.85, 0.85, 1],
+                  "stagger": {
+                    "preset": "fadeInUp",
+                    "grouping": "word",
+                    "startFrame": 0,
+                    "delayFrames": 6,
+                    "durationFrames": 20,
+                    "direction": "forward"
+                  },
+                  "children": []
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

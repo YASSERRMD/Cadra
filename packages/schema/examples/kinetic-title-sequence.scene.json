@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "id": "project-kinetic-title-sequence",
+    "name": "Kinetic Title Sequence Example",
+    "compositions": [
+      {
+        "id": "comp-kinetic-title-sequence",
+        "name": "Main",
+        "fps": 30,
+        "durationInFrames": 90,
+        "width": 1920,
+        "height": 1080,
+        "tracks": [
+          {
+            "id": "track-kinetic-title",
+            "name": "Title",
+            "clips": [
+              {
+                "id": "clip-kinetic-title",
+                "startFrame": 0,
+                "durationInFrames": 90,
+                "node": {
+                  "id": "kinetic-title-text",
+                  "kind": "text",
+                  "name": "Kinetic Title",
+                  "transform": {
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1]
+                  },
+                  "visible": true,
+                  "content": "CADRA",
+                  "fontRef": "font-inter-bold",
+                  "fontSize": 120,
+                  "color": [1, 1, 1, 1],
+                  "stagger": {
+                    "preset": "fadeInUp",
+                    "grouping": "character",
+                    "startFrame": 0,
+                    "delayFrames": 3,
+                    "durationFrames": 18,
+                    "direction": "forward",
+                    "easing": "easeOutCubic",
+                    "distance": 0.6
+                  },
+                  "glow": {
+                    "direction": "outer",
+                    "radius": 0.08,
+                    "color": [0.4, 0.7, 1, 1],
+                    "intensity": 0.8
+                  },
+                  "children": []
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -377,14 +377,289 @@ const MULTI_TRACK_TRANSITION: SceneDocument = {
   },
 };
 
+const KINETIC_TITLE_SEQUENCE: SceneDocument = {
+  schemaVersion: 1,
+  project: {
+    id: "project-kinetic-title-sequence",
+    name: "Kinetic Title Sequence Example",
+    compositions: [
+      {
+        id: "comp-kinetic-title-sequence",
+        name: "Main",
+        fps: 30,
+        durationInFrames: 90,
+        width: 1920,
+        height: 1080,
+        tracks: [
+          {
+            id: "track-kinetic-title",
+            name: "Title",
+            clips: [
+              {
+                id: "clip-kinetic-title",
+                startFrame: 0,
+                durationInFrames: 90,
+                node: {
+                  id: "kinetic-title-text",
+                  kind: "text",
+                  name: "Kinetic Title",
+                  transform: {
+                    position: [0, 0, 0],
+                    rotation: [0, 0, 0],
+                    scale: [1, 1, 1],
+                  },
+                  visible: true,
+                  content: "CADRA",
+                  fontRef: "font-inter-bold",
+                  fontSize: 120,
+                  color: [1, 1, 1, 1],
+                  stagger: {
+                    preset: "fadeInUp",
+                    grouping: "character",
+                    startFrame: 0,
+                    delayFrames: 3,
+                    durationFrames: 18,
+                    direction: "forward",
+                    easing: "easeOutCubic",
+                    distance: 0.6,
+                  },
+                  glow: {
+                    direction: "outer",
+                    radius: 0.08,
+                    color: [0.4, 0.7, 1, 1],
+                    intensity: 0.8,
+                  },
+                  children: [],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+};
+
+const PRODUCT_SHOT_IBL_DOF: SceneDocument = {
+  schemaVersion: 1,
+  project: {
+    id: "project-product-shot-ibl-dof",
+    name: "Product Shot (IBL and Depth of Field) Example",
+    compositions: [
+      {
+        id: "comp-product-shot-ibl-dof",
+        name: "Main",
+        fps: 30,
+        durationInFrames: 90,
+        width: 1920,
+        height: 1080,
+        environment: {
+          envMapRef: "studio",
+          intensity: 1,
+          showBackground: false,
+        },
+        postProcessing: {
+          effects: [
+            { type: "depthOfField", focusDistance: 6, aperture: 0.03, maxBlur: 1 },
+            { type: "sharpen", amount: 0.3 },
+          ],
+        },
+        tracks: [
+          {
+            id: "track-product-camera",
+            name: "Camera",
+            clips: [
+              {
+                id: "clip-product-camera",
+                startFrame: 0,
+                durationInFrames: 90,
+                node: {
+                  id: "product-camera",
+                  kind: "camera",
+                  name: "Camera",
+                  transform: {
+                    position: [0, 1.5, 6],
+                    rotation: [0, 0, 0],
+                    scale: [1, 1, 1],
+                  },
+                  visible: true,
+                  fov: 40,
+                  near: 0.1,
+                  far: 1000,
+                  target: [0, 0, 0],
+                  children: [],
+                },
+              },
+            ],
+          },
+          {
+            id: "track-product-shape",
+            name: "Product",
+            clips: [
+              {
+                id: "clip-product-shape",
+                startFrame: 0,
+                durationInFrames: 90,
+                node: {
+                  id: "product-shape",
+                  kind: "mesh",
+                  name: "Product",
+                  transform: {
+                    position: [0, 0, 0],
+                    rotation: [0, 0.4, 0],
+                    scale: [1, 1, 1],
+                  },
+                  visible: true,
+                  geometryRef: "geometry-sphere",
+                  materialRef: "material-product-fallback",
+                  material: {
+                    baseColor: [1, 0.766, 0.336, 1],
+                    metalness: 1,
+                    roughness: 0.12,
+                  },
+                  castShadow: true,
+                  receiveShadow: true,
+                  children: [],
+                },
+              },
+            ],
+          },
+          {
+            id: "track-product-light",
+            name: "Key Light",
+            clips: [
+              {
+                id: "clip-product-light",
+                startFrame: 0,
+                durationInFrames: 90,
+                node: {
+                  id: "product-key-light",
+                  kind: "light",
+                  name: "Key Light",
+                  transform: {
+                    position: [3, 4, 5],
+                    rotation: [0, 0, 0],
+                    scale: [1, 1, 1],
+                  },
+                  visible: true,
+                  lightType: "directional",
+                  color: [1, 1, 1, 1],
+                  intensity: 1.8,
+                  castShadow: true,
+                  children: [],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+};
+
+const RTL_LATIN_LOWER_THIRD: SceneDocument = {
+  schemaVersion: 1,
+  project: {
+    id: "project-rtl-latin-lower-third",
+    name: "Arabic and Latin Lower Third Example",
+    compositions: [
+      {
+        id: "comp-rtl-latin-lower-third",
+        name: "Main",
+        fps: 30,
+        durationInFrames: 90,
+        width: 1920,
+        height: 1080,
+        tracks: [
+          {
+            id: "track-lower-third-arabic",
+            name: "Lower Third (Arabic)",
+            clips: [
+              {
+                id: "clip-lower-third-arabic",
+                startFrame: 0,
+                durationInFrames: 90,
+                node: {
+                  id: "lower-third-arabic-text",
+                  kind: "text",
+                  name: "Lower Third (Arabic)",
+                  transform: {
+                    position: [-6, -3, 0],
+                    rotation: [0, 0, 0],
+                    scale: [1, 1, 1],
+                  },
+                  visible: true,
+                  content: "مرحبا بالعالم",
+                  fontRef: "font-noto-sans-arabic",
+                  fontSize: 64,
+                  color: [1, 1, 1, 1],
+                  stagger: {
+                    preset: "fadeInUp",
+                    grouping: "word",
+                    startFrame: 0,
+                    delayFrames: 6,
+                    durationFrames: 20,
+                    direction: "forward",
+                  },
+                  children: [],
+                },
+              },
+            ],
+          },
+          {
+            id: "track-lower-third-latin",
+            name: "Lower Third (Latin)",
+            clips: [
+              {
+                id: "clip-lower-third-latin",
+                startFrame: 10,
+                durationInFrames: 80,
+                node: {
+                  id: "lower-third-latin-text",
+                  kind: "text",
+                  name: "Lower Third (Latin)",
+                  transform: {
+                    position: [-6, -3.8, 0],
+                    rotation: [0, 0, 0],
+                    scale: [1, 1, 1],
+                  },
+                  visible: true,
+                  content: "Hello, World",
+                  fontRef: "font-inter-bold",
+                  fontSize: 40,
+                  color: [0.85, 0.85, 0.85, 1],
+                  stagger: {
+                    preset: "fadeInUp",
+                    grouping: "word",
+                    startFrame: 0,
+                    delayFrames: 6,
+                    durationFrames: 20,
+                    direction: "forward",
+                  },
+                  children: [],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+};
+
 /**
  * The full curated example set, in the same order the `.scene.json` files
  * were introduced: a title card (a static `group` composed of a background
  * plane and text), a moving shape (three sequential clips walking a mesh
- * across the frame), a camera pan (two sequential `camera` clips), and a
+ * across the frame), a camera pan (two sequential `camera` clips), a
  * multi-track composition with transitions (two video tracks, one with a
  * `crossDissolve` between clips and one with a fading-in overlay, plus a
- * background-music audio track).
+ * background-music audio track), a kinetic title sequence (a staggered,
+ * glowing character-by-character reveal), a product shot (a PBR sphere lit
+ * by a key light plus a studio IBL environment, with depth of field), and an
+ * Arabic-and-Latin animated lower third (two staggered `text` nodes, one
+ * right-to-left, one left-to-right, proving bidi content is just ordinary
+ * `content` - no special scene-graph shape of its own).
  */
 export const EXAMPLE_SCENE_DOCUMENTS: readonly NamedSceneDocumentExample[] = [
   {
@@ -409,5 +684,26 @@ export const EXAMPLE_SCENE_DOCUMENTS: readonly NamedSceneDocumentExample[] = [
       "Two video tracks (a crossDissolve between clips on one, a fading-in lower third on the " +
       "other) plus a background-music audio track with fades.",
     document: MULTI_TRACK_TRANSITION,
+  },
+  {
+    name: "kinetic-title-sequence",
+    description:
+      "A kinetic title: one text node revealing character by character with a fadeInUp stagger " +
+      "and an outer glow.",
+    document: KINETIC_TITLE_SEQUENCE,
+  },
+  {
+    name: "product-shot-ibl-dof",
+    description:
+      "A product shot: a metallic PBR sphere lit by a key light under a studio image-based-lighting " +
+      "environment, with depth-of-field and sharpen post-processing.",
+    document: PRODUCT_SHOT_IBL_DOF,
+  },
+  {
+    name: "rtl-latin-lower-third",
+    description:
+      "An animated lower third pairing right-to-left Arabic and left-to-right Latin text, each " +
+      "revealing with its own word-by-word fadeInUp stagger.",
+    document: RTL_LATIN_LOWER_THIRD,
   },
 ];
