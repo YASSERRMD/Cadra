@@ -3,6 +3,7 @@ import {
   computeWhiteBalanceGain,
   createFrameContext,
   createIdentityTransform,
+  DEFAULT_LIGHTING_RIG,
   type FrameContext,
   type LightNode,
   type MeshNode,
@@ -220,6 +221,22 @@ function makeSceneState(overrides: Partial<SceneState> = {}): SceneState {
 
 function makeFrameContext(frame = 3): FrameContext {
   return createFrameContext({ frame, fps: 30, durationInFrames: 90, seed: "det-seed" });
+}
+
+/**
+ * Finds the `SceneState` wrapper root (a real `THREE.Group`, see
+ * `buildSceneStateRoot`) among `scene`'s own children, filtering out
+ * `DEFAULT_LIGHTING_RIG`'s own lights: every fixture in this file builds a
+ * `SceneState` with no authored `LightNode`, so `applyDefaultLightingIfNeeded`
+ * always adds that rig as sibling children of the wrapper root, no longer
+ * making `scene.children[0]` reliably the wrapper root itself.
+ */
+function findWrapperRoot(scene: THREE.Scene): THREE.Group {
+  const group = scene.children.find((child): child is THREE.Group => child instanceof THREE.Group);
+  if (group === undefined) {
+    throw new Error("findWrapperRoot: no THREE.Group found in scene.children.");
+  }
+  return group;
 }
 
 /** A distinguishable, real `THREE.Texture` for environment tests, tagged via `.name` so a resolved value can be traced back to the ref that produced it. */
@@ -474,9 +491,10 @@ describe("ThreeRenderer.renderFrame: real SceneState reconciliation", () => {
 
     const [scene] = webGpuRenderer.render.mock.calls[0] as [THREE.Scene, THREE.Camera];
     // scene -> wrapper root group -> [back-mesh, front-mesh], one Object3D
-    // per layer, in sceneState.layers order.
-    expect(scene.children).toHaveLength(1);
-    const wrapperRoot = scene.children[0] as THREE.Group;
+    // per layer, in sceneState.layers order (plus DEFAULT_LIGHTING_RIG's own
+    // lights as further scene.children siblings, since this fixture authors
+    // no LightNode of its own; see findWrapperRoot's own doc).
+    const wrapperRoot = findWrapperRoot(scene);
     expect(wrapperRoot.children).toHaveLength(2);
     expect(wrapperRoot.children[0]?.name).toBe("back-mesh");
     expect(wrapperRoot.children[1]?.name).toBe("front-mesh");
@@ -491,9 +509,9 @@ describe("ThreeRenderer.renderFrame: real SceneState reconciliation", () => {
     const sceneState = makeSceneState();
 
     renderer.renderFrame(sceneState, makeFrameContext(3));
-    const firstMesh = renderer["scene"].children[0]?.children[0];
+    const firstMesh = findWrapperRoot(renderer["scene"]).children[0];
     renderer.renderFrame(sceneState, makeFrameContext(4));
-    const secondMesh = renderer["scene"].children[0]?.children[0];
+    const secondMesh = findWrapperRoot(renderer["scene"]).children[0];
 
     expect(secondMesh).toBe(firstMesh);
   });
@@ -508,8 +526,11 @@ describe("ThreeRenderer.renderFrame: real SceneState reconciliation", () => {
       renderer.renderFrame(sceneState, makeFrameContext(frame));
     }
 
-    expect(renderer["scene"].children).toHaveLength(1);
-    expect(renderer["scene"].children[0]?.children).toHaveLength(1);
+    // 3 DEFAULT_LIGHTING_RIG lights (this fixture authors no LightNode of its
+    // own) plus the wrapper root, stable across every repeated call: the
+    // real "no growth" signal this test is named for.
+    expect(renderer["scene"].children).toHaveLength(4);
+    expect(findWrapperRoot(renderer["scene"]).children).toHaveLength(1);
   });
 });
 
@@ -522,7 +543,7 @@ describe("ThreeRenderer.renderFrame: layer opacity", () => {
 
     renderer.renderFrame(sceneState, makeFrameContext());
 
-    const mesh = renderer["scene"].children[0]?.children[0] as THREE.Mesh;
+    const mesh = findWrapperRoot(renderer["scene"]).children[0] as THREE.Mesh;
     const material = mesh.material as THREE.Material;
     expect(material.transparent).toBe(false);
   });
@@ -557,7 +578,7 @@ describe("ThreeRenderer.renderFrame: layer opacity", () => {
 
     renderer.renderFrame(sceneState, makeFrameContext());
 
-    const wrapperRoot = renderer["scene"].children[0] as THREE.Group;
+    const wrapperRoot = findWrapperRoot(renderer["scene"]);
     const fullOpacityMesh = wrapperRoot.children[0] as THREE.Mesh;
     const fadingMesh = wrapperRoot.children[1] as THREE.Mesh;
 
@@ -601,7 +622,7 @@ describe("ThreeRenderer.renderFrame: layer opacity", () => {
 
     renderer.renderFrame(sceneState, makeFrameContext());
 
-    const wrapperRoot = renderer["scene"].children[0] as THREE.Group;
+    const wrapperRoot = findWrapperRoot(renderer["scene"]);
     const fullOpacityMesh = wrapperRoot.children[0] as THREE.Mesh;
     const fadingMesh = wrapperRoot.children[1] as THREE.Mesh;
 
@@ -632,7 +653,7 @@ describe("ThreeRenderer.renderFrame: layer opacity", () => {
       ],
     });
     renderer.renderFrame(fadingState, makeFrameContext(3));
-    const fadingMesh = renderer["scene"].children[0]?.children[0] as THREE.Mesh;
+    const fadingMesh = findWrapperRoot(renderer["scene"]).children[0] as THREE.Mesh;
     expect((fadingMesh.material as THREE.Material).transparent).toBe(true);
 
     const fullState = makeSceneState({
@@ -649,7 +670,7 @@ describe("ThreeRenderer.renderFrame: layer opacity", () => {
       ],
     });
     renderer.renderFrame(fullState, makeFrameContext(4));
-    const fullMesh = renderer["scene"].children[0]?.children[0] as THREE.Mesh;
+    const fullMesh = findWrapperRoot(renderer["scene"]).children[0] as THREE.Mesh;
 
     expect((fullMesh.material as THREE.Material).transparent).toBe(false);
   });
@@ -1908,5 +1929,137 @@ describe("ThreeRenderer: physics (Phase 66)", () => {
     renderer.dispose();
 
     expect(fakeBake.dispose).toHaveBeenCalledOnce();
+  });
+});
+
+describe("ThreeRenderer.renderFrame: default lighting rig (Phase 73 cinematic defaults)", () => {
+  /** Every light `scene.children` holds, in add order. */
+  function sceneLights(renderer: ThreeRenderer): THREE.Light[] {
+    return renderer["scene"].children.filter((child): child is THREE.Light => child instanceof THREE.Light);
+  }
+
+  it("adds DEFAULT_LIGHTING_RIG's own lights when a scene state authors no LightNode and no environment", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(makeSceneState(), makeFrameContext());
+
+    const lights = sceneLights(renderer);
+    expect(lights).toHaveLength(DEFAULT_LIGHTING_RIG.length);
+    expect(lights.some((light) => light instanceof THREE.AmbientLight)).toBe(true);
+    expect(lights.some((light) => light instanceof THREE.DirectionalLight)).toBe(true);
+    expect(lights.some((light) => light instanceof THREE.PointLight)).toBe(true);
+    // Never a shadow-casting light: an invisible, automatic fallback should
+    // not also invisibly allocate shadow-map GPU resources.
+    expect(lights.every((light) => !light.castShadow)).toBe(true);
+  });
+
+  it("does not add the default rig when the scene state authors at least one LightNode", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    const sceneState = makeSceneState({
+      layers: [
+        {
+          compositionId: "comp-1",
+          trackId: "track-1",
+          clipId: "clip-1",
+          node: lightNode("light-1"),
+          zIndex: 0,
+          localFrame: 3,
+          opacity: 1,
+        },
+      ],
+    });
+    renderer.renderFrame(sceneState, makeFrameContext());
+
+    // None of DEFAULT_LIGHTING_RIG's own lights (those alone are direct
+    // scene.children; the authored light instead nests under the wrapper
+    // root, reconciled the same as any other node).
+    expect(sceneLights(renderer)).toHaveLength(0);
+    expect(renderer.getObject3DByNodeId("light-1")).toBeInstanceOf(THREE.Light);
+  });
+
+  it("does not add the default rig when environment is configured, even with zero authored lights", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps, fakeEnvironmentRegistry(["studio"]));
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(makeSceneState({ environment: { envMapRef: "studio" } }), makeFrameContext());
+
+    expect(sceneLights(renderer)).toHaveLength(0);
+  });
+
+  it("finds a light nested under a group, not just a top-level layer", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    const groupedLight: SceneNode = {
+      id: "group-1",
+      kind: "group",
+      transform: createIdentityTransform(),
+      visible: true,
+      children: [lightNode("light-1")],
+    };
+    const sceneState = makeSceneState({
+      layers: [
+        {
+          compositionId: "comp-1",
+          trackId: "track-1",
+          clipId: "clip-1",
+          node: groupedLight,
+          zIndex: 0,
+          localFrame: 3,
+          opacity: 1,
+        },
+      ],
+    });
+    renderer.renderFrame(sceneState, makeFrameContext());
+
+    expect(sceneLights(renderer)).toHaveLength(0);
+    expect(renderer.getObject3DByNodeId("light-1")).toBeInstanceOf(THREE.Light);
+  });
+
+  it("builds the rig once and reuses the same instances across repeated renderFrame calls", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(makeSceneState(), makeFrameContext(0));
+    const firstLights = sceneLights(renderer);
+    renderer.renderFrame(makeSceneState(), makeFrameContext(1));
+    const secondLights = sceneLights(renderer);
+
+    expect(secondLights).toEqual(firstLights);
+  });
+
+  it("removes the default rig once a later frame's own scene state authors a real light", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(makeSceneState(), makeFrameContext(0));
+    expect(sceneLights(renderer)).toHaveLength(DEFAULT_LIGHTING_RIG.length);
+
+    const litState = makeSceneState({
+      layers: [
+        {
+          compositionId: "comp-1",
+          trackId: "track-1",
+          clipId: "clip-1",
+          node: lightNode("light-1"),
+          zIndex: 0,
+          localFrame: 4,
+          opacity: 1,
+        },
+      ],
+    });
+    renderer.renderFrame(litState, makeFrameContext(1));
+
+    expect(sceneLights(renderer)).toHaveLength(0);
+    expect(renderer.getObject3DByNodeId("light-1")).toBeInstanceOf(THREE.Light);
   });
 });

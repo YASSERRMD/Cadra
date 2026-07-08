@@ -403,7 +403,26 @@ export type TextPathOrientation = "upright" | "tangent";
 /** How a `TextPathConfig` spaces glyphs along its own curve: `"advance"` preserves each glyph's own natural (per-font) advance width, so the text reads as if the original flat line were simply bent onto the curve; `"even"` distributes every unit at equal arc-length intervals regardless of its own width. */
 export type TextPathSpacing = "advance" | "even";
 
-/** Where a `TextPathConfig` anchors its own text along the curve's own extent: `"start"`/`"end"` flush the text's own first/last unit to the curve's own start/end, `"center"` centers it. */
+/**
+ * Where a `TextPathConfig` anchors its own text along the curve's own
+ * extent: `"start"`/`"end"` flush the text's own first/last glyph
+ * (by resolved on-curve position, see below) to the curve's own start/end,
+ * `"center"` centers it.
+ *
+ * Deliberately visual-order, not reading-order: unlike
+ * `TextStaggerConfig.direction`/`TextPhysicsConfig.direction` (which
+ * explicitly rank by `TextUnit`'s own reading-order index, so `"forward"`
+ * always means first-read to last-read regardless of script - see that
+ * type's own doc), `"start"`/`"end"` here flush whichever glyph resolves to
+ * the lowest/highest position along the curve itself, a property of the
+ * curve's own geometry rather than of the text's own reading order. For a
+ * right-to-left line, this means `"start"` anchors the *visually*
+ * leftmost glyph (the *last-read* one) to the curve's own start - the
+ * mirror image of `TextStaggerDirection`'s own reading-order guarantee. A
+ * caller placing right-to-left content on a path and wanting the
+ * *first-read* glyph pinned to the curve's own start should use
+ * `"end"` instead, or reverse `segments`' own direction.
+ */
 export type TextPathAlignment = "start" | "center" | "end";
 
 /**

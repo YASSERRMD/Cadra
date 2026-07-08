@@ -5,6 +5,7 @@ import { renderRasterGoldenScene } from "./render-raster-scene.js";
 import {
   lightingScene,
   materialsScene,
+  minimalDefaultsScene,
   postProcessingScene,
   textFontkitScene,
   textOpentypeScene,
@@ -51,6 +52,7 @@ describe("renderRasterGoldenScene: real native GPU renders (no browser)", () => 
     ["materials", materialsScene],
     ["lighting", lightingScene],
     ["post-processing", postProcessingScene],
+    ["minimal-defaults", minimalDefaultsScene],
   ] as const)("renders %s to a non-blank PixelBuffer at the scene's own size", async (_label, scene) => {
     if (!(await nativeGpuAvailable)) {
       return;
@@ -98,6 +100,29 @@ describe("renderRasterGoldenScene: real native GPU renders (no browser)", () => 
 
     const nonBlank = countNonBlankPixels(pixels.data);
     expect(nonBlank).toBeGreaterThan((pixels.width * pixels.height) / 100);
+  });
+
+  it("renders the minimal-defaults scene's own sphere with real, varied shading, not a flat silhouette (Phase 73 task 6: quality defaults alone)", async () => {
+    if (!(await nativeGpuAvailable)) {
+      return;
+    }
+
+    const pixels = await renderRasterGoldenScene(minimalDefaultsScene);
+
+    // A flat, unlit silhouette (e.g. the default lighting rig silently
+    // failing to engage) would still show as non-blank, but every visible
+    // texel would share the same one or two gray values. Real key/fill/rim
+    // shading produces a wide spread of distinct brightness levels across
+    // the sphere's own visible pixels instead.
+    const distinctGrayValues = new Set<number>();
+    for (let i = 0; i < pixels.data.length; i += 4) {
+      const alpha = pixels.data[i + 3] ?? 0;
+      if (alpha === 0) {
+        continue;
+      }
+      distinctGrayValues.add(pixels.data[i]!);
+    }
+    expect(distinctGrayValues.size).toBeGreaterThan(20);
   });
 
   it("renders the opentype and fontkit text engines to visually similar (not pixel-identical) output for the same content", async () => {

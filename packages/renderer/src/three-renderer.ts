@@ -5,8 +5,11 @@ import {
   type CompositionShadowQuality,
   computeWhiteBalanceGain,
   type ContactShadowConfig,
+  DEFAULT_LIGHTING_RIG,
   type FrameContext,
+  type LookPresetLight,
   resolveExposureMultiplier,
+  resolveVector3Property,
   type SceneNode,
   type SceneState,
   type WhiteBalanceGain,
@@ -491,6 +494,56 @@ function buildSceneStateRoot(sceneState: SceneState): SceneNode {
   };
 }
 
+/** True if any layer of `sceneState` contains a `"light"`-kind node anywhere in its own subtree; see `applyDefaultLightingIfNeeded`. */
+function sceneStateHasAnyLight(sceneState: SceneState): boolean {
+  return sceneState.layers.some((layer) => nodeSubtreeHasLight(layer.node));
+}
+
+/** True if `node` itself, or any descendant, is `"light"`-kind. */
+function nodeSubtreeHasLight(node: SceneNode): boolean {
+  if (node.kind === "light") {
+    return true;
+  }
+  return node.children.some((child) => nodeSubtreeHasLight(child));
+}
+
+/**
+ * Constructs one real, bare `THREE.Light` from a `LookPresetLight`'s own
+ * plain (never `Property<T>`, never frame-dependent) data - a much smaller
+ * job than `node-factory.ts`'s own `createLight`/`applyLightProperties`
+ * (which resolve a real, keyframeable `LightNode` at a specific frame), so
+ * this is its own minimal, self-contained adapter rather than reusing that
+ * pair. `resolveSceneColor` still routes the color through this renderer's
+ * one designated sRGB-to-linear conversion point, exactly like every other
+ * light's own color, so `DEFAULT_LIGHTING_RIG` responds to
+ * `colorGrading.whiteBalance*` the same way an authored light would.
+ */
+function buildDefaultLightingRigLight(light: LookPresetLight, whiteBalanceGain: WhiteBalanceGain): THREE.Light {
+  const three: THREE.Light = (() => {
+    switch (light.lightType ?? "ambient") {
+      case "ambient":
+        return new THREE.AmbientLight();
+      case "directional":
+        return new THREE.DirectionalLight();
+      case "point":
+        return new THREE.PointLight();
+      case "spot":
+        return new THREE.SpotLight();
+      case "area":
+        return new THREE.RectAreaLight();
+    }
+  })();
+
+  const [r, g, b] = resolveSceneColor(light.color ?? [1, 1, 1, 1], whiteBalanceGain);
+  three.color.setRGB(r, g, b);
+  three.intensity = light.intensity ?? 1;
+  if (light.transform !== undefined) {
+    const [x, y, z] = resolveVector3Property(light.transform.position, 0);
+    three.position.set(x, y, z);
+  }
+  return three;
+}
+
 /**
  * Applies `opacity` to every mesh material in `subtree`, mutating in place.
  * Skipped entirely for `opacity === 1` (the overwhelmingly common case, no
@@ -629,6 +682,15 @@ export class ThreeRenderer implements Renderer {
    */
   private cachedEnvironment: { ref: string; prefiltered: THREE.Texture } | undefined;
   /**
+   * `DEFAULT_LIGHTING_RIG`, built once as real `THREE.Light`s and added to
+   * `this.scene`, when a `renderFrame` call's own `SceneState` has no
+   * authored `LightNode` and no `environment` (see `applyDefaultLightingIfNeeded`).
+   * `undefined` before the rig is first needed, or once built, still holds
+   * the same instances forever (never rebuilt): this rig is fixed data,
+   * unlike `cachedEnvironment`'s own per-`envMapRef` cache.
+   */
+  private defaultLightingRigLights: THREE.Light[] | undefined;
+  /**
    * The grounded-skybox mesh currently added to `this.scene`, when
    * `SceneState.environment.groundProjection` is set. `undefined` when no
    * ground projection is active. Tracked so a later `renderFrame` call can
@@ -762,6 +824,7 @@ export class ThreeRenderer implements Renderer {
     );
 
     this.applyEnvironment(renderer, sceneState.environment);
+    this.applyDefaultLightingIfNeeded(sceneState, whiteBalanceGain);
     this.applyFog(sceneState.fog, whiteBalanceGain);
     this.applyContactShadow(sceneState.shadowQuality?.contactShadows);
     const physicsTransforms = this.resolvePhysicsTransforms(sceneState, frameContext);
@@ -904,6 +967,48 @@ export class ThreeRenderer implements Renderer {
     this.scene.backgroundIntensity = environment.backgroundIntensity ?? 1;
 
     this.applyGroundedSkybox(environment.groundProjection, prefiltered);
+  }
+
+  /**
+   * Ensures a `SceneState` with no authored `LightNode` and no
+   * `environment` still renders visibly, by adding `DEFAULT_LIGHTING_RIG`
+   * directly onto `this.scene` - never onto the scene graph/document
+   * itself, so it is invisible to `parseScene`/the schema layer and never
+   * persisted. Idempotent and called every `renderFrame` (mirrors
+   * `applyEnvironment`'s own "re-checked fresh every call" convention):
+   * adds the rig the first frame it is needed, and removes it again the
+   * moment a later frame's own scene state authors a real light or an
+   * `environment` of its own. A composition with at least one `LightNode`
+   * or an `environment` renders exactly as it did before this fallback
+   * existed - this is purely additive for the previously-black "zero
+   * lights authored" case.
+   */
+  private applyDefaultLightingIfNeeded(sceneState: SceneState, whiteBalanceGain: WhiteBalanceGain): void {
+    if (sceneState.environment !== undefined || sceneStateHasAnyLight(sceneState)) {
+      this.removeDefaultLightingRig();
+      return;
+    }
+
+    if (this.defaultLightingRigLights === undefined) {
+      this.defaultLightingRigLights = DEFAULT_LIGHTING_RIG.map((light) =>
+        buildDefaultLightingRigLight(light, whiteBalanceGain),
+      );
+    }
+    for (const light of this.defaultLightingRigLights) {
+      if (light.parent !== this.scene) {
+        this.scene.add(light);
+      }
+    }
+  }
+
+  /** Removes (never disposes: `DEFAULT_LIGHTING_RIG` lights never cast shadows, so they hold no GPU-allocated resources) `defaultLightingRigLights` from `this.scene`, if present. */
+  private removeDefaultLightingRig(): void {
+    if (this.defaultLightingRigLights === undefined) {
+      return;
+    }
+    for (const light of this.defaultLightingRigLights) {
+      this.scene.remove(light);
+    }
   }
 
   /**
@@ -1161,6 +1266,7 @@ export class ThreeRenderer implements Renderer {
 
   dispose(): void {
     this.clearCachedEnvironment();
+    this.removeDefaultLightingRig();
     this.removeGroundedSkybox();
     this.clearCascadedShadows();
     this.removeContactShadowMesh();

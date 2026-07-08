@@ -45,12 +45,11 @@ export interface LookPreset {
 }
 
 /**
- * A small, deliberately starter set of look presets (Phase 72's own scope:
- * ship the mechanism and prove it works end to end). Phase 73 is where this
- * codebase's own improvement track ships the full curated library ("product,
- * documentary, bold social, elegant title" per that phase's own task list) -
- * adding a new named entry here later is a pure data addition, no mechanism
- * change.
+ * The curated look-preset library: `cinematic` and `product` shipped in
+ * Phase 72 (proving the mechanism end to end); `documentary`, `boldSocial`,
+ * and `elegantTitle` shipped in Phase 73 (this codebase's own improvement
+ * track's "full curated library" deliverable). Adding a new named entry
+ * here later is a pure data addition, no mechanism change.
  */
 export const LOOK_PRESETS: Record<string, LookPreset> = {
   /** A three-point-inspired key/fill/rim rig plus `POST_PROCESSING_LOOK_PRESETS.cinematic`: a general-purpose dramatic look for a title card or hero shot. */
@@ -102,7 +101,118 @@ export const LOOK_PRESETS: Record<string, LookPreset> = {
     },
     environment: { envMapRef: "studio", intensity: 1, showBackground: false },
   },
+  /** A naturalistic, observational two-light rig (key plus fill, no rim - a rim light reads as "produced," not available-light) with a gentle desaturation and grain: a believable documentary/interview look. */
+  documentary: {
+    lights: [
+      {
+        name: "key",
+        lightType: "directional",
+        transform: { position: [3, 4, 2], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        intensity: 1.4,
+      },
+      {
+        name: "fill",
+        lightType: "ambient",
+        intensity: 0.7,
+      },
+    ],
+    postProcessing: {
+      effects: [
+        { type: "colorGrade", saturation: 0.9, contrast: 0.95 },
+        { type: "filmGrain", intensity: 0.2 },
+        { type: "vignette", darkness: 0.25, offset: 1.3 },
+      ],
+    },
+  },
+  /** A punchy, high-contrast rig plus a vibrant colored accent light and a saturated, sharpened grade: built for short-form social video, read at a glance on a small screen. */
+  boldSocial: {
+    lights: [
+      {
+        name: "key",
+        lightType: "directional",
+        transform: { position: [3, 5, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        intensity: 2.5,
+        castShadow: true,
+      },
+      {
+        name: "fill",
+        lightType: "ambient",
+        intensity: 0.4,
+      },
+      {
+        name: "accent",
+        lightType: "point",
+        transform: { position: [-3, 1, -3], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        color: [1, 0.3, 0.6, 1],
+        intensity: 8,
+      },
+    ],
+    postProcessing: {
+      effects: [
+        { type: "colorGrade", saturation: 1.3, contrast: 1.2 },
+        { type: "sharpen", amount: 0.5 },
+        { type: "vignette", darkness: 0.5, offset: 0.9 },
+      ],
+    },
+  },
+  /** A soft, even, restrained two-light rig with a gentle bloom and a cool, slightly desaturated grade, and deliberately no vignette (clean and even, not moody): a refined, high-end title-card look. */
+  elegantTitle: {
+    lights: [
+      {
+        name: "key",
+        lightType: "directional",
+        transform: { position: [2, 4, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        intensity: 1.5,
+      },
+      {
+        name: "fill",
+        lightType: "ambient",
+        intensity: 0.5,
+      },
+    ],
+    postProcessing: {
+      effects: [
+        { type: "bloom", threshold: 0.8, intensity: 0.35, radius: 0.3 },
+        { type: "colorGrade", saturation: 0.92, contrast: 1.05 },
+      ],
+    },
+  },
 };
+
+/**
+ * The lighting rig `@cadra/renderer` falls back to when a composition's
+ * resolved scene state has no authored `LightNode` and no `environment`
+ * configured, so a bare mesh/model is never rendered fully unlit by
+ * omission alone (Phase 73's own "cinematic defaults" deliverable: "a
+ * minimal scene looks professional with defaults alone"). A three-point-
+ * inspired key/fill/rim rig, matching `LOOK_PRESETS.cinematic`'s own light
+ * data at the time this was authored - kept as its own separate constant
+ * (not a live reference to `LOOK_PRESETS.cinematic`) so editing that named,
+ * opt-in preset for its own sake never silently changes this always-on
+ * engine-level fallback's own behavior. `castShadow` is deliberately never
+ * set (defaults to no shadow casting): an invisible, automatic fallback
+ * should not also invisibly allocate shadow-map GPU resources.
+ */
+export const DEFAULT_LIGHTING_RIG: readonly LookPresetLight[] = [
+  {
+    name: "key",
+    lightType: "directional",
+    transform: { position: [4, 5, 6], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    intensity: 2.2,
+  },
+  {
+    name: "fill",
+    lightType: "ambient",
+    intensity: 0.35,
+  },
+  {
+    name: "rim",
+    lightType: "point",
+    transform: { position: [-3, 2, -4], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    color: [0.6, 0.7, 1, 1],
+    intensity: 6,
+  },
+];
 
 /** Thrown by `applyLookPreset` when `presetName` names no entry in `LOOK_PRESETS`. */
 export class UnknownLookPresetError extends Error {
