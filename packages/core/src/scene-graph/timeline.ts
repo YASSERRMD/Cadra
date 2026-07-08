@@ -235,6 +235,44 @@ export interface Composition {
  * `CompositionEnvironment` - so a path-traced final looks like a
  * physically-correct upgrade of the same raster preview, not a
  * different scene.
+ *
+ * Fixed per composition (a "shot"), not per-frame or per-node: a project
+ * mixing a few hero shots (`renderMode: "pathTraced"`) with everything else
+ * left `"raster"` pays the path-tracing cost only where it is actually
+ * asked for. `render_scene`'s own `renderMode`/`pathTracing` parameters
+ * (`@cadra/mcp-server`) additionally let one render call override either
+ * for that call only, without touching the persisted composition at all.
+ *
+ * Parity notes (raster vs. `"pathTraced"`), since the two renderers are not
+ * a single shared pipeline with one path swapped out:
+ * - `Composition.shadowQuality`'s ambient occlusion and cascaded/contact
+ *   shadows are raster-only screen-space approximations of global
+ *   illumination and soft shadowing. A `"pathTraced"` final ignores them
+ *   entirely - real, physically-based indirect light, soft shadows, and
+ *   caustics fall out of unbiased path tracing itself (see
+ *   `@cadra/pathtracer`'s own `renderPathTracedFrame`), and are strictly
+ *   more correct than the raster approximations they supersede, never a
+ *   regression.
+ * - `Composition.postProcessing`'s screen-space effect stack (bloom, depth
+ *   of field, chromatic aberration, vignette, film grain, lens distortion,
+ *   sharpen, color grade, LUT) and its own `sampleCount`
+ *   (SSAA/`RenderQualityTier`-driven anti-aliasing) are raster-only for
+ *   now: a `"pathTraced"` final does not currently run this stack on its
+ *   own output. `PathTracingConfig.denoise` is the path-traced equivalent
+ *   of noise reduction, not a substitute for the other effects. Running the
+ *   full raster post-processing pipeline on a path-traced result is a known
+ *   gap for a future phase to close, not a design decision that it never
+ *   will be.
+ * - Velocity-buffer motion blur (`motionBlur` in `PostEffectConfig`) has no
+ *   path-traced equivalent yet: path tracing does not currently integrate
+ *   samples across a shutter interval, so a fast-moving object renders
+ *   tack-sharp per accumulated frame regardless of `renderMode`.
+ * - `Composition.colorGrading`'s `exposureStops` still applies to a
+ *   path-traced final exactly as it does to raster (both ultimately tone-map
+ *   through the same `ACESFilmicToneMapping`/`SRGBColorSpace` settings);
+ *   `whiteBalanceTemperatureK`/`.Tint` apply identically too, since they are
+ *   baked into the shared scene graph's own light/material colors before
+ *   either renderer ever runs, not a separate per-renderer step.
  */
 export type CompositionRenderMode = "raster" | "pathTraced";
 
