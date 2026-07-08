@@ -242,6 +242,34 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@26.1.0)(jsdom@25.0.1)(lightningcss@1.32.0)
 
+  packages/pathtracer:
+    dependencies:
+      '@cadra/core':
+        specifier: workspace:*
+        version: link:../core
+      three:
+        specifier: ^0.185.1
+        version: 0.185.1
+      three-gpu-pathtracer:
+        specifier: ^0.0.24
+        version: 0.0.24(three-mesh-bvh@0.9.10(three@0.185.1))(three@0.185.1)(xatlas-web@0.1.0)
+      three-mesh-bvh:
+        specifier: ^0.9.10
+        version: 0.9.10(three@0.185.1)
+      xatlas-web:
+        specifier: ^0.1.0
+        version: 0.1.0
+    devDependencies:
+      '@types/three':
+        specifier: ^0.185.0
+        version: 0.185.0
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@26.1.0)(jsdom@25.0.1)(lightningcss@1.32.0)
+
   packages/player:
     dependencies:
       '@cadra/core':
@@ -2931,6 +2959,18 @@ packages:
     resolution: {integrity: sha512-u9E6A+ZDYdp7a4WnarkXPZOx8Ilz46+kby6p1yZ8zsGTz9gYa6FIS7lj2oezzNKmtdyyJNNmmXDppga5GB7kSw==}
     engines: {node: '>=18'}
 
+  three-gpu-pathtracer@0.0.24:
+    resolution: {integrity: sha512-fHQ7g7ywvSwRAQywhsfech2/kspQKinfFNOcNDTJS2Q34CzcF1kpESlOVvJH8kX/bGlCnxMI+Qo16kWGAy7zCA==}
+    peerDependencies:
+      three: '>=0.180.0'
+      three-mesh-bvh: '>=0.7.4'
+      xatlas-web: ^0.1.0
+
+  three-mesh-bvh@0.9.10:
+    resolution: {integrity: sha512-UOlTgPIeqUURcwaG8knxvBaruwZlC4X3/WSHEFO7rYvMVv/YNUrkfFEszvfj36pXV88dCHoHNnIp0PifkirnTQ==}
+    peerDependencies:
+      three: '>= 0.159.0'
+
   three@0.185.1:
     resolution: {integrity: sha512-5aojFCXKwnjBRZvUnt3WFfEcvUJgkN5LlijRFN95hMy8WVkG4I0QNcJE+OuWvuJ0bOdStrbfXn0pkd6/QyiAlg==}
 
@@ -3252,6 +3292,9 @@ packages:
         optional: true
       utf-8-validate:
         optional: true
+
+  xatlas-web@0.1.0:
+    resolution: {integrity: sha512-PprVfuXbaIskxLTLBUQRaWfgSy9xUQqAMIRooOw0P6NYqwgh6T0voeer6+Z5M7AFt5SGXUybuww/uDGs1yw8vQ==}
 
   xml-name-validator@5.0.0:
     resolution: {integrity: sha512-EvGK8EJ3DhaHfbRlETOWAS5pO9MZITeauHKJyb8wyajUfQUenkIg2MvLDTZ4T/TgIcm3HU0TFBgWWboAZ30UHg==}
@@ -5824,6 +5867,16 @@ snapshots:
       glob: 10.5.0
       minimatch: 10.2.5
 
+  three-gpu-pathtracer@0.0.24(three-mesh-bvh@0.9.10(three@0.185.1))(three@0.185.1)(xatlas-web@0.1.0):
+    dependencies:
+      three: 0.185.1
+      three-mesh-bvh: 0.9.10(three@0.185.1)
+      xatlas-web: 0.1.0
+
+  three-mesh-bvh@0.9.10(three@0.185.1):
+    dependencies:
+      three: 0.185.1
+
   three@0.185.1: {}
 
   tiny-inflate@1.0.3: {}
@@ -6148,6 +6201,8 @@ snapshots:
   wrappy@1.0.2: {}
 
   ws@8.21.0: {}
+
+  xatlas-web@0.1.0: {}
 
   xml-name-validator@5.0.0: {}
 
