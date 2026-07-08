@@ -1410,7 +1410,7 @@ export const volumeNodeSchema = z.strictObject({
   ),
   shape: volumeShapeSchema.describe("The bounding shape this volume's density field fills."),
   color: propertySchema(colorRgbaSchema).describe(
-    "This volume's own base color, lit by the scene's own lights. A plain ColorRGBA or a keyframe track.",
+    "This volume's own base color, lit by the scene's own point/spot lights (ambient/directional lights do not contribute; see VolumeNode's own doc). A plain ColorRGBA or a keyframe track.",
   ),
   density: propertySchema(z.number().min(0)).describe(
     "Overall density multiplier: higher looks thicker/more opaque. A plain number or a keyframe track. Defaults to 1.",
@@ -1419,7 +1419,7 @@ export const volumeNodeSchema = z.strictObject({
     .number()
     .positive()
     .optional()
-    .describe("Spatial frequency of the underlying curl-noise field. Higher values give smaller, more turbulent detail. Defaults to 1."),
+    .describe("Spatial frequency of the underlying value-noise field. Higher values give smaller, more turbulent detail. Defaults to 1."),
   driftSpeed: z
     .number()
     .optional()

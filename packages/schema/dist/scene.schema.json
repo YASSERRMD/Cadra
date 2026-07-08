@@ -11274,7 +11274,7 @@
                   "additionalProperties": false
                 }
               ],
-              "description": "This volume's own base color, lit by the scene's own lights. A plain ColorRGBA or a keyframe track."
+              "description": "This volume's own base color, lit by the scene's own point/spot lights (ambient/directional lights do not contribute; see VolumeNode's own doc). A plain ColorRGBA or a keyframe track."
             },
             "density": {
               "anyOf": [
@@ -11344,7 +11344,7 @@
               "description": "Overall density multiplier: higher looks thicker/more opaque. A plain number or a keyframe track. Defaults to 1."
             },
             "noiseFrequency": {
-              "description": "Spatial frequency of the underlying curl-noise field. Higher values give smaller, more turbulent detail. Defaults to 1.",
+              "description": "Spatial frequency of the underlying value-noise field. Higher values give smaller, more turbulent detail. Defaults to 1.",
               "type": "number",
               "exclusiveMinimum": 0
             },
