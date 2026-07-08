@@ -568,6 +568,27 @@
                             "type"
                           ],
                           "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "motionBlur"
+                            },
+                            "shutterAngle": {
+                              "description": "Shutter angle in degrees, 0 to 360. Defaults to 180.",
+                              "type": "number"
+                            },
+                            "samples": {
+                              "description": "Samples taken along each pixel's own velocity vector. Higher is smoother and more expensive. Defaults to 16.",
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ],
+                          "additionalProperties": false
                         }
                       ]
                     },
