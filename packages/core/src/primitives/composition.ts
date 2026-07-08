@@ -4,6 +4,7 @@ import type {
   Composition as CompositionData,
   CompositionColorGrading,
   CompositionEnvironment,
+  CompositionPostProcessing,
   CompositionShadowQuality,
   Track,
 } from "../scene-graph/timeline.js";
@@ -17,12 +18,13 @@ import type {
  * type has been part of the public API since Phase 2.
  *
  * `tracks` defaults to an empty array if omitted. `activeCameraTrack`,
- * `audioTracks`, `colorGrading`, `environment`, and `shadowQuality` are all
- * omitted (not defaulted to an empty array/object) unless explicitly
- * supplied, mirroring `Composition`'s own "omitted means this composition
- * has no active-camera concept/audio/color grade/environment/shadow tuning
- * at all" convention (see `../scene-graph/timeline.ts`) rather than every
- * composition gaining an empty-but-present lane it never asked for.
+ * `audioTracks`, `colorGrading`, `environment`, `shadowQuality`, and
+ * `postProcessing` are all omitted (not defaulted to an empty array/object)
+ * unless explicitly supplied, mirroring `Composition`'s own "omitted means
+ * this composition has no active-camera concept/audio/color grade/
+ * environment/shadow tuning/post-processing at all" convention (see
+ * `../scene-graph/timeline.ts`) rather than every composition gaining an
+ * empty-but-present lane it never asked for.
  */
 export interface CompositionProps {
   id: string;
@@ -37,6 +39,7 @@ export interface CompositionProps {
   colorGrading?: CompositionColorGrading;
   environment?: CompositionEnvironment;
   shadowQuality?: CompositionShadowQuality;
+  postProcessing?: CompositionPostProcessing;
 }
 
 /**
@@ -44,10 +47,10 @@ export interface CompositionProps {
  * size, and the tracks of clips that populate it.
  *
  * Defaults: `tracks: []`. `activeCameraTrack`/`audioTracks`/`colorGrading`/
- * `environment`/`shadowQuality` are passed through only when provided, left
- * `undefined` (not defaulted to `[]`) otherwise. Every other field is
- * required, since there is no sensible default frame rate, duration, or
- * output size for arbitrary authored content.
+ * `environment`/`shadowQuality`/`postProcessing` are passed through only when
+ * provided, left `undefined` (not defaulted to `[]`) otherwise. Every other
+ * field is required, since there is no sensible default frame rate,
+ * duration, or output size for arbitrary authored content.
  */
 export function createComposition(props: CompositionProps): CompositionData {
   return {
@@ -63,5 +66,6 @@ export function createComposition(props: CompositionProps): CompositionData {
     ...(props.colorGrading !== undefined && { colorGrading: props.colorGrading }),
     ...(props.environment !== undefined && { environment: props.environment }),
     ...(props.shadowQuality !== undefined && { shadowQuality: props.shadowQuality }),
+    ...(props.postProcessing !== undefined && { postProcessing: props.postProcessing }),
   };
 }

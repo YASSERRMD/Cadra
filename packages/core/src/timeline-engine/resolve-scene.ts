@@ -116,6 +116,7 @@ function resolveComposition(
     ...(composition.colorGrading !== undefined && { colorGrading: composition.colorGrading }),
     ...(composition.environment !== undefined && { environment: composition.environment }),
     ...(composition.shadowQuality !== undefined && { shadowQuality: composition.shadowQuality }),
+    ...(composition.postProcessing !== undefined && { postProcessing: composition.postProcessing }),
   };
 }
 

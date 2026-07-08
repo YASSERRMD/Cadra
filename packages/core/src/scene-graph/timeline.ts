@@ -193,6 +193,17 @@ export interface Composition {
    * contact shadows at all (the pre-Phase-57 default).
    */
   shadowQuality?: CompositionShadowQuality;
+  /**
+   * The composition's own post-processing effect stack: an ordered list of
+   * screen-space passes applied after the scene itself is drawn. Fixed for
+   * the composition's entire length, exactly like `colorGrading` (see that
+   * field's own doc for why a whole render pipeline setting is not
+   * `Property<T>`-animatable; individual effect parameters inside
+   * `PostEffectConfig` are still keyframeable per Phase 59 onward). Omitted
+   * (or `effects: []`) means no post-processing pipeline runs at all: the
+   * renderer draws exactly as it did before Phase 58, byte for byte.
+   */
+  postProcessing?: CompositionPostProcessing;
 }
 
 /**
@@ -320,6 +331,56 @@ export interface ContactShadowConfig {
   opacity?: number;
   /** Radius of the soft contact-shadow decal, in scene units. Defaults to `2`. */
   radius?: number;
+}
+
+/**
+ * A quality tier trading render cost against fidelity, applied to
+ * post-processing (and, from Phase 60 onward, motion blur and temporal
+ * accumulation sample counts). A separate type from `ShadowQualityTier`
+ * despite sharing the same two literal values: shadows and post-processing
+ * are tuned independently (a composition may want cheap preview shadows but
+ * a full final-quality bloom, or vice versa), so collapsing them into one
+ * shared tier would force them to always move together.
+ */
+export type RenderQualityTier = "preview" | "final";
+
+/**
+ * A local-contrast sharpening pass (unsharp mask): brightens each pixel
+ * relative to the average of its four neighbors, scaled by `amount`. The one
+ * concrete `PostEffectConfig` variant Phase 58 ships, purely to prove the
+ * post-processing backbone actually runs a real, deterministic, animatable
+ * effect; Phase 59 onward adds the named cinematic effects (bloom, depth of
+ * field, chromatic aberration, vignette, film grain, lens distortion) as
+ * further variants of the same union.
+ */
+export interface SharpenEffectConfig {
+  type: "sharpen";
+  /** Strength of the sharpening effect. `0` is a no-op. Defaults to `0.5`. */
+  amount?: number;
+}
+
+/**
+ * One configured entry in `CompositionPostProcessing.effects`. A
+ * discriminated union on `type`, growing by one variant per effect Phase 59
+ * onward adds; `SharpenEffectConfig` is the only variant Phase 58 itself
+ * ships. Which side of tone mapping a given `type` renders on (linear
+ * scene-referred HDR versus the final display-referred image) is an inherent
+ * property of that effect, decided by the renderer, not an authorable field
+ * here: getting it wrong would silently clip or wash out the effect, so it is
+ * not something a scene author or agent can misconfigure.
+ */
+export type PostEffectConfig = SharpenEffectConfig;
+
+/**
+ * A whole-composition post-processing effect stack. See
+ * `Composition.postProcessing`'s own doc for why this is a fixed,
+ * non-`Property<T>` setting.
+ */
+export interface CompositionPostProcessing {
+  /** Trades render cost against fidelity for whichever effect in `effects` has an expensive quality knob of its own. Defaults to `"final"`. */
+  tier?: RenderQualityTier;
+  /** The effect stack, applied in array order within each effect's own fixed pre/post-tonemap stage. An empty array is a no-op, identical to omitting `postProcessing` entirely. */
+  effects: PostEffectConfig[];
 }
 
 /** The top-level authoring unit: a named collection of compositions. */

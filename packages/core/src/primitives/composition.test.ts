@@ -40,7 +40,7 @@ describe("createComposition", () => {
     expect(composition.tracks).toEqual(tracks);
   });
 
-  it("omits activeCameraTrack, audioTracks, colorGrading, environment, and shadowQuality entirely when not provided", () => {
+  it("omits activeCameraTrack, audioTracks, colorGrading, environment, shadowQuality, and postProcessing entirely when not provided", () => {
     const composition = createComposition({
       id: "comp-1",
       name: "Main",
@@ -55,6 +55,7 @@ describe("createComposition", () => {
     expect("colorGrading" in composition).toBe(false);
     expect("environment" in composition).toBe(false);
     expect("shadowQuality" in composition).toBe(false);
+    expect("postProcessing" in composition).toBe(false);
   });
 
   it("preserves activeCameraTrack when provided", () => {
@@ -140,5 +141,21 @@ describe("createComposition", () => {
     });
 
     expect(composition.shadowQuality).toEqual(shadowQuality);
+  });
+
+  it("preserves postProcessing when provided", () => {
+    const postProcessing = { tier: "final" as const, effects: [{ type: "sharpen" as const, amount: 0.6 }] };
+
+    const composition = createComposition({
+      id: "comp-1",
+      name: "Main",
+      fps: 30,
+      durationInFrames: 300,
+      width: 1920,
+      height: 1080,
+      postProcessing,
+    });
+
+    expect(composition.postProcessing).toEqual(postProcessing);
   });
 });

@@ -940,3 +940,51 @@ describe("resolveSceneAtFrame: shadowQuality passthrough", () => {
     expect(state.shadowQuality).toBeUndefined();
   });
 });
+
+describe("resolveSceneAtFrame: postProcessing passthrough", () => {
+  it("carries the composition's own postProcessing through unchanged", () => {
+    const shape = Shape({ id: "post-processed-shape" });
+    const postProcessing = { tier: "preview" as const, effects: [{ type: "sharpen" as const, amount: 0.4 }] };
+    const composition = createComposition({
+      id: "comp-post-processing",
+      name: "Post Processing",
+      fps: 30,
+      durationInFrames: 30,
+      width: 100,
+      height: 100,
+      tracks: [
+        {
+          id: "track-content",
+          clips: [Sequence({ id: "clip-content", from: 0, durationInFrames: 30, content: shape })],
+        },
+      ],
+      postProcessing,
+    });
+    const project = createProject({ id: "p-post-processing", name: "Project", compositions: [composition] });
+
+    const state = resolveSceneAtFrame(project, "comp-post-processing", 5);
+    expect(state.postProcessing).toEqual(postProcessing);
+  });
+
+  it("leaves postProcessing undefined when the composition has none", () => {
+    const shape = Shape({ id: "unprocessed-shape" });
+    const composition = createComposition({
+      id: "comp-no-post-processing",
+      name: "No Post Processing",
+      fps: 30,
+      durationInFrames: 30,
+      width: 100,
+      height: 100,
+      tracks: [
+        {
+          id: "track-content",
+          clips: [Sequence({ id: "clip-content", from: 0, durationInFrames: 30, content: shape })],
+        },
+      ],
+    });
+    const project = createProject({ id: "p-no-post-processing", name: "Project", compositions: [composition] });
+
+    const state = resolveSceneAtFrame(project, "comp-no-post-processing", 5);
+    expect(state.postProcessing).toBeUndefined();
+  });
+});
