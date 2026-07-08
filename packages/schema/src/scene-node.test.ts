@@ -24,6 +24,7 @@ describe("sceneNodeKindSchema", () => {
       "video",
       "compositionRef",
       "satori",
+      "particles",
     ];
     for (const kind of kinds) {
       expect(sceneNodeKindSchema.safeParse(kind).success).toBe(true);
@@ -1471,6 +1472,177 @@ describe("sceneNodeSchema: satori", () => {
       layer: { type: "div", children: [{ type: "icon", icon: "arrow-right" }] },
     });
     expect(result.success).toBe(true);
+  });
+});
+
+describe("sceneNodeSchema: particles (Phase 67)", () => {
+  function minimalParticlesFields() {
+    return {
+      ...baseFields(),
+      kind: "particles" as const,
+      maxParticles: 1000,
+      emissionRate: 100,
+      shape: { type: "point" as const },
+      lifetimeSeconds: 2,
+      initialSpeed: 1,
+      direction: [0, 1, 0] as const,
+      startSize: 0.1,
+    };
+  }
+
+  it("accepts a minimal particles node", () => {
+    const result = sceneNodeSchema.safeParse(minimalParticlesFields());
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a particles node missing maxParticles, emissionRate, shape, lifetimeSeconds, initialSpeed, direction, or startSize", () => {
+    const fields = minimalParticlesFields();
+    for (const omit of [
+      "maxParticles",
+      "emissionRate",
+      "shape",
+      "lifetimeSeconds",
+      "initialSpeed",
+      "direction",
+      "startSize",
+    ] as const) {
+      const { [omit]: _omitted, ...rest } = fields;
+      expect(sceneNodeSchema.safeParse(rest).success).toBe(false);
+    }
+  });
+
+  it("accepts every emitter shape", () => {
+    for (const shape of [
+      { type: "point" },
+      { type: "box", halfExtents: [1, 1, 1] },
+      { type: "sphere", radius: 0.5 },
+      { type: "cone", radius: 0.5, angle: 0.3 },
+    ]) {
+      expect(sceneNodeSchema.safeParse({ ...minimalParticlesFields(), shape }).success).toBe(true);
+    }
+  });
+
+  it("rejects an unrecognized emitter shape type", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...minimalParticlesFields(),
+      shape: { type: "cylinder", radius: 0.5 },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts every force kind", () => {
+    const forces = [
+      { type: "gravity", acceleration: [0, -9.81, 0] },
+      { type: "drag", coefficient: 0.2 },
+      { type: "curlNoise", strength: 2, frequency: 0.5 },
+      { type: "curlNoise", strength: 2, frequency: 0.5, speed: 1 },
+      { type: "vortex", origin: [0, 0, 0], axis: [0, 1, 0], strength: 1 },
+    ];
+    for (const force of forces) {
+      expect(sceneNodeSchema.safeParse({ ...minimalParticlesFields(), forces: [force] }).success).toBe(true);
+    }
+  });
+
+  it("rejects an unrecognized force type", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...minimalParticlesFields(),
+      forces: [{ type: "wind", strength: 1 }],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts every collider kind", () => {
+    expect(
+      sceneNodeSchema.safeParse({
+        ...minimalParticlesFields(),
+        colliders: [{ type: "groundPlane", y: 0 }],
+      }).success,
+    ).toBe(true);
+    expect(
+      sceneNodeSchema.safeParse({
+        ...minimalParticlesFields(),
+        colliders: [{ type: "sphere", center: [0, 0, 0], radius: 1, bounce: 0.5 }],
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects collider bounce outside [0, 1]", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...minimalParticlesFields(),
+      colliders: [{ type: "groundPlane", y: 0, bounce: 1.5 }],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts colorOverLife and sizeOverLife curves", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...minimalParticlesFields(),
+      colorOverLife: [
+        { time: 0, color: [1, 1, 1, 1] },
+        { time: 1, color: [1, 1, 1, 0] },
+      ],
+      sizeOverLife: [
+        { time: 0, size: 0 },
+        { time: 1, size: 1 },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a colorOverLife stop with time outside [0, 1]", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...minimalParticlesFields(),
+      colorOverLife: [{ time: 1.5, color: [1, 1, 1, 1] }],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a negative sizeOverLife size", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...minimalParticlesFields(),
+      sizeOverLife: [{ time: 0, size: -1 }],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts every blendMode", () => {
+    for (const blendMode of ["normal", "additive"]) {
+      expect(sceneNodeSchema.safeParse({ ...minimalParticlesFields(), blendMode }).success).toBe(true);
+    }
+  });
+
+  it("rejects an unknown blendMode", () => {
+    const result = sceneNodeSchema.safeParse({ ...minimalParticlesFields(), blendMode: "screen" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a non-positive maxParticles", () => {
+    expect(sceneNodeSchema.safeParse({ ...minimalParticlesFields(), maxParticles: 0 }).success).toBe(false);
+    expect(sceneNodeSchema.safeParse({ ...minimalParticlesFields(), maxParticles: -5 }).success).toBe(false);
+    expect(sceneNodeSchema.safeParse({ ...minimalParticlesFields(), maxParticles: 1.5 }).success).toBe(false);
+  });
+
+  it("accepts every optional field together", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...minimalParticlesFields(),
+      lifetimeVarianceSeconds: 0.5,
+      initialSpeedVariance: 0.2,
+      spreadAngle: 0.3,
+      sizeVariance: 0.1,
+      forces: [{ type: "gravity", acceleration: [0, -9.81, 0] }],
+      colliders: [{ type: "groundPlane", y: 0 }],
+      colorOverLife: [{ time: 0, color: [1, 1, 1, 1] }],
+      sizeOverLife: [{ time: 0, size: 1 }],
+      textureRef: "spark-sprite",
+      blendMode: "additive",
+      seed: 7,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a stray, unrecognized field (strict object)", () => {
+    const result = sceneNodeSchema.safeParse({ ...minimalParticlesFields(), unknownField: true });
+    expect(result.success).toBe(false);
   });
 });
 
