@@ -1,17 +1,32 @@
 import {
+  type CascadedShadowConfig,
   type CompositionEnvironment,
+  type CompositionShadowQuality,
   computeWhiteBalanceGain,
+  type ContactShadowConfig,
   type FrameContext,
   resolveExposureMultiplier,
   type SceneNode,
   type SceneState,
 } from "@cadra/core";
 import * as THREE from "three";
+import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
 import { RectAreaLightTexturesLib } from "three/addons/lights/RectAreaLightTexturesLib.js";
 import { RectAreaLightUniformsLib } from "three/addons/lights/RectAreaLightUniformsLib.js";
 import { GroundedSkybox } from "three/addons/objects/GroundedSkybox.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { ao as createGtaoNode } from "three/addons/tsl/display/GTAONode.js";
+import { mrt, normalView, output, pass, vec3, vec4 } from "three/tsl";
 import * as ThreeWebGPUInternals from "three/webgpu";
-import { PMREMGenerator as WebGPUPMREMGenerator, WebGPURenderer, type WebGPURendererParameters } from "three/webgpu";
+import {
+  PMREMGenerator as WebGPUPMREMGenerator,
+  RenderPipeline,
+  WebGPURenderer,
+  type WebGPURendererParameters,
+} from "three/webgpu";
 
 import { detectWebGpuSupport, type WebGpuDetector } from "./capability-detection.js";
 import {
@@ -26,6 +41,7 @@ import type {
   RenderSize,
   RenderTarget,
 } from "./renderer.js";
+import { createContactShadowMesh } from "./shadows/contact-shadow.js";
 
 /**
  * The subset of `THREE.WebGPURenderer` / `THREE.WebGLRenderer` this module
@@ -41,7 +57,15 @@ import type {
 interface ThreeRendererLike {
   init?: () => Promise<unknown>;
   setSize: (width: number, height: number, updateStyle?: boolean) => void;
-  render: (scene: THREE.Scene, camera: THREE.Camera) => void;
+  /**
+   * Draws `scene` through `camera`. `ambientOcclusion`, when present,
+   * routes the draw through this backend's own post-processing pipeline
+   * (`EffectComposer`+`GTAOPass` for WebGL2, a TSL `RenderPipeline`+`GTAONode`
+   * for WebGPU - see `withAmbientOcclusionSupport`'s own two implementations)
+   * instead of a bare `renderer.render(scene, camera)` call; omitted, this
+   * renders exactly as it did before Phase 57.
+   */
+  render: (scene: THREE.Scene, camera: THREE.Camera, ambientOcclusion?: AmbientOcclusionRenderConfig) => void;
   dispose: () => void;
   capabilities?: { maxTextureSize?: number };
   /** Set fresh every `renderFrame` call, from the composition's own resolved `colorGrading.exposureStops` - see `resolveExposureMultiplier`. */
@@ -59,6 +83,24 @@ interface ThreeRendererLike {
    * `renderer instanceof WebGPURenderer` check at every call site.
    */
   createEnvironmentMap: (equirectangular: THREE.Texture) => THREE.Texture;
+}
+
+/**
+ * Ambient occlusion tuning resolved from `AmbientOcclusionConfig` plus the
+ * composition's own quality tier, passed to `ThreeRendererLike.render`.
+ * `resolutionScale`/`samples` are each meaningful to only one backend's own
+ * natural quality knob (see `withAmbientOcclusionSupport`'s two
+ * implementations for why they differ), so both are always resolved
+ * regardless of which backend is actually active - the inactive one's own
+ * field is simply unused.
+ */
+interface AmbientOcclusionRenderConfig {
+  radius: number;
+  intensity: number;
+  /** WebGL2 `GTAOPass` only: scales its own internal render-target resolution, independent of the main scene's resolution. Lower at the `"preview"` quality tier for speed. */
+  resolutionScale: number;
+  /** WebGPU `GTAONode` only: sample count per pixel. Lower at the `"preview"` quality tier for speed. */
+  samples: number;
 }
 
 /** Constructs the underlying Three.js renderer for a given backend and target. */
@@ -174,13 +216,216 @@ function withEnvironmentMapSupport(
   });
 }
 
+/**
+ * A deterministic replacement for `GTAOPass`'s own `pdNoiseTexture` (its
+ * secondary Poisson-denoise stage's decorrelation texture): the pass's own
+ * `_generateNoise()` seeds a `SimplexNoise` instance with no explicit
+ * random-number source, which reads `Math.random()` 256 times inside
+ * `SimplexNoise`'s own constructor to build its permutation table (verified
+ * directly against this project's installed `three@0.185.1` source) - so a
+ * fresh `GTAOPass` gets a different, unseeded texture every process run,
+ * violating this codebase's own frame-determinism requirement. `GTAOPass`'s
+ * *primary* AO sampling (`gtaoNoiseTexture`, a magic-square pattern) is
+ * already fully deterministic and untouched by this function; only the
+ * secondary denoise stage needs a fix. This mirrors
+ * `environment-registry.ts`'s own "pure function of pixel index, no
+ * `Math.random()`" texture-generation pattern, matching `_generateNoise()`'s
+ * own exact 64x64 RGBA8 `RepeatWrapping` format so it drops in as a direct
+ * replacement.
+ */
+function createDeterministicGtaoDenoiseTexture(): THREE.DataTexture {
+  const size = 64;
+  const data = new Uint8Array(size * size * 4);
+  for (let i = 0; i < size; i += 1) {
+    for (let j = 0; j < size; j += 1) {
+      const index = (i * size + j) * 4;
+      data[index] = hashToByte(i, j, 0);
+      data[index + 1] = hashToByte(i + size, j, 1);
+      data[index + 2] = hashToByte(i, j + size, 2);
+      data[index + 3] = hashToByte(i + size, j + size, 3);
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat, THREE.UnsignedByteType);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/** A pure, deterministic pseudo-random byte in `[0, 255]` from integer coordinates, the standard shader "hash from sine" trick - decorrelated enough for denoise sampling, with no external RNG or `Math.random()` at all. */
+function hashToByte(x: number, y: number, channel: number): number {
+  const value = Math.sin(x * 12.9898 + y * 78.233 + channel * 37.719) * 43758.5453;
+  return Math.round((value - Math.floor(value)) * 255);
+}
+
+/**
+ * Wraps `threeRendererLike`'s own `render` to route through a cached
+ * `EffectComposer` (`RenderPass` -> `GTAOPass` -> `OutputPass`) whenever
+ * `ambientOcclusion` is present, rebuilt only when the scene, camera, or
+ * `resolutionScale` actually changes across calls - mirroring
+ * `ThreeRenderer`'s own `cachedEnvironment` cache-on-identity-change
+ * pattern. `OutputPass` is required, not optional: any offscreen
+ * `WebGLRenderTarget` (which `EffectComposer`'s own intermediate buffers
+ * are) makes `WebGLRenderer` silently skip both tone mapping and output
+ * color-space conversion (verified directly against this project's
+ * installed `three@0.185.1` source, `WebGLPrograms.js`/`WebGLRenderer.js`),
+ * which would otherwise silently undo `applyColorWorkflowDefaults`'s own
+ * ACES/sRGB output the moment AO is enabled.
+ */
+function withAmbientOcclusionSupport(
+  renderer: THREE.WebGLRenderer,
+  threeRendererLike: ThreeRendererLike,
+): ThreeRendererLike {
+  // Captured before the `Object.assign` below reassigns `threeRendererLike`'s
+  // own `.render`/`.dispose` - `threeRendererLike` and (per
+  // `withEnvironmentMapSupport`'s own `Object.assign(renderer, {...})`,
+  // which mutates and returns the very same object) `renderer` are
+  // frequently the very same object, so a method body that instead read
+  // `renderer.render(...)`/`threeRendererLike.dispose()` live at call time
+  // would read *itself* (verified as a real bug in both methods: each
+  // infinite-recursed in this project's own real browser e2e tests,
+  // `Maximum call stack size exceeded`).
+  const originalRender = renderer.render.bind(renderer);
+  const originalDispose = threeRendererLike.dispose.bind(threeRendererLike);
+  let composer: EffectComposer | undefined;
+  let gtaoPass: GTAOPass | undefined;
+  let cachedScene: THREE.Scene | undefined;
+  let cachedCamera: THREE.Camera | undefined;
+  let cachedResolutionScale: number | undefined;
+
+  function disposeComposer(): void {
+    composer?.dispose();
+    composer = undefined;
+    gtaoPass = undefined;
+  }
+
+  return Object.assign(threeRendererLike, {
+    render(scene: THREE.Scene, camera: THREE.Camera, ambientOcclusion?: AmbientOcclusionRenderConfig): void {
+      if (ambientOcclusion === undefined) {
+        disposeComposer();
+        originalRender(scene, camera);
+        return;
+      }
+
+      if (
+        composer === undefined ||
+        cachedScene !== scene ||
+        cachedCamera !== camera ||
+        cachedResolutionScale !== ambientOcclusion.resolutionScale
+      ) {
+        disposeComposer();
+        const size = renderer.getSize(new THREE.Vector2());
+        const width = Math.max(1, Math.round(size.x * ambientOcclusion.resolutionScale));
+        const height = Math.max(1, Math.round(size.y * ambientOcclusion.resolutionScale));
+        const newComposer = new EffectComposer(renderer);
+        newComposer.addPass(new RenderPass(scene, camera));
+        const newGtaoPass = new GTAOPass(scene, camera, width, height);
+        newGtaoPass.pdNoiseTexture.dispose();
+        newGtaoPass.pdNoiseTexture = createDeterministicGtaoDenoiseTexture();
+        const pdMaterial = (newGtaoPass as unknown as { pdMaterial: { uniforms: { tNoise: { value: THREE.Texture } } } })
+          .pdMaterial;
+        pdMaterial.uniforms.tNoise.value = newGtaoPass.pdNoiseTexture;
+        newComposer.addPass(newGtaoPass);
+        newComposer.addPass(new OutputPass());
+        composer = newComposer;
+        gtaoPass = newGtaoPass;
+        cachedScene = scene;
+        cachedCamera = camera;
+        cachedResolutionScale = ambientOcclusion.resolutionScale;
+      }
+
+      gtaoPass?.updateGtaoMaterial({ radius: ambientOcclusion.radius, scale: ambientOcclusion.intensity });
+      composer.render();
+    },
+    dispose(): void {
+      disposeComposer();
+      originalDispose();
+    },
+  });
+}
+
+/**
+ * The WebGPU-backend equivalent of `withAmbientOcclusionSupport` above,
+ * mirroring its own doc for why AO routes through a cached, rebuilt-on-change
+ * pipeline. Uses a TSL `RenderPipeline` (the current, non-deprecated name for
+ * what `three/webgpu` briefly called `PostProcessing` before r183; using
+ * `PostProcessing` here would fire a runtime `console.warn` on every
+ * construction, verified directly against this project's installed
+ * `three@0.185.1` source) plus `GTAONode`, per that node's own documented
+ * usage pattern: a single MRT `pass(scene, camera)` producing color/normal/
+ * depth texture nodes, fed into `ao(...)`, composited back over the scene
+ * color. `RenderPipeline.outputColorTransform` defaults to `true`, which
+ * already applies tone mapping/color-space conversion automatically (unlike
+ * the WebGL2/`EffectComposer` path above, this backend needs no `OutputPass`
+ * equivalent at all).
+ */
+function withWebGpuAmbientOcclusionSupport(
+  renderer: WebGPURenderer,
+  threeRendererLike: ThreeRendererLike,
+): ThreeRendererLike {
+  // See `withAmbientOcclusionSupport`'s own identical comment: must capture
+  // the original `render`/`dispose` before `Object.assign` below reassigns
+  // them, or the wrapped methods recurse into themselves.
+  const originalRender = renderer.render.bind(renderer);
+  const originalDispose = threeRendererLike.dispose.bind(threeRendererLike);
+  let renderPipeline: RenderPipeline | undefined;
+  let aoNode: ReturnType<typeof createGtaoNode> | undefined;
+  let cachedScene: THREE.Scene | undefined;
+  let cachedCamera: THREE.Camera | undefined;
+
+  function disposePipeline(): void {
+    renderPipeline?.dispose();
+    renderPipeline = undefined;
+    aoNode = undefined;
+  }
+
+  return Object.assign(threeRendererLike, {
+    render(scene: THREE.Scene, camera: THREE.Camera, ambientOcclusion?: AmbientOcclusionRenderConfig): void {
+      if (ambientOcclusion === undefined) {
+        disposePipeline();
+        originalRender(scene, camera);
+        return;
+      }
+
+      if (renderPipeline === undefined || cachedScene !== scene || cachedCamera !== camera) {
+        disposePipeline();
+        const scenePass = pass(scene, camera);
+        scenePass.setMRT(mrt({ output, normal: normalView }));
+        const scenePassColor = scenePass.getTextureNode("output");
+        const scenePassNormal = scenePass.getTextureNode("normal");
+        const scenePassDepth = scenePass.getTextureNode("depth");
+        const newAoNode = createGtaoNode(scenePassDepth, scenePassNormal, camera);
+        const aoOutput = newAoNode.getTextureNode();
+        const newPipeline = new RenderPipeline(renderer);
+        newPipeline.outputNode = scenePassColor.mul(vec4(vec3(aoOutput.r), 1));
+        renderPipeline = newPipeline;
+        aoNode = newAoNode;
+        cachedScene = scene;
+        cachedCamera = camera;
+      }
+
+      if (aoNode !== undefined) {
+        aoNode.radius.value = ambientOcclusion.radius;
+        aoNode.scale.value = ambientOcclusion.intensity;
+        aoNode.samples.value = ambientOcclusion.samples;
+      }
+      renderPipeline?.render();
+    },
+    dispose(): void {
+      disposePipeline();
+      originalDispose();
+    },
+  });
+}
+
 /** The real WebGPU constructor path: `three/webgpu`'s `WebGPURenderer`, canvas passed via `canvas`. */
 function createRealWebGpuRenderer(target: RenderTarget, _size: RenderSize): ThreeRendererLike {
   ensureWebGpuAreaLightSupport();
   const parameters: WebGPURendererParameters = { canvas: target };
   const renderer = new WebGPURenderer(parameters);
   applyColorWorkflowDefaults(renderer);
-  return withEnvironmentMapSupport(renderer, new WebGPUPMREMGenerator(renderer));
+  const withEnvironment = withEnvironmentMapSupport(renderer, new WebGPUPMREMGenerator(renderer));
+  return withWebGpuAmbientOcclusionSupport(renderer, withEnvironment);
 }
 
 /** The real WebGL2 fallback path: the classic `THREE.WebGLRenderer`, also driven off `canvas`. */
@@ -188,7 +433,8 @@ function createRealWebGl2Renderer(target: RenderTarget, _size: RenderSize): Thre
   ensureWebGl2AreaLightSupport();
   const renderer = new THREE.WebGLRenderer({ canvas: target });
   applyColorWorkflowDefaults(renderer);
-  return withEnvironmentMapSupport(renderer, new THREE.PMREMGenerator(renderer));
+  const withEnvironment = withEnvironmentMapSupport(renderer, new THREE.PMREMGenerator(renderer));
+  return withAmbientOcclusionSupport(renderer, withEnvironment);
 }
 
 /** The dependency set a `Renderer` uses when no overrides are supplied, i.e. real Three.js. */
@@ -365,6 +611,25 @@ export class ThreeRenderer implements Renderer {
    * changed `height`/`radius` needs a fresh instance, not a mutation).
    */
   private groundedSkybox: GroundedSkybox | undefined;
+  /**
+   * The cascaded shadow map currently attached to a directional light, when
+   * `SceneState.shadowQuality.cascadedShadows` is set and the active
+   * backend is WebGPU. `undefined` when no CSM is active. Cached and only
+   * rebuilt when the target light instance or cascade/maxFar config
+   * actually changes, since constructing a `CSMShadowNode` allocates its
+   * own per-cascade shadow map light set.
+   */
+  private cachedCsm:
+    | { light: THREE.DirectionalLight; node: CSMShadowNode; cascades: number; maxFar: number }
+    | undefined;
+  /**
+   * The contact-shadow decal mesh currently added to `this.scene`, when
+   * `SceneState.shadowQuality.contactShadows` is set. `undefined` when none
+   * is active. Rebuilt (not mutated) whenever `groundY`/`opacity`/`radius`
+   * changes, mirroring `groundedSkybox`'s own "fixed at construction time"
+   * pattern.
+   */
+  private contactShadowMesh: THREE.Mesh | undefined;
 
   constructor(
     deps: ThreeRendererDependencies = defaultThreeRendererDependencies,
@@ -405,6 +670,7 @@ export class ThreeRenderer implements Renderer {
     );
 
     this.applyEnvironment(renderer, sceneState.environment);
+    this.applyContactShadow(sceneState.shadowQuality?.contactShadows);
 
     const wrapperRoot = buildSceneStateRoot(sceneState);
     const reconciled = this.reconciler.reconcile(wrapperRoot, frameContext.frame, whiteBalanceGain);
@@ -415,6 +681,8 @@ export class ThreeRenderer implements Renderer {
       // assertion.
       return;
     }
+
+    this.applyCascadedShadows(reconciled, sceneState.shadowQuality?.cascadedShadows, this.requireBackend());
 
     if (reconciled.parent !== this.scene) {
       // Only true on the very first call (or if the reconciler ever handed
@@ -438,7 +706,7 @@ export class ThreeRenderer implements Renderer {
     const camera =
       findActiveCamera(reconciled, sceneState.activeCameraNodeId) ?? this.defaultCamera;
     this.lastUsedCamera = camera;
-    renderer.render(this.scene, camera);
+    renderer.render(this.scene, camera, this.resolveAmbientOcclusion(sceneState.shadowQuality));
   }
 
   /**
@@ -525,6 +793,139 @@ export class ThreeRenderer implements Renderer {
     this.groundedSkybox = undefined;
   }
 
+  /**
+   * Applies (or clears) cascaded shadow maps for the first directional
+   * light found in `reconciled` (mirroring `findActiveCamera`'s own
+   * "search the reconciled tree by traversal" pattern), when
+   * `cascadedShadows` is set and `backend` is `"webgpu"`. WebGPU-only, per
+   * `CascadedShadowConfig`'s own doc: on the WebGL2 fallback (or when
+   * `cascadedShadows` is omitted), this always clears/no-ops, leaving
+   * directional lights with the ordinary, non-cascaded soft shadow Phase 55
+   * already provides.
+   */
+  private applyCascadedShadows(
+    reconciled: THREE.Object3D,
+    cascadedShadows: CascadedShadowConfig | undefined,
+    backend: RendererBackend,
+  ): void {
+    if (cascadedShadows === undefined || backend !== "webgpu") {
+      this.clearCascadedShadows();
+      return;
+    }
+
+    let directionalLight: THREE.DirectionalLight | undefined;
+    reconciled.traverse((object3D) => {
+      if (directionalLight === undefined && object3D instanceof THREE.DirectionalLight) {
+        directionalLight = object3D;
+      }
+    });
+    if (directionalLight === undefined) {
+      this.clearCascadedShadows();
+      return;
+    }
+
+    const cascades = cascadedShadows.cascades ?? 4;
+    const maxFar = cascadedShadows.maxFar ?? 100000;
+    if (
+      this.cachedCsm === undefined ||
+      this.cachedCsm.light !== directionalLight ||
+      this.cachedCsm.cascades !== cascades ||
+      this.cachedCsm.maxFar !== maxFar
+    ) {
+      this.clearCascadedShadows();
+      const node = new CSMShadowNode(directionalLight, { cascades, maxFar });
+      // `LightShadow.shadowNode` is not declared in `@types/three@0.185.0`
+      // even though `three/webgpu`'s own `AnalyticLightNode` reads it at
+      // runtime to override its own default shadow node (verified directly
+      // against this project's installed `three@0.185.1` source,
+      // `AnalyticLightNode.js`'s own `this.light.shadow.shadowNode` read) -
+      // the same class of declaration gap as Phase 55's `RectAreaLightNode`.
+      // This narrow, structurally typed cast reaches only that one field.
+      (directionalLight.shadow as unknown as { shadowNode: CSMShadowNode | null }).shadowNode = node;
+      this.cachedCsm = { light: directionalLight, node, cascades, maxFar };
+    }
+  }
+
+  /** Clears any previously-applied CSM shadow node, disposing it and detaching it from whichever light it was attached to. Safe to call when there is none (a no-op). */
+  private clearCascadedShadows(): void {
+    if (this.cachedCsm === undefined) {
+      return;
+    }
+    (this.cachedCsm.light.shadow as unknown as { shadowNode: CSMShadowNode | null }).shadowNode = null;
+    this.cachedCsm.node.dispose();
+    this.cachedCsm = undefined;
+  }
+
+  /**
+   * Adds, replaces, or removes `this.contactShadowMesh` to match
+   * `contactShadows`: a soft, ground-projected decal that reads as "this
+   * scene's own content touches the ground," independent of either
+   * backend's own post-processing pipeline (see `createContactShadowMesh`'s
+   * own doc for why this is a plain mesh, not a depth-aware technique).
+   * Rebuilt (not mutated) whenever `groundY`/`opacity`/`radius` changes,
+   * mirroring `applyGroundedSkybox`'s own "fixed at construction time"
+   * pattern.
+   */
+  private applyContactShadow(contactShadows: ContactShadowConfig | undefined): void {
+    if (contactShadows === undefined) {
+      this.removeContactShadowMesh();
+      return;
+    }
+
+    const groundY = contactShadows.groundY;
+    const opacity = contactShadows.opacity ?? 0.5;
+    const radius = contactShadows.radius ?? 2;
+    const current = this.contactShadowMesh;
+    const currentMaterial = current?.material as THREE.MeshBasicMaterial | undefined;
+    const currentGeometry = current?.geometry as THREE.CircleGeometry | undefined;
+    const unchanged =
+      current !== undefined &&
+      current.position.y === groundY &&
+      currentMaterial?.opacity === opacity &&
+      currentGeometry?.parameters.radius === radius;
+    if (unchanged) {
+      return;
+    }
+
+    this.removeContactShadowMesh();
+    this.contactShadowMesh = createContactShadowMesh(groundY, opacity, radius);
+    this.scene.add(this.contactShadowMesh);
+  }
+
+  /** Removes and disposes `this.contactShadowMesh`, if one is currently added. Safe to call when there is none (a no-op). The shared decal texture itself is never disposed here: it is a module-level singleton pooled across every contact-shadow mesh, exactly like `node-factory.ts`'s own pooled placeholder resources. */
+  private removeContactShadowMesh(): void {
+    if (this.contactShadowMesh === undefined) {
+      return;
+    }
+    this.scene.remove(this.contactShadowMesh);
+    this.contactShadowMesh.geometry.dispose();
+    (this.contactShadowMesh.material as THREE.Material).dispose();
+    this.contactShadowMesh = undefined;
+  }
+
+  /**
+   * Resolves `shadowQuality.ambientOcclusion` (when present) into an
+   * `AmbientOcclusionRenderConfig`, applying quality-tier defaults for
+   * whichever backend-specific field (`resolutionScale`/`samples`) is only
+   * ever read by one backend's own AO implementation - see
+   * `AmbientOcclusionRenderConfig`'s own doc for why.
+   */
+  private resolveAmbientOcclusion(
+    shadowQuality: CompositionShadowQuality | undefined,
+  ): AmbientOcclusionRenderConfig | undefined {
+    const ambientOcclusion = shadowQuality?.ambientOcclusion;
+    if (ambientOcclusion === undefined) {
+      return undefined;
+    }
+    const isPreview = (shadowQuality?.tier ?? "final") === "preview";
+    return {
+      radius: ambientOcclusion.radius ?? 1,
+      intensity: ambientOcclusion.intensity ?? 1,
+      resolutionScale: isPreview ? 0.5 : 1,
+      samples: isPreview ? 8 : 16,
+    };
+  }
+
   resize(size: RenderSize): void {
     const renderer = this.requireInitialized();
     // `updateStyle: false`: touching `.style` would throw on an
@@ -535,6 +936,8 @@ export class ThreeRenderer implements Renderer {
   dispose(): void {
     this.clearCachedEnvironment();
     this.removeGroundedSkybox();
+    this.clearCascadedShadows();
+    this.removeContactShadowMesh();
     this.requireInitialized().dispose();
   }
 
