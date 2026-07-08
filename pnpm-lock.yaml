@@ -242,6 +242,25 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@26.1.0)(jsdom@25.0.1)(lightningcss@1.32.0)
 
+  packages/particles:
+    dependencies:
+      '@cadra/core':
+        specifier: workspace:*
+        version: link:../core
+      three:
+        specifier: ^0.185.1
+        version: 0.185.1
+    devDependencies:
+      '@types/three':
+        specifier: ^0.185.0
+        version: 0.185.0
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@26.1.0)(jsdom@25.0.1)(lightningcss@1.32.0)
+
   packages/pathtracer:
     dependencies:
       '@cadra/core':
@@ -323,6 +342,9 @@ importers:
       '@cadra/core':
         specifier: workspace:*
         version: link:../core
+      '@cadra/particles':
+        specifier: workspace:*
+        version: link:../particles
       '@cadra/pathtracer':
         specifier: workspace:*
         version: link:../pathtracer
