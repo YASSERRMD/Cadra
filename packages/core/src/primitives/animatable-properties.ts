@@ -85,3 +85,11 @@ export const SATORI_ANIMATABLE_PROPERTIES = [
   "visible",
   "opacity",
 ] as const;
+
+/** `Volume` (`VolumeNode`) animatable props: transform, visibility, color, and density. */
+export const VOLUME_ANIMATABLE_PROPERTIES = [
+  ...TRANSFORM_ANIMATABLE_PROPERTIES,
+  "visible",
+  "color",
+  "density",
+] as const;

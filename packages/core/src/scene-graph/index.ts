@@ -54,6 +54,8 @@ export type {
   VideoFitMode,
   VideoNode,
   VideoOutOfRangeBehavior,
+  VolumeNode,
+  VolumeShape,
 } from "./scene-node.js";
 export type {
   ActiveCameraEntry,
@@ -69,6 +71,7 @@ export type {
   Composition,
   CompositionColorGrading,
   CompositionEnvironment,
+  CompositionFog,
   CompositionPhysics,
   CompositionPostProcessing,
   CompositionRenderMode,
@@ -77,6 +80,7 @@ export type {
   DepthOfFieldEffectConfig,
   EnvironmentGroundProjection,
   FilmGrainEffectConfig,
+  GodRaysEffectConfig,
   LensDistortionEffectConfig,
   LutEffectConfig,
   MotionBlurEffectConfig,

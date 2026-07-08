@@ -22,7 +22,8 @@ export type SceneNodeKind =
   | "video"
   | "compositionRef"
   | "satori"
-  | "particles";
+  | "particles"
+  | "volume";
 
 /**
  * Fields shared by every scene node, regardless of kind.
@@ -958,6 +959,50 @@ export interface ParticleSystemNode extends SceneNodeBase<"particles"> {
 }
 
 /**
+ * The bounding shape a `VolumeNode`'s density field fills; nothing renders
+ * outside it. In the node's own local space (before its `transform` is
+ * applied), mirroring `ColliderConfig`'s own "simple analytic shape"
+ * precedent.
+ */
+export type VolumeShape =
+  | { type: "box"; halfExtents: Vector3 }
+  | { type: "sphere"; radius: number };
+
+/**
+ * A simple animated volumetric smoke/mist volume (Phase 68): a raymarched,
+ * curl-noise-driven density field filling `shape`, lit by the scene's own
+ * lights (via Three.js's `VolumeNodeMaterial`/`VolumetricLightingModel`; see
+ * `@cadra/renderer`'s own wiring).
+ *
+ * WebGPU-backend only, and silently renders nothing at all on the WebGL2
+ * fallback: this technique is TSL-node infrastructure (a raymarch through a
+ * bounding mesh, integrating real scene lights per step) with no classic-
+ * material equivalent, the same class of backend asymmetry
+ * `MotionBlurEffectConfig`'s own doc documents for the identical underlying
+ * reason.
+ *
+ * Animated deterministically: `driftSpeed` offsets the sampled noise field
+ * along its own local Z axis by `driftSpeed * (frame / fps)`, both supplied
+ * fresh by the renderer each frame from the composition's own frame clock
+ * (base Phase 3), never wall-clock.
+ */
+export interface VolumeNode extends SceneNodeBase<"volume"> {
+  shape: VolumeShape;
+  /** The volume's own base color, lit by the scene's own lights. */
+  color: Property<ColorRGBA>;
+  /** Overall density multiplier: higher looks thicker/more opaque. */
+  density: Property<number>;
+  /** Spatial frequency of the underlying curl-noise field: higher values give smaller, more turbulent detail. Defaults to `1`. */
+  noiseFrequency?: number;
+  /** How fast the sampled noise field drifts along its own local Z axis, in units per second. Defaults to `0` (static, non-animated). */
+  driftSpeed?: number;
+  /** Raymarch step count through `shape`: higher is smoother, slower. Defaults to `25`. */
+  raymarchSteps?: number;
+  /** Combined with the composition's own frame seed and this node's own `id` to derive this volume's deterministic noise field. Defaults to `0`. */
+  seed?: number;
+}
+
+/**
  * A node in the scene graph, discriminated on `kind`. Every variant is a
  * strict, closed shape: none of them carry a catch-all index signature, so
  * accessing a field not declared for the current `kind` is a compile error
@@ -973,4 +1018,5 @@ export type SceneNode =
   | VideoNode
   | CompositionRefNode
   | SatoriNode
-  | ParticleSystemNode;
+  | ParticleSystemNode
+  | VolumeNode;

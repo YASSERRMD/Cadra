@@ -1,4 +1,4 @@
-import type { Vector3 } from "./primitives.js";
+import type { ColorRGBA, Vector3 } from "./primitives.js";
 import type { SceneNode } from "./scene-node.js";
 
 /**
@@ -185,6 +185,12 @@ export interface Composition {
    * means no environment lighting at all (the pre-Phase-56 default).
    */
   environment?: CompositionEnvironment;
+  /**
+   * Whole-composition atmospheric fog. Fixed for the composition's entire
+   * length, exactly like `environment` (see that field's own doc for why).
+   * Omitted means no fog at all (the pre-Phase-68 default).
+   */
+  fog?: CompositionFog;
   /**
    * Whole-composition shadow and ambient-occlusion tuning: cascaded shadow
    * maps, ambient occlusion, and ground contact shadows. Fixed for the
@@ -444,6 +450,32 @@ export interface EnvironmentGroundProjection {
   radius?: number;
 }
 
+/**
+ * Whole-composition atmospheric fog, thinning distant geometry toward a
+ * fixed color. See `Composition.fog`'s own doc for why this is a fixed,
+ * non-`Property<T>` setting.
+ *
+ * `"linear"` and `"exponential"` both work identically on either render
+ * backend: Three.js's own classic `THREE.Fog`/`THREE.FogExp2` compute fog
+ * per-fragment during each material's own forward render (from that
+ * fragment's view-space depth alone, not a depth-texture post pass), and
+ * the WebGPU backend auto-derives the equivalent TSL fog node from that
+ * exact same classic fog object every frame (see `@cadra/renderer`'s own
+ * `applyFog`) - one config, both backends, no dual implementation needed.
+ *
+ * `"height"` (density additionally falling off with world-space height, for
+ * ground mist that thins out overhead) has no classic-material equivalent
+ * at all: Three.js's own fog GLSL chunks only ever implement linear/
+ * exponential falloff. WebGPU-backend only, and silently skipped (a no-op,
+ * not an error) on the WebGL2 fallback - the same "WebGPU-only technique,
+ * no hand-rollable classic counterpart" precedent `MotionBlurEffectConfig`'s
+ * own doc documents for the identical underlying reason.
+ */
+export type CompositionFog =
+  | { type: "linear"; color: ColorRGBA; near: number; far: number }
+  | { type: "exponential"; color: ColorRGBA; density: number }
+  | { type: "height"; color: ColorRGBA; density: number; height: number };
+
 /** A quality tier trading render cost against fidelity, applied to shadow map resolution, cascade count, and ambient occlusion sample density. */
 export type ShadowQualityTier = "preview" | "final";
 
@@ -649,6 +681,40 @@ export interface MotionBlurEffectConfig {
 }
 
 /**
+ * Screen-space volumetric light shafts ("god rays"/crepuscular rays) cast
+ * from one shadow-casting light, via a shadow-map raymarch through that
+ * light's own shadow frustum (Three.js's `GodraysNode`; see
+ * `@cadra/renderer`'s own wiring). Pre-tonemap (see `PostEffectConfig`'s own
+ * doc): light shafts are additive HDR content, exactly like bloom.
+ *
+ * WebGPU-backend only, and silently skipped (a no-op, not an error) on the
+ * WebGL2 fallback: this technique is TSL-node infrastructure (a raymarch
+ * sampling a light's own shadow map) with no classic-material equivalent,
+ * the same class of backend asymmetry `MotionBlurEffectConfig`'s own doc
+ * documents for the identical underlying reason.
+ *
+ * `lightNodeId` must reference a `LightNode` that exists in the scene,
+ * casts shadows (`LightNode.castShadow: true`), and is `"directional"` or
+ * `"point"` (the two light types this technique supports) - referencing a
+ * missing node, a non-shadow-casting light, or an unsupported light type is
+ * a silent no-op (no rays rendered) rather than an error: "this light
+ * doesn't currently qualify for rays" is a legitimate transient authoring
+ * state (e.g. mid-edit), not a broken document.
+ */
+export interface GodRaysEffectConfig {
+  type: "godRays";
+  lightNodeId: string;
+  /** Raymarch steps sampled along each pixel's own view ray through the light's shadow frustum. Higher is smoother and more expensive. Defaults to `60`. */
+  raymarchSteps?: number;
+  /** Overall ray density/brightness. Defaults to `0.7`. */
+  density?: number;
+  /** Caps how dense (opaque) the accumulated rays can become. Defaults to `0.5`. */
+  maxDensity?: number;
+  /** How strongly rays fade with distance from the light. Defaults to `2`. */
+  distanceAttenuation?: number;
+}
+
+/**
  * A three-way (lift/gamma/gain) color grading pass: the same primaries
  * model every color-grading tool (DaVinci Resolve, Nuke, Blender) exposes as
  * its baseline "shadows/midtones/highlights" corrector, plus saturation and
@@ -709,7 +775,7 @@ export interface LutEffectConfig {
  * property of that effect, decided by the renderer, not an authorable field
  * here: getting it wrong would silently clip or wash out the effect, so it is
  * not something a scene author or agent can misconfigure. `bloom`,
- * `depthOfField`, and `motionBlur` render pre-tonemap; `sharpen`,
+ * `depthOfField`, `motionBlur`, and `godRays` render pre-tonemap; `sharpen`,
  * `chromaticAberration`, `vignette`, `filmGrain`, `lensDistortion`,
  * `colorGrade`, and `lut` render post-tonemap.
  */
@@ -722,6 +788,7 @@ export type PostEffectConfig =
   | FilmGrainEffectConfig
   | LensDistortionEffectConfig
   | MotionBlurEffectConfig
+  | GodRaysEffectConfig
   | ColorGradeEffectConfig
   | LutEffectConfig;
 
