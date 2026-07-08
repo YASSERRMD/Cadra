@@ -2,6 +2,7 @@ import type { SceneNode, SceneNodeKind, WhiteBalanceGain } from "@cadra/core";
 import type { PhysicsTransform } from "@cadra/physics";
 import type * as THREE from "three";
 
+import type { RendererBackend } from "../renderer.js";
 import type { SatoriLayerRenderRegistry } from "../svg-layer/satori-layer-render-registry.js";
 import type { TextRenderRegistry } from "../text/text-render-registry.js";
 import {
@@ -78,6 +79,12 @@ export interface Reconciler {
    * `NodeFactoryContext.particleObjects`'s own doc), supplied fresh each
    * call for the same reason. Defaults to every `"particles"` node
    * rendering as an empty group when omitted.
+   *
+   * `backend`/`fps` are this renderer's own resolved backend and this
+   * composition's own frames-per-second (see `NodeFactoryContext.backend`/
+   * `.fps`'s own docs), supplied fresh each call for the same reason.
+   * Defaults to every `"volume"` node rendering as an empty group when
+   * `backend` is omitted.
    */
   reconcile(
     nextRoot: SceneNode | null,
@@ -85,6 +92,8 @@ export interface Reconciler {
     whiteBalanceGain?: WhiteBalanceGain,
     physicsTransforms?: ReadonlyMap<string, PhysicsTransform>,
     particleObjects?: ReadonlyMap<string, THREE.Object3D>,
+    backend?: RendererBackend,
+    fps?: number,
   ): THREE.Object3D | null;
 }
 
@@ -129,10 +138,14 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
     whiteBalanceGain?: WhiteBalanceGain,
     physicsTransforms?: ReadonlyMap<string, PhysicsTransform>,
     particleObjects?: ReadonlyMap<string, THREE.Object3D>,
+    backend?: RendererBackend,
+    fps?: number,
   ): THREE.Object3D | null {
     ctx.whiteBalanceGain = whiteBalanceGain ?? [1, 1, 1];
     ctx.physicsTransforms = physicsTransforms;
     ctx.particleObjects = particleObjects;
+    ctx.backend = backend;
+    ctx.fps = fps;
 
     if (nextRoot === null) {
       teardownAll();
@@ -297,6 +310,10 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
       entry.owned.satori.geometry.dispose();
       entry.owned.satori.material?.dispose();
       entry.owned.satori.texture?.dispose();
+    }
+    if (entry.owned?.volume !== undefined) {
+      entry.owned.volume.geometry.dispose();
+      entry.owned.volume.material.dispose();
     }
   }
 

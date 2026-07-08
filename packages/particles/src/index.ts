@@ -28,3 +28,4 @@ export { createGpuParticleSystem } from "./gpu-particle-system.js";
 export { particleHash, particleHashSigned } from "./hash.js";
 export type { ComputeFn, ParticleRuntime, ParticleRuntimeDependencies } from "./particle-runtime.js";
 export { createParticleRuntime } from "./particle-runtime.js";
+export { curlNoise3DTSL, valueNoise3DTSL } from "./tsl-curl-noise.js";
