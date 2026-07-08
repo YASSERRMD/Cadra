@@ -1,21 +1,50 @@
 import type { CompositionPostProcessing, PostEffectConfig, RenderQualityTier } from "@cadra/core";
 import * as THREE from "three";
+import { BokehPass } from "three/addons/postprocessing/BokehPass.js";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import type { Pass } from "three/addons/postprocessing/Pass.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { FilmShader } from "three/addons/shaders/FilmShader.js";
+import { RGBShiftShader } from "three/addons/shaders/RGBShiftShader.js";
+import { VignetteShader } from "three/addons/shaders/VignetteShader.js";
+import { bloom as createBloomNode } from "three/addons/tsl/display/BloomNode.js";
+import { chromaticAberration as createChromaticAberrationNode } from "three/addons/tsl/display/ChromaticAberrationNode.js";
+import { dof as createDofNode } from "three/addons/tsl/display/DepthOfFieldNode.js";
 import { ao as createGtaoNode } from "three/addons/tsl/display/GTAONode.js";
-import { float, int, mrt, normalView, output, pass, textureSize, toneMappingExposure, uv, vec2, vec3, vec4 } from "three/tsl";
+import {
+  clamp,
+  convertToTexture,
+  float,
+  fract,
+  int,
+  mix,
+  mrt,
+  normalView,
+  output,
+  pass,
+  rand,
+  textureSize,
+  toneMappingExposure,
+  uniform,
+  uv,
+  vec2,
+  vec3,
+  vec4,
+} from "three/tsl";
 import { RenderPipeline, type WebGPURenderer } from "three/webgpu";
 
+import { computeFilmGrainSeed } from "./film-grain.js";
 import { computeSharpenKernelWeights, SharpenShader, updateSharpenUniforms } from "./sharpen.js";
 import type { AnyTslNode } from "./tsl-node.js";
 
 /**
  * Ambient occlusion tuning resolved from `AmbientOcclusionConfig` plus the
  * composition's own quality tier, consumed by `buildWebGl2Pipeline`/
- * `buildWebGpuOutputNode` below. Moved here from `three-renderer.ts` in
+ * `buildWebGpuPipeline` below. Moved here from `three-renderer.ts` in
  * Phase 58 (previously private to that file's own `withAmbientOcclusionSupport`/
  * `withWebGpuAmbientOcclusionSupport`): both AO and the generic
  * post-processing stack this phase adds now share one composer/pipeline
@@ -34,23 +63,45 @@ export interface AmbientOcclusionRenderConfig {
 
 /** Fully resolved, render-ready post-processing config for one `renderFrame` call, produced by `resolvePostProcessing`. */
 export interface PostProcessingRenderConfig {
-  /** Trades render cost against fidelity. Not read by any effect Phase 58 itself ships (`sharpen` has no tier-sensitive knob); threaded through now so Phase 59 onward's more expensive effects (bloom, depth of field) can read it without another round of plumbing. */
+  /** Trades render cost against fidelity. Not read by any effect Phase 58/59 ship (none has a tier-sensitive knob yet); threaded through so a future expensive effect can read it without another round of plumbing. */
   tier: RenderQualityTier;
   effects: PostEffectConfig[];
 }
 
 /**
  * Everything a `ThreeRendererLike.render` call might need beyond `scene`/
- * `camera`. Both fields must reach the very same composer/pipeline
- * construction (see `buildWebGl2Pipeline`/`buildWebGpuOutputNode`): ambient
- * occlusion darkens the scene's own linear-HDR color before tone mapping,
- * exactly where a `postProcessing` effect's own `"preTonemap"` stage runs, so
- * splitting them across two independently-`RenderPass`-ing composers would
- * either silently drop one or double-render the scene.
+ * `camera`. `ambientOcclusion`/`postProcessing` must reach the very same
+ * composer/pipeline construction (see `buildWebGl2Pipeline`/
+ * `buildWebGpuPipeline`): ambient occlusion darkens the scene's own
+ * linear-HDR color before tone mapping, exactly where a `postProcessing`
+ * effect's own `"preTonemap"` stage runs, so splitting them across two
+ * independently-`RenderPass`-ing composers would either silently drop one or
+ * double-render the scene. `frame` is deliberately excluded from
+ * `withPostProcessingSupport`/`withWebGpuPostProcessingSupport`'s own cache
+ * key (see `renderPassConfigKey`): it changes every call by construction,
+ * and only ever drives a handful of already-built passes' own per-frame
+ * uniforms (currently: film grain's seed) via each built pipeline's own
+ * `updateFrame`, never a full composer/pipeline rebuild.
  */
 export interface RenderPassConfig {
   ambientOcclusion?: AmbientOcclusionRenderConfig;
   postProcessing?: PostProcessingRenderConfig;
+  frame: number;
+}
+
+/**
+ * A built composer/pipeline (`handle`) plus `updateFrame`: re-applies this
+ * frame's own frame-dependent effect parameters (currently: film grain's
+ * seed, from `computeFilmGrainSeed`) onto whichever already-built passes/
+ * nodes need them. Called every render, whether or not `handle` was just
+ * freshly built this call - mirrors `GTAOPass.updateGtaoMaterial` being
+ * called unconditionally every frame in Phase 57's own AO wrapper, for the
+ * same reason: cheap per-frame uniform updates should never force a full,
+ * expensive pipeline rebuild.
+ */
+export interface BuiltPipeline<Handle> {
+  handle: Handle;
+  updateFrame: (frame: number) => void;
 }
 
 /**
@@ -71,14 +122,21 @@ export function resolvePostProcessing(
 /**
  * True for a `PostEffectConfig` whose own pass must run before tone mapping,
  * on linear scene-referred HDR data (an inherent property of the effect
- * type, not authorable - see `PostEffectConfig`'s own doc for why). `sharpen`
- * is the one variant Phase 58 ships, and is a display-referred (post-tonemap)
- * effect: it sharpens the final image an audience actually sees, the same
- * stage a photo editor's own "clarity"/"sharpen" slider operates at.
+ * type, not authorable - see `PostEffectConfig`'s own doc for why). `bloom`
+ * and `depthOfField` need that HDR headroom to extract/blur bright
+ * highlights correctly; every other effect is a display-referred lens/sensor
+ * artifact applied to the final image an audience actually sees.
  */
 function isPreTonemapEffect(effect: PostEffectConfig): boolean {
   switch (effect.type) {
+    case "bloom":
+    case "depthOfField":
+      return true;
     case "sharpen":
+    case "chromaticAberration":
+    case "vignette":
+    case "filmGrain":
+    case "lensDistortion":
       return false;
   }
 }
@@ -155,12 +213,108 @@ function buildGtaoPass(
   return gtaoPass;
 }
 
-/** Builds one `ShaderPass` for `effect`, sized to the composer's own current pixel dimensions. The one branch Phase 58 ships (`"sharpen"`); Phase 59 onward adds one case per new effect. */
-function buildWebGl2EffectPass(effect: PostEffectConfig, width: number, height: number): ShaderPass {
+/**
+ * A hand-written lens distortion shader: warps `tDiffuse` radially from the
+ * frame's own center by `amount` (barrel for positive, pincushion for
+ * negative). Not bundled by three.js under any name, unlike bloom/depth of
+ * field/chromatic aberration/vignette/film grain, all of which reuse a real,
+ * tested three.js pass or node instead of hand-written math (see
+ * `buildWebGl2EffectPass`/`applyWebGpuEffect`).
+ */
+const LensDistortionShader = {
+  name: "LensDistortionShader",
+  uniforms: {
+    tDiffuse: { value: null as THREE.Texture | null },
+    amount: { value: 0 },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float amount;
+    varying vec2 vUv;
+
+    void main() {
+      vec2 centered = vUv - vec2(0.5);
+      float r2 = dot(centered, centered);
+      vec2 distortedUv = vec2(0.5) + centered * (1.0 + amount * r2);
+      gl_FragColor = texture2D(tDiffuse, distortedUv);
+    }
+  `,
+};
+
+/**
+ * Builds one `Pass` for `effect`, sized to the composer's own current pixel
+ * dimensions. `scene`/`camera` are needed by `depthOfField` (`BokehPass`
+ * renders its own internal depth pass from them); `registerFrameUpdate` is
+ * called, at most once, by any effect whose own uniforms depend on the
+ * current frame (currently: `filmGrain`'s seed, from
+ * `computeFilmGrainSeed`) - see `BuiltPipeline.updateFrame`'s own doc for why
+ * this is a callback rather than a full rebuild.
+ */
+function buildWebGl2EffectPass(
+  effect: PostEffectConfig,
+  scene: THREE.Scene,
+  camera: THREE.Camera,
+  width: number,
+  height: number,
+  registerFrameUpdate: (update: (frame: number) => void) => void,
+): Pass {
   switch (effect.type) {
     case "sharpen": {
       const shaderPass = new ShaderPass(SharpenShader);
       updateSharpenUniforms(shaderPass.material, effect.amount ?? 0.5, width, height);
+      return shaderPass;
+    }
+    case "bloom": {
+      const bloomPass = new UnrealBloomPass(
+        new THREE.Vector2(width, height),
+        effect.intensity ?? 1,
+        effect.radius ?? 0.4,
+        effect.threshold ?? 0.85,
+      );
+      return bloomPass;
+    }
+    case "depthOfField": {
+      return new BokehPass(scene, camera, {
+        focus: effect.focusDistance ?? 10,
+        aperture: effect.aperture ?? 0.025,
+        maxblur: effect.maxBlur ?? 1,
+      });
+    }
+    case "chromaticAberration": {
+      const shaderPass = new ShaderPass(RGBShiftShader);
+      const uniforms = shaderPass.material.uniforms as typeof RGBShiftShader.uniforms;
+      uniforms.amount.value = (effect.intensity ?? 0.5) * 0.01;
+      uniforms.angle.value = 0;
+      return shaderPass;
+    }
+    case "vignette": {
+      const shaderPass = new ShaderPass(VignetteShader);
+      const uniforms = shaderPass.material.uniforms as typeof VignetteShader.uniforms;
+      uniforms.darkness.value = effect.darkness ?? 1;
+      uniforms.offset.value = effect.offset ?? 1;
+      return shaderPass;
+    }
+    case "filmGrain": {
+      const shaderPass = new ShaderPass(FilmShader);
+      const uniforms = shaderPass.material.uniforms as typeof FilmShader.uniforms;
+      uniforms.intensity.value = effect.intensity ?? 0.35;
+      uniforms.grayscale.value = false;
+      registerFrameUpdate((frame) => {
+        uniforms.time.value = computeFilmGrainSeed(frame);
+      });
+      return shaderPass;
+    }
+    case "lensDistortion": {
+      const shaderPass = new ShaderPass(LensDistortionShader);
+      const uniforms = shaderPass.material.uniforms as typeof LensDistortionShader.uniforms;
+      uniforms.amount.value = effect.amount ?? 0;
       return shaderPass;
     }
   }
@@ -187,7 +341,7 @@ export function buildWebGl2Pipeline(
   width: number,
   height: number,
   config: RenderPassConfig,
-): EffectComposer {
+): BuiltPipeline<EffectComposer> {
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
 
@@ -198,18 +352,30 @@ export function buildWebGl2Pipeline(
     composer.addPass(buildGtaoPass(scene, camera, aoWidth, aoHeight, ao));
   }
 
+  const frameUpdates: Array<(frame: number) => void> = [];
+  const registerFrameUpdate = (update: (frame: number) => void): void => {
+    frameUpdates.push(update);
+  };
+
   const { preTonemap, postTonemap } = partitionEffectsByStage(config.postProcessing?.effects ?? []);
   for (const effect of preTonemap) {
-    composer.addPass(buildWebGl2EffectPass(effect, width, height));
+    composer.addPass(buildWebGl2EffectPass(effect, scene, camera, width, height, registerFrameUpdate));
   }
 
   composer.addPass(new OutputPass());
 
   for (const effect of postTonemap) {
-    composer.addPass(buildWebGl2EffectPass(effect, width, height));
+    composer.addPass(buildWebGl2EffectPass(effect, scene, camera, width, height, registerFrameUpdate));
   }
 
-  return composer;
+  return {
+    handle: composer,
+    updateFrame(frame: number): void {
+      for (const update of frameUpdates) {
+        update(frame);
+      }
+    },
+  };
 }
 
 /**
@@ -223,18 +389,14 @@ export function buildWebGl2Pipeline(
  * applies every post-tonemap effect - deliberately mirroring
  * `buildWebGl2Pipeline`'s own pre/post-`OutputPass` split so a given
  * `PostEffectConfig` operates on the same kind of data (pre-tonemap: linear
- * HDR; post-tonemap: display-referred) on both backends. The caller is
- * responsible for setting `RenderPipeline.outputColorTransform = false`
- * before assigning the returned node to `outputNode`: this function already
- * did that conversion manually, and the pipeline's own default automatic
- * conversion would otherwise double-apply it.
+ * HDR; post-tonemap: display-referred) on both backends.
  */
 export function buildWebGpuPipeline(
   renderer: WebGPURenderer,
   scene: THREE.Scene,
   camera: THREE.Camera,
   config: RenderPassConfig,
-): RenderPipeline {
+): BuiltPipeline<RenderPipeline> {
   const scenePass = pass(scene, camera);
   if (config.ambientOcclusion !== undefined) {
     scenePass.setMRT(mrt({ output, normal: normalView }));
@@ -254,10 +416,15 @@ export function buildWebGpuPipeline(
     node = node.mul(vec4(vec3(aoOutput.r), 1));
   }
 
+  const frameUpdates: Array<(frame: number) => void> = [];
+  const registerFrameUpdate = (update: (frame: number) => void): void => {
+    frameUpdates.push(update);
+  };
+
   const { preTonemap, postTonemap } = partitionEffectsByStage(config.postProcessing?.effects ?? []);
 
   for (const effect of preTonemap) {
-    node = applyWebGpuEffect(node, effect);
+    node = applyWebGpuEffect(node, effect, scenePass, camera, registerFrameUpdate);
   }
 
   // Mirrors RenderOutputNode's own setup() guard (verified directly against
@@ -274,7 +441,7 @@ export function buildWebGpuPipeline(
   }
 
   for (const effect of postTonemap) {
-    node = applyWebGpuEffect(node, effect);
+    node = applyWebGpuEffect(node, effect, scenePass, camera, registerFrameUpdate);
   }
 
   const renderPipeline = new RenderPipeline(renderer);
@@ -285,7 +452,15 @@ export function buildWebGpuPipeline(
   // would compose and double-apply both.
   renderPipeline.outputColorTransform = false;
   renderPipeline.outputNode = node;
-  return renderPipeline;
+
+  return {
+    handle: renderPipeline,
+    updateFrame(frame: number): void {
+      for (const update of frameUpdates) {
+        update(frame);
+      }
+    },
+  };
 }
 
 /**
@@ -294,21 +469,96 @@ export function buildWebGpuPipeline(
  * this touches - a scene-pass texture, a `.mul()`/`.sample()` result, ... -
  * is the same proxy-wrapped object at runtime regardless of which narrow,
  * mutually incompatible declared subtype `@types/three@0.185.0` happens to
- * assign it.
+ * assign it. `scenePass` is needed by `depthOfField` (for its own
+ * `getViewZNode()`); `camera` is needed by `depthOfField`'s near/far
+ * implied by that same view-space depth; `registerFrameUpdate` is called, at
+ * most once, by any effect whose own uniforms depend on the current frame
+ * (currently: `filmGrain`'s seed) - see `BuiltPipeline.updateFrame`'s own
+ * doc for why.
  */
-function applyWebGpuEffect(colorTexture: AnyTslNode, effect: PostEffectConfig): AnyTslNode {
+function applyWebGpuEffect(
+  colorTexture: AnyTslNode,
+  effect: PostEffectConfig,
+  scenePass: AnyTslNode,
+  camera: THREE.Camera,
+  registerFrameUpdate: (update: (frame: number) => void) => void,
+): AnyTslNode {
   switch (effect.type) {
     case "sharpen": {
+      // colorTexture is only guaranteed sampleable-at-an-arbitrary-UV when it
+      // is the very first thing reading the raw scene pass (a genuine
+      // TextureNode). Once anything upstream - tone mapping, color space
+      // conversion, or an earlier effect in this same stage - has run, it is
+      // a plain computed value node with no .sample() of its own at all
+      // (confirmed as a real bug via this project's own real-browser e2e
+      // test, `render-composition-headless-server.e2e.test.ts`'s
+      // post-processing case: "colorTexture.sample is not a function").
+      // convertToTexture (the same helper DepthOfFieldNode's own factory
+      // uses for its own input) is a no-op when colorTexture is already a
+      // real texture node, and otherwise bakes it into one via an internal
+      // render-to-texture pass - see this project's installed
+      // three@0.185.1 source, RTTNode.js.
+      const sampleable = convertToTexture(colorTexture);
       const { centerWeight, neighborWeight } = computeSharpenKernelWeights(effect.amount ?? 0.5);
-      const size: AnyTslNode = textureSize(colorTexture, int(0));
+      const size: AnyTslNode = textureSize(sampleable, int(0));
       const texel = vec2(1, 1).div(size);
-      const center = colorTexture.sample(uv());
-      const top = colorTexture.sample(uv().add(vec2(0, texel.y)));
-      const bottom = colorTexture.sample(uv().sub(vec2(0, texel.y)));
-      const left = colorTexture.sample(uv().sub(vec2(texel.x, 0)));
-      const right = colorTexture.sample(uv().add(vec2(texel.x, 0)));
+      const center = sampleable.sample(uv());
+      const top = sampleable.sample(uv().add(vec2(0, texel.y)));
+      const bottom = sampleable.sample(uv().sub(vec2(0, texel.y)));
+      const left = sampleable.sample(uv().sub(vec2(texel.x, 0)));
+      const right = sampleable.sample(uv().add(vec2(texel.x, 0)));
       const neighborSum = top.add(bottom).add(left).add(right);
       return center.mul(float(centerWeight)).sub(neighborSum.mul(float(neighborWeight)));
+    }
+    case "bloom": {
+      const bloomNode = createBloomNode(
+        colorTexture,
+        effect.intensity ?? 1,
+        effect.radius ?? 0.4,
+        effect.threshold ?? 0.85,
+      );
+      return colorTexture.add(bloomNode);
+    }
+    case "depthOfField": {
+      const viewZNode: AnyTslNode = scenePass.getViewZNode();
+      return createDofNode(
+        colorTexture,
+        viewZNode,
+        effect.focusDistance ?? 10,
+        (effect.aperture ?? 0.025) * 40,
+        effect.maxBlur ?? 1,
+      );
+    }
+    case "chromaticAberration": {
+      return createChromaticAberrationNode(colorTexture, float((effect.intensity ?? 0.5) * 0.01));
+    }
+    case "vignette": {
+      const darkness = effect.darkness ?? 1;
+      const offset = effect.offset ?? 1;
+      const centered = uv().sub(vec2(0.5, 0.5)).mul(float(offset));
+      const falloff = centered.dot(centered);
+      const target = vec3(1, 1, 1).sub(vec3(darkness, darkness, darkness));
+      return vec4(mix(colorTexture.rgb, target, falloff.clamp(0, 1)), colorTexture.a);
+    }
+    case "filmGrain": {
+      const seed = uniform(0);
+      registerFrameUpdate((frame) => {
+        seed.value = computeFilmGrainSeed(frame);
+      });
+      const noise = rand(fract(uv().add(seed)));
+      const grained = colorTexture.rgb.add(colorTexture.rgb.mul(clamp(noise.add(0.1), 0, 1)));
+      const intensity = float(effect.intensity ?? 0.35);
+      return vec4(mix(colorTexture.rgb, grained, intensity), colorTexture.a);
+    }
+    case "lensDistortion": {
+      // See the "sharpen" case's own comment for why colorTexture needs
+      // convertToTexture before any .sample() call at a non-default UV.
+      const sampleable = convertToTexture(colorTexture);
+      const amount = effect.amount ?? 0;
+      const centered = uv().sub(vec2(0.5, 0.5));
+      const r2 = centered.dot(centered);
+      const distortedUv = vec2(0.5, 0.5).add(centered.mul(float(1).add(r2.mul(float(amount)))));
+      return sampleable.sample(distortedUv);
     }
   }
 }

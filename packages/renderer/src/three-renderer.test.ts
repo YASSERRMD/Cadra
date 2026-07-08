@@ -1320,12 +1320,25 @@ describe("ThreeRenderer.renderFrame: ambient occlusion (Phase 57)", () => {
     });
 
     renderer.renderFrame(sceneState, makeFrameContext(1));
-    const [, , first] = webGpuRenderer.render.mock.calls[0] as [THREE.Scene, THREE.Camera, unknown];
+    const [, , first] = webGpuRenderer.render.mock.calls[0] as [
+      THREE.Scene,
+      THREE.Camera,
+      { ambientOcclusion: unknown },
+    ];
 
     renderer.renderFrame(sceneState, makeFrameContext(2));
-    const [, , second] = webGpuRenderer.render.mock.calls[1] as [THREE.Scene, THREE.Camera, unknown];
+    const [, , second] = webGpuRenderer.render.mock.calls[1] as [
+      THREE.Scene,
+      THREE.Camera,
+      { ambientOcclusion: unknown },
+    ];
 
-    expect(second).toEqual(first);
+    // Compares only ambientOcclusion, not the whole RenderPassConfig: frame
+    // legitimately differs between makeFrameContext(1) and (2) (see
+    // RenderPassConfig's own doc), so this asserts specifically that the
+    // resolved AO config itself does not depend on which frame it was
+    // resolved at, not that the two render() calls got byte-identical args.
+    expect(second.ambientOcclusion).toEqual(first.ambientOcclusion);
   });
 });
 
@@ -1386,11 +1399,25 @@ describe("ThreeRenderer.renderFrame: post-processing (Phase 58)", () => {
     const sceneState = makeSceneState({ postProcessing: { effects: [{ type: "sharpen", amount: 0.4 }] } });
 
     renderer.renderFrame(sceneState, makeFrameContext(1));
-    const [, , first] = webGpuRenderer.render.mock.calls[0] as [THREE.Scene, THREE.Camera, unknown];
+    const [, , first] = webGpuRenderer.render.mock.calls[0] as [
+      THREE.Scene,
+      THREE.Camera,
+      { postProcessing: unknown },
+    ];
 
     renderer.renderFrame(sceneState, makeFrameContext(2));
-    const [, , second] = webGpuRenderer.render.mock.calls[1] as [THREE.Scene, THREE.Camera, unknown];
+    const [, , second] = webGpuRenderer.render.mock.calls[1] as [
+      THREE.Scene,
+      THREE.Camera,
+      { postProcessing: unknown },
+    ];
 
-    expect(second).toEqual(first);
+    // Compares only postProcessing, not the whole RenderPassConfig: frame
+    // legitimately differs between makeFrameContext(1) and (2) (see
+    // RenderPassConfig's own doc), so this asserts specifically that the
+    // resolved postProcessing config itself does not depend on which frame
+    // it was resolved at, not that the two render() calls got byte-identical
+    // args.
+    expect(second.postProcessing).toEqual(first.postProcessing);
   });
 });
