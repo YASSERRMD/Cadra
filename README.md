@@ -117,6 +117,10 @@ directly in the studio.
 
 - [Agent authoring guide](docs/agent-authoring-guide.md): how to author a
   valid Cadra scene as an LLM agent or a developer.
+- [Quality defaults and preset library](docs/quality-defaults.md): every
+  default applied automatically (tone mapping, materials, lighting), the
+  type- and look-preset libraries built on top, and how to override each one
+  cleanly.
 - [Diagnostic codes](docs/diagnostic-codes.md): every validation diagnostic
   code, what it means, and whether it carries an automatic repair patch.
 - [Provider capabilities](docs/provider-capabilities.md): what each
