@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { CompositionPhysics, PhysicsConstraintConfig } from "../scene-graph/timeline.js";
+import type { CompositionFog, CompositionPhysics, PhysicsConstraintConfig } from "../scene-graph/timeline.js";
 import { createComposition } from "./composition.js";
 
 describe("createComposition", () => {
@@ -41,7 +41,7 @@ describe("createComposition", () => {
     expect(composition.tracks).toEqual(tracks);
   });
 
-  it("omits activeCameraTrack, audioTracks, colorGrading, environment, shadowQuality, postProcessing, renderMode, pathTracing, physics, and physicsConstraints entirely when not provided", () => {
+  it("omits activeCameraTrack, audioTracks, colorGrading, environment, fog, shadowQuality, postProcessing, renderMode, pathTracing, physics, and physicsConstraints entirely when not provided", () => {
     const composition = createComposition({
       id: "comp-1",
       name: "Main",
@@ -55,6 +55,7 @@ describe("createComposition", () => {
     expect("audioTracks" in composition).toBe(false);
     expect("colorGrading" in composition).toBe(false);
     expect("environment" in composition).toBe(false);
+    expect("fog" in composition).toBe(false);
     expect("shadowQuality" in composition).toBe(false);
     expect("postProcessing" in composition).toBe(false);
     expect("renderMode" in composition).toBe(false);
@@ -125,6 +126,22 @@ describe("createComposition", () => {
     });
 
     expect(composition.environment).toEqual(environment);
+  });
+
+  it("preserves fog when provided", () => {
+    const fog: CompositionFog = { type: "linear", color: [0.6, 0.6, 0.65, 1], near: 5, far: 100 };
+
+    const composition = createComposition({
+      id: "comp-1",
+      name: "Main",
+      fps: 30,
+      durationInFrames: 300,
+      width: 1920,
+      height: 1080,
+      fog,
+    });
+
+    expect(composition.fog).toEqual(fog);
   });
 
   it("preserves shadowQuality when provided", () => {

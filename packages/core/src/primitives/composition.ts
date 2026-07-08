@@ -4,6 +4,7 @@ import type {
   Composition as CompositionData,
   CompositionColorGrading,
   CompositionEnvironment,
+  CompositionFog,
   CompositionPhysics,
   CompositionPostProcessing,
   CompositionRenderMode,
@@ -22,12 +23,12 @@ import type {
  * type has been part of the public API since Phase 2.
  *
  * `tracks` defaults to an empty array if omitted. `activeCameraTrack`,
- * `audioTracks`, `colorGrading`, `environment`, `shadowQuality`,
+ * `audioTracks`, `colorGrading`, `environment`, `fog`, `shadowQuality`,
  * `postProcessing`, `renderMode`, `pathTracing`, `physics`, and
  * `physicsConstraints` are all omitted (not defaulted to an empty
  * array/object) unless explicitly supplied, mirroring `Composition`'s own
  * "omitted means this composition has no active-camera concept/audio/color
- * grade/environment/shadow tuning/post-processing/non-default render
+ * grade/environment/fog/shadow tuning/post-processing/non-default render
  * mode/physics world at all" convention (see `../scene-graph/timeline.ts`)
  * rather than every composition gaining an empty-but-present lane it never
  * asked for.
@@ -44,6 +45,7 @@ export interface CompositionProps {
   audioTracks?: AudioTrack[];
   colorGrading?: CompositionColorGrading;
   environment?: CompositionEnvironment;
+  fog?: CompositionFog;
   shadowQuality?: CompositionShadowQuality;
   postProcessing?: CompositionPostProcessing;
   renderMode?: CompositionRenderMode;
@@ -57,7 +59,7 @@ export interface CompositionProps {
  * size, and the tracks of clips that populate it.
  *
  * Defaults: `tracks: []`. `activeCameraTrack`/`audioTracks`/`colorGrading`/
- * `environment`/`shadowQuality`/`postProcessing`/`renderMode`/`pathTracing`/
+ * `environment`/`fog`/`shadowQuality`/`postProcessing`/`renderMode`/`pathTracing`/
  * `physics`/`physicsConstraints` are passed through only when provided,
  * left `undefined` (not defaulted to `[]`) otherwise. Every other field is
  * required, since there is no sensible default frame rate, duration, or
@@ -76,6 +78,7 @@ export function createComposition(props: CompositionProps): CompositionData {
     ...(props.audioTracks !== undefined && { audioTracks: props.audioTracks }),
     ...(props.colorGrading !== undefined && { colorGrading: props.colorGrading }),
     ...(props.environment !== undefined && { environment: props.environment }),
+    ...(props.fog !== undefined && { fog: props.fog }),
     ...(props.shadowQuality !== undefined && { shadowQuality: props.shadowQuality }),
     ...(props.postProcessing !== undefined && { postProcessing: props.postProcessing }),
     ...(props.renderMode !== undefined && { renderMode: props.renderMode }),
