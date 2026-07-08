@@ -346,6 +346,73 @@
                   "envMapRef"
                 ],
                 "additionalProperties": false
+              },
+              "shadowQuality": {
+                "description": "Optional whole-composition shadow and ambient-occlusion tuning.",
+                "type": "object",
+                "properties": {
+                  "tier": {
+                    "description": "Trades render cost against fidelity. Defaults to 'final'.",
+                    "type": "string",
+                    "enum": [
+                      "preview",
+                      "final"
+                    ]
+                  },
+                  "cascadedShadows": {
+                    "description": "Optional cascaded shadow maps for directional lights. WebGPU-backend only; see its own doc.",
+                    "type": "object",
+                    "properties": {
+                      "cascades": {
+                        "description": "Number of shadow cascades. Defaults to 3 (4 at the 'final' quality tier).",
+                        "type": "number"
+                      },
+                      "maxFar": {
+                        "description": "The far distance cascades extend to, in scene units. Defaults to 100000.",
+                        "type": "number"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "ambientOcclusion": {
+                    "description": "Optional screen-space ambient occlusion.",
+                    "type": "object",
+                    "properties": {
+                      "radius": {
+                        "description": "How far, in scene units, occlusion sampling reaches when looking for nearby occluders. Defaults to 1.",
+                        "type": "number"
+                      },
+                      "intensity": {
+                        "description": "Multiplies the occlusion's own darkening strength. Defaults to 1.",
+                        "type": "number"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "contactShadows": {
+                    "description": "Optional soft contact-shadow decals for grounded product-style shots.",
+                    "type": "object",
+                    "properties": {
+                      "groundY": {
+                        "type": "number",
+                        "description": "Height of the ground plane contact shadows are projected onto, in scene units."
+                      },
+                      "opacity": {
+                        "description": "Opacity of the contact shadow at its darkest point, 0 to 1. Defaults to 0.5.",
+                        "type": "number"
+                      },
+                      "radius": {
+                        "description": "Radius of the soft contact-shadow decal, in scene units. Defaults to 2.",
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "groundY"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
               }
             },
             "required": [
