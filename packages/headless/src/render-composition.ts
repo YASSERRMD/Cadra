@@ -199,14 +199,19 @@ export async function* renderComposition(
       }
 
       const sceneState = resolveSceneAtFrame(options.project, options.compositionId, frame);
-      const pixels = await renderWhenAssetsReady(getPendingAssets(frame, sceneState), () => {
+      const pixels = await renderWhenAssetsReady(getPendingAssets(frame, sceneState), async () => {
         const frameContext = createFrameContext({
           frame,
           fps,
           durationInFrames,
           seed: options.seed,
         });
-        options.renderer.renderFrame(sceneState, frameContext);
+        // `renderFrame` returns `void` for every ordinary (raster) Renderer
+        // and a `Promise<void>` only for a path-traced frame (real GPU
+        // sampling work to await) - see `Renderer.renderFrame`'s own doc.
+        // Awaiting unconditionally is a no-op for the former and required
+        // for the latter.
+        await options.renderer.renderFrame(sceneState, frameContext);
         return options.renderer.readPixels();
       });
 
