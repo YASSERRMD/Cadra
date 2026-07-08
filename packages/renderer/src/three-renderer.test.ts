@@ -9,6 +9,7 @@ import {
   type SceneState,
 } from "@cadra/core";
 import * as THREE from "three";
+import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
 import { GroundedSkybox } from "three/addons/objects/GroundedSkybox.js";
 import { describe, expect, it, vi } from "vitest";
 
@@ -964,5 +965,362 @@ describe("ThreeRenderer.renderFrame: image-based lighting environment (Phase 56)
     expect(secondEnvironment).toBe(firstEnvironment);
     expect(secondRotation).toBe(firstRotation);
     expect(secondIntensity).toBe(firstIntensity);
+  });
+});
+
+describe("ThreeRenderer.renderFrame: cascaded shadow maps (Phase 57)", () => {
+  it("attaches a real CSMShadowNode to the scene's first directional light on the WebGPU backend", async () => {
+    const { deps } = createFakeDeps({ detectWebGpuSupport: () => true });
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({
+        layers: [
+          {
+            compositionId: "comp-1",
+            trackId: "track-1",
+            clipId: "clip-1",
+            node: lightNode("sun", { lightType: "directional" }),
+            zIndex: 0,
+            localFrame: 3,
+            opacity: 1,
+          },
+        ],
+        shadowQuality: { cascadedShadows: { cascades: 4, maxFar: 500 } },
+      }),
+      makeFrameContext(),
+    );
+
+    const light = renderer.getObject3DByNodeId("sun") as THREE.DirectionalLight;
+    const shadowNode = (light.shadow as unknown as { shadowNode: unknown }).shadowNode;
+    expect(shadowNode).toBeInstanceOf(CSMShadowNode);
+    expect((shadowNode as CSMShadowNode).cascades).toBe(4);
+    expect((shadowNode as CSMShadowNode).maxFar).toBe(500);
+  });
+
+  it("does not attach a CSMShadowNode on the WebGL2 fallback backend (cascaded shadows are WebGPU-only)", async () => {
+    const { deps } = createFakeDeps({ detectWebGpuSupport: () => false });
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({
+        layers: [
+          {
+            compositionId: "comp-1",
+            trackId: "track-1",
+            clipId: "clip-1",
+            node: lightNode("sun", { lightType: "directional" }),
+            zIndex: 0,
+            localFrame: 3,
+            opacity: 1,
+          },
+        ],
+        shadowQuality: { cascadedShadows: { cascades: 3 } },
+      }),
+      makeFrameContext(),
+    );
+
+    const light = renderer.getObject3DByNodeId("sun") as THREE.DirectionalLight;
+    expect((light.shadow as unknown as { shadowNode: unknown }).shadowNode).toBeUndefined();
+  });
+
+  it("does not throw and attaches nothing when there is no directional light in the scene", async () => {
+    const { deps } = createFakeDeps({ detectWebGpuSupport: () => true });
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    expect(() =>
+      renderer.renderFrame(
+        makeSceneState({ shadowQuality: { cascadedShadows: { cascades: 3 } } }),
+        makeFrameContext(),
+      ),
+    ).not.toThrow();
+  });
+
+  it("does not rebuild the CSMShadowNode on a later call with the same light and config (caching)", async () => {
+    const { deps } = createFakeDeps({ detectWebGpuSupport: () => true });
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+    const sceneState = makeSceneState({
+      layers: [
+        {
+          compositionId: "comp-1",
+          trackId: "track-1",
+          clipId: "clip-1",
+          node: lightNode("sun", { lightType: "directional" }),
+          zIndex: 0,
+          localFrame: 3,
+          opacity: 1,
+        },
+      ],
+      shadowQuality: { cascadedShadows: { cascades: 3 } },
+    });
+
+    renderer.renderFrame(sceneState, makeFrameContext(1));
+    const light = renderer.getObject3DByNodeId("sun") as THREE.DirectionalLight;
+    const firstShadowNode = (light.shadow as unknown as { shadowNode: unknown }).shadowNode;
+
+    renderer.renderFrame(sceneState, makeFrameContext(2));
+    const secondShadowNode = (light.shadow as unknown as { shadowNode: unknown }).shadowNode;
+
+    expect(secondShadowNode).toBe(firstShadowNode);
+  });
+
+  it("rebuilds the CSMShadowNode when cascades changes", async () => {
+    const { deps } = createFakeDeps({ detectWebGpuSupport: () => true });
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+    const layers = [
+      {
+        compositionId: "comp-1",
+        trackId: "track-1",
+        clipId: "clip-1",
+        node: lightNode("sun", { lightType: "directional" }),
+        zIndex: 0,
+        localFrame: 3,
+        opacity: 1,
+      },
+    ];
+
+    renderer.renderFrame(
+      makeSceneState({ layers, shadowQuality: { cascadedShadows: { cascades: 3 } } }),
+      makeFrameContext(1),
+    );
+    const light = renderer.getObject3DByNodeId("sun") as THREE.DirectionalLight;
+    const firstShadowNode = (light.shadow as unknown as { shadowNode: unknown }).shadowNode;
+
+    renderer.renderFrame(
+      makeSceneState({ layers, shadowQuality: { cascadedShadows: { cascades: 4 } } }),
+      makeFrameContext(2),
+    );
+    const secondShadowNode = (light.shadow as unknown as { shadowNode: CSMShadowNode }).shadowNode;
+
+    expect(secondShadowNode).not.toBe(firstShadowNode);
+    expect(secondShadowNode.cascades).toBe(4);
+  });
+
+  it("clears the CSMShadowNode once cascadedShadows is later omitted", async () => {
+    const { deps } = createFakeDeps({ detectWebGpuSupport: () => true });
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+    const layers = [
+      {
+        compositionId: "comp-1",
+        trackId: "track-1",
+        clipId: "clip-1",
+        node: lightNode("sun", { lightType: "directional" }),
+        zIndex: 0,
+        localFrame: 3,
+        opacity: 1,
+      },
+    ];
+
+    renderer.renderFrame(
+      makeSceneState({ layers, shadowQuality: { cascadedShadows: { cascades: 3 } } }),
+      makeFrameContext(1),
+    );
+    renderer.renderFrame(makeSceneState({ layers }), makeFrameContext(2));
+
+    const light = renderer.getObject3DByNodeId("sun") as THREE.DirectionalLight;
+    expect((light.shadow as unknown as { shadowNode: unknown }).shadowNode).toBeNull();
+  });
+});
+
+describe("ThreeRenderer.renderFrame: contact shadows (Phase 57)", () => {
+  it("adds a contact-shadow decal mesh to the scene when contactShadows is set", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({ shadowQuality: { contactShadows: { groundY: 0, opacity: 0.6, radius: 3 } } }),
+      makeFrameContext(),
+    );
+
+    const decal = renderer
+      .getScene()
+      .children.find((child) => child instanceof THREE.Mesh && child.geometry instanceof THREE.CircleGeometry);
+    expect(decal).toBeInstanceOf(THREE.Mesh);
+  });
+
+  it("removes the contact-shadow decal mesh once contactShadows is later omitted", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({ shadowQuality: { contactShadows: { groundY: 0 } } }),
+      makeFrameContext(1),
+    );
+    renderer.renderFrame(makeSceneState(), makeFrameContext(2));
+
+    const decal = renderer
+      .getScene()
+      .children.find((child) => child instanceof THREE.Mesh && child.geometry instanceof THREE.CircleGeometry);
+    expect(decal).toBeUndefined();
+  });
+
+  it("keeps the same decal mesh instance across calls with unchanged groundY/opacity/radius", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+    const sceneState = makeSceneState({ shadowQuality: { contactShadows: { groundY: 0, opacity: 0.5 } } });
+
+    renderer.renderFrame(sceneState, makeFrameContext(1));
+    const first = renderer
+      .getScene()
+      .children.find((child) => child instanceof THREE.Mesh && child.geometry instanceof THREE.CircleGeometry);
+
+    renderer.renderFrame(sceneState, makeFrameContext(2));
+    const second = renderer
+      .getScene()
+      .children.find((child) => child instanceof THREE.Mesh && child.geometry instanceof THREE.CircleGeometry);
+
+    expect(second).toBe(first);
+  });
+
+  it("rebuilds the decal mesh when opacity changes", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({ shadowQuality: { contactShadows: { groundY: 0, opacity: 0.5 } } }),
+      makeFrameContext(1),
+    );
+    const first = renderer
+      .getScene()
+      .children.find((child) => child instanceof THREE.Mesh && child.geometry instanceof THREE.CircleGeometry);
+
+    renderer.renderFrame(
+      makeSceneState({ shadowQuality: { contactShadows: { groundY: 0, opacity: 0.9 } } }),
+      makeFrameContext(2),
+    );
+    const second = renderer
+      .getScene()
+      .children.find((child) => child instanceof THREE.Mesh && child.geometry instanceof THREE.CircleGeometry);
+
+    expect(second).not.toBe(first);
+  });
+});
+
+describe("ThreeRenderer.renderFrame: ambient occlusion (Phase 57)", () => {
+  it("passes undefined ambientOcclusion to render() when shadowQuality is omitted", async () => {
+    const { deps, webGpuRenderer } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(makeSceneState(), makeFrameContext());
+
+    const [, , ambientOcclusion] = webGpuRenderer.render.mock.calls[0] as [THREE.Scene, THREE.Camera, unknown];
+    expect(ambientOcclusion).toBeUndefined();
+  });
+
+  it("passes a resolved ambient occlusion config to render() when ambientOcclusion is set", async () => {
+    const { deps, webGpuRenderer } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({ shadowQuality: { ambientOcclusion: { radius: 2, intensity: 0.7 } } }),
+      makeFrameContext(),
+    );
+
+    const [, , ambientOcclusion] = webGpuRenderer.render.mock.calls[0] as [
+      THREE.Scene,
+      THREE.Camera,
+      { radius: number; intensity: number; resolutionScale: number; samples: number },
+    ];
+    expect(ambientOcclusion.radius).toBe(2);
+    expect(ambientOcclusion.intensity).toBe(0.7);
+  });
+
+  it("defaults radius and intensity to 1 when omitted", async () => {
+    const { deps, webGpuRenderer } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(makeSceneState({ shadowQuality: { ambientOcclusion: {} } }), makeFrameContext());
+
+    const [, , ambientOcclusion] = webGpuRenderer.render.mock.calls[0] as [
+      THREE.Scene,
+      THREE.Camera,
+      { radius: number; intensity: number },
+    ];
+    expect(ambientOcclusion.radius).toBe(1);
+    expect(ambientOcclusion.intensity).toBe(1);
+  });
+
+  it("resolves lower resolutionScale/samples at the 'preview' quality tier than at 'final'", async () => {
+    const { deps, webGpuRenderer } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({ shadowQuality: { tier: "preview", ambientOcclusion: {} } }),
+      makeFrameContext(1),
+    );
+    const [, , previewAo] = webGpuRenderer.render.mock.calls[0] as [
+      THREE.Scene,
+      THREE.Camera,
+      { resolutionScale: number; samples: number },
+    ];
+
+    renderer.renderFrame(
+      makeSceneState({ shadowQuality: { tier: "final", ambientOcclusion: {} } }),
+      makeFrameContext(2),
+    );
+    const [, , finalAo] = webGpuRenderer.render.mock.calls[1] as [
+      THREE.Scene,
+      THREE.Camera,
+      { resolutionScale: number; samples: number },
+    ];
+
+    expect(previewAo.resolutionScale).toBeLessThan(finalAo.resolutionScale);
+    expect(previewAo.samples).toBeLessThan(finalAo.samples);
+  });
+
+  it("defaults to the 'final' tier's own resolutionScale/samples when tier is omitted", async () => {
+    const { deps, webGpuRenderer } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({ shadowQuality: { tier: "final", ambientOcclusion: {} } }),
+      makeFrameContext(1),
+    );
+    const [, , finalAo] = webGpuRenderer.render.mock.calls[0] as [
+      THREE.Scene,
+      THREE.Camera,
+      { resolutionScale: number; samples: number },
+    ];
+
+    renderer.renderFrame(makeSceneState({ shadowQuality: { ambientOcclusion: {} } }), makeFrameContext(2));
+    const [, , omittedTierAo] = webGpuRenderer.render.mock.calls[1] as [
+      THREE.Scene,
+      THREE.Camera,
+      { resolutionScale: number; samples: number },
+    ];
+
+    expect(omittedTierAo).toEqual(finalAo);
+  });
+
+  it("is deterministic: identical shadowQuality resolves to an identical AO config across repeated calls", async () => {
+    const { deps, webGpuRenderer } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+    const sceneState = makeSceneState({
+      shadowQuality: { tier: "preview", ambientOcclusion: { radius: 1.5, intensity: 0.6 } },
+    });
+
+    renderer.renderFrame(sceneState, makeFrameContext(1));
+    const [, , first] = webGpuRenderer.render.mock.calls[0] as [THREE.Scene, THREE.Camera, unknown];
+
+    renderer.renderFrame(sceneState, makeFrameContext(2));
+    const [, , second] = webGpuRenderer.render.mock.calls[1] as [THREE.Scene, THREE.Camera, unknown];
+
+    expect(second).toEqual(first);
   });
 });

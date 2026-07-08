@@ -1,14 +1,19 @@
 import type {
   ActiveCameraEntry,
+  AmbientOcclusionConfig,
   AudioClip,
   AudioFadeEnvelope,
   AudioTrack,
+  CascadedShadowConfig,
   Clip,
   Composition,
   CompositionColorGrading,
   CompositionEnvironment,
+  CompositionShadowQuality,
+  ContactShadowConfig,
   EnvironmentGroundProjection,
   Project,
+  ShadowQualityTier,
   Track,
   Transition,
 } from "@cadra/core";
@@ -332,6 +337,84 @@ type _CheckCompositionEnvironment = AssertTrue<
   AssertEqual<z.infer<typeof compositionEnvironmentSchema>, CompositionEnvironment>
 >;
 
+/** A quality tier trading render cost against fidelity, mirroring `ShadowQualityTier`. */
+export const shadowQualityTierSchema = z
+  .enum(["preview", "final"])
+  .describe("Trades render cost against fidelity for shadow map resolution, cascade count, and AO sample density.");
+
+type _CheckShadowQualityTier = AssertTrue<
+  AssertEqual<z.infer<typeof shadowQualityTierSchema>, ShadowQualityTier>
+>;
+
+/** Cascaded shadow map tuning for `compositionShadowQualitySchema.cascadedShadows`, mirroring `CascadedShadowConfig`. */
+export const cascadedShadowConfigSchema = z.strictObject({
+  cascades: z
+    .number()
+    .optional()
+    .describe("Number of shadow cascades. Defaults to 3 (4 at the 'final' quality tier)."),
+  maxFar: z
+    .number()
+    .optional()
+    .describe("The far distance cascades extend to, in scene units. Defaults to 100000."),
+});
+
+type _CheckCascadedShadowConfig = AssertTrue<
+  AssertEqual<z.infer<typeof cascadedShadowConfigSchema>, CascadedShadowConfig>
+>;
+
+/** Ambient occlusion tuning for `compositionShadowQualitySchema.ambientOcclusion`, mirroring `AmbientOcclusionConfig`. */
+export const ambientOcclusionConfigSchema = z.strictObject({
+  radius: z
+    .number()
+    .optional()
+    .describe("How far, in scene units, occlusion sampling reaches when looking for nearby occluders. Defaults to 1."),
+  intensity: z
+    .number()
+    .optional()
+    .describe("Multiplies the occlusion's own darkening strength. Defaults to 1."),
+});
+
+type _CheckAmbientOcclusionConfig = AssertTrue<
+  AssertEqual<z.infer<typeof ambientOcclusionConfigSchema>, AmbientOcclusionConfig>
+>;
+
+/** Contact-shadow tuning for `compositionShadowQualitySchema.contactShadows`, mirroring `ContactShadowConfig`. */
+export const contactShadowConfigSchema = z.strictObject({
+  groundY: z
+    .number()
+    .describe("Height of the ground plane contact shadows are projected onto, in scene units."),
+  opacity: z
+    .number()
+    .optional()
+    .describe("Opacity of the contact shadow at its darkest point, 0 to 1. Defaults to 0.5."),
+  radius: z
+    .number()
+    .optional()
+    .describe("Radius of the soft contact-shadow decal, in scene units. Defaults to 2."),
+});
+
+type _CheckContactShadowConfig = AssertTrue<
+  AssertEqual<z.infer<typeof contactShadowConfigSchema>, ContactShadowConfig>
+>;
+
+/** Whole-composition shadow and ambient-occlusion tuning, mirroring `CompositionShadowQuality`. */
+export const compositionShadowQualitySchema = z.strictObject({
+  tier: shadowQualityTierSchema.optional().describe("Trades render cost against fidelity. Defaults to 'final'."),
+  cascadedShadows: cascadedShadowConfigSchema
+    .optional()
+    .describe("Optional cascaded shadow maps for directional lights. WebGPU-backend only; see its own doc."),
+  ambientOcclusion: ambientOcclusionConfigSchema
+    .optional()
+    .describe("Optional screen-space ambient occlusion."),
+  contactShadows: contactShadowConfigSchema
+    .optional()
+    .describe("Optional soft contact-shadow decals for grounded product-style shots."),
+});
+
+type _CheckCompositionShadowQuality = AssertTrue<
+  AssertEqual<z.infer<typeof compositionShadowQualitySchema>, CompositionShadowQuality>
+>;
+
 /**
  * A single renderable timeline: a fixed frame rate, a fixed integer duration,
  * a fixed output size, and the tracks of clips that populate it.
@@ -362,6 +445,9 @@ export const compositionSchema = z.strictObject({
   environment: compositionEnvironmentSchema
     .optional()
     .describe("Optional whole-composition image-based lighting environment."),
+  shadowQuality: compositionShadowQualitySchema
+    .optional()
+    .describe("Optional whole-composition shadow and ambient-occlusion tuning."),
 });
 
 type _CheckComposition = AssertTrue<AssertEqual<z.infer<typeof compositionSchema>, Composition>>;

@@ -184,6 +184,15 @@ export interface Composition {
    * means no environment lighting at all (the pre-Phase-56 default).
    */
   environment?: CompositionEnvironment;
+  /**
+   * Whole-composition shadow and ambient-occlusion tuning: cascaded shadow
+   * maps, ambient occlusion, and ground contact shadows. Fixed for the
+   * composition's entire length, exactly like `colorGrading`/`environment`
+   * (see `colorGrading`'s own doc for why). Omitted means ordinary
+   * (non-cascaded) soft shadows per `LightNode.shadow` and no occlusion or
+   * contact shadows at all (the pre-Phase-57 default).
+   */
+  shadowQuality?: CompositionShadowQuality;
 }
 
 /**
@@ -256,6 +265,60 @@ export interface EnvironmentGroundProjection {
    */
   height: number;
   /** Radius of the virtual sky sphere; should comfortably contain the whole scene. Must be strictly positive. Defaults to `100`. */
+  radius?: number;
+}
+
+/** A quality tier trading render cost against fidelity, applied to shadow map resolution, cascade count, and ambient occlusion sample density. */
+export type ShadowQualityTier = "preview" | "final";
+
+/**
+ * Whole-composition shadow and ambient-occlusion tuning. See
+ * `Composition.shadowQuality`'s own doc for why this is a fixed,
+ * non-`Property<T>` setting.
+ */
+export interface CompositionShadowQuality {
+  /** Trades render cost against fidelity for every setting below whose own field is left at its default. Defaults to `"final"`. */
+  tier?: ShadowQualityTier;
+  /**
+   * Cascaded shadow maps for the scene's own directional lights, keeping
+   * shadow crispness consistent across a large view distance instead of one
+   * shadow map stretched thin. WebGPU-backend only: Three.js's own cascaded
+   * shadow map implementations are backend-specific (`CSMShadowNode` for
+   * WebGPU, `CSM` for WebGL2) and not drop-in-compatible with each other, so
+   * on the WebGL2 fallback a directional light instead casts the ordinary,
+   * non-cascaded soft shadow `LightNode.shadow` already provides. Omitted
+   * means ordinary (non-cascaded) shadow mapping on both backends.
+   */
+  cascadedShadows?: CascadedShadowConfig;
+  /** Screen-space ambient occlusion (contact darkening in creases and corners from nearby geometry, independent of any light). Omitted means no ambient occlusion. */
+  ambientOcclusion?: AmbientOcclusionConfig;
+  /** Soft contact-shadow decals under shadow-casting meshes, for grounded product-style shots. Omitted means none. */
+  contactShadows?: ContactShadowConfig;
+}
+
+/** Cascaded shadow map tuning for `CompositionShadowQuality.cascadedShadows`. */
+export interface CascadedShadowConfig {
+  /** Number of shadow cascades. Higher values keep shadows crisp across a larger view distance, at a higher render cost. Defaults to `3` (`4` at the `"final"` quality tier). */
+  cascades?: number;
+  /** The far distance cascades extend to, in scene units. Defaults to `100000` (Three.js's own `CSMShadowNode` default). */
+  maxFar?: number;
+}
+
+/** Ambient occlusion tuning for `CompositionShadowQuality.ambientOcclusion`. */
+export interface AmbientOcclusionConfig {
+  /** How far, in scene units, occlusion sampling reaches when looking for nearby occluders. Defaults to `1`. */
+  radius?: number;
+  /** Multiplies the occlusion's own darkening strength. Defaults to `1`. */
+  intensity?: number;
+}
+
+/** Contact-shadow tuning for `CompositionShadowQuality.contactShadows`. */
+export interface ContactShadowConfig {
+  /** Height of the ground plane contact shadows are projected onto, in scene units. */
+  groundY: number;
+  /** Opacity of the contact shadow at its darkest point, `0` to `1`. Defaults to `0.5`. */
+  opacity?: number;
+  /** Radius of the soft contact-shadow decal, in scene units. Defaults to `2`. */
   radius?: number;
 }
 

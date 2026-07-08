@@ -1,5 +1,9 @@
 import type { SceneNode } from "../scene-graph/scene-node.js";
-import type { CompositionColorGrading, CompositionEnvironment } from "../scene-graph/timeline.js";
+import type {
+  CompositionColorGrading,
+  CompositionEnvironment,
+  CompositionShadowQuality,
+} from "../scene-graph/timeline.js";
 
 /**
  * One resolved, positioned piece of content contributed by a single `Clip` at
@@ -82,4 +86,6 @@ export interface SceneState {
   colorGrading?: CompositionColorGrading;
   /** This composition's own `Composition.environment`, unchanged. `undefined` when the composition has none, i.e. no image-based lighting. */
   environment?: CompositionEnvironment;
+  /** This composition's own `Composition.shadowQuality`, unchanged. `undefined` when the composition has none, i.e. ordinary shadows with no cascades, occlusion, or contact shadows. */
+  shadowQuality?: CompositionShadowQuality;
 }
