@@ -46,6 +46,8 @@ import type {
   VideoFitMode,
   VideoNode,
   VideoOutOfRangeBehavior,
+  VolumeNode,
+  VolumeShape,
 } from "@cadra/core";
 import { z } from "zod";
 
@@ -103,6 +105,7 @@ export const sceneNodeKindSchema = z
     "compositionRef",
     "satori",
     "particles",
+    "volume",
   ])
   .describe("Which of the fixed set of scene node kinds this node is.");
 
@@ -1374,11 +1377,75 @@ type _CheckParticleSystemNode = AssertTrue<
   AssertEqual<z.infer<typeof particleSystemNodeSchema>, ParticleSystemNode>
 >;
 
+/** The bounding shape a volume node's density field fills, mirroring `VolumeShape`. */
+export const volumeShapeSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.literal("box"),
+    halfExtents: vector3Schema.describe("Half-width, half-height, half-depth of the box, in the node's own local units."),
+  }),
+  z.strictObject({
+    type: z.literal("sphere"),
+    radius: z.number().positive(),
+  }),
+]);
+
+type _CheckVolumeShape = AssertTrue<AssertEqual<z.infer<typeof volumeShapeSchema>, VolumeShape>>;
+
+/**
+ * A simple animated volumetric smoke/mist volume (Phase 68), mirroring
+ * `VolumeNode`. WebGPU-backend only; see that type's own doc.
+ */
+export const volumeNodeSchema = z.strictObject({
+  id: z.string().describe("Unique identifier for this scene node within the project."),
+  kind: z.literal("volume").describe("Discriminant identifying this node as a volumetric smoke/mist volume."),
+  name: z
+    .string()
+    .optional()
+    .describe("Optional human-readable label, purely for authoring and debugging."),
+  transform: animatableTransformSchema.describe(
+    "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track.",
+  ),
+  visible: propertySchema(z.boolean()).describe(
+    "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track.",
+  ),
+  shape: volumeShapeSchema.describe("The bounding shape this volume's density field fills."),
+  color: propertySchema(colorRgbaSchema).describe(
+    "This volume's own base color, lit by the scene's own point/spot lights (ambient/directional lights do not contribute; see VolumeNode's own doc). A plain ColorRGBA or a keyframe track.",
+  ),
+  density: propertySchema(z.number().min(0)).describe(
+    "Overall density multiplier: higher looks thicker/more opaque. A plain number or a keyframe track. Defaults to 1.",
+  ),
+  noiseFrequency: z
+    .number()
+    .positive()
+    .optional()
+    .describe("Spatial frequency of the underlying value-noise field. Higher values give smaller, more turbulent detail. Defaults to 1."),
+  driftSpeed: z
+    .number()
+    .optional()
+    .describe("How fast the sampled noise field drifts along its own local Z axis, in units per second. Defaults to 0 (static)."),
+  raymarchSteps: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Raymarch step count through shape. Higher is smoother, slower. Defaults to 25."),
+  seed: z
+    .number()
+    .optional()
+    .describe("Combined with the composition's own frame seed and this node's own id to derive this volume's deterministic noise field."),
+  get children(): z.ZodArray<typeof sceneNodeSchema> {
+    return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
+  },
+});
+
+type _CheckVolumeNode = AssertTrue<AssertEqual<z.infer<typeof volumeNodeSchema>, VolumeNode>>;
+
 /**
  * A node in the scene graph, discriminated on `kind`. Mirrors the `SceneNode`
  * union in `@cadra/core` exactly: every variant is a strict, closed shape,
- * and an object whose `kind` does not match one of the ten known literals is
- * rejected rather than coerced into the closest variant.
+ * and an object whose `kind` does not match one of the eleven known literals
+ * is rejected rather than coerced into the closest variant.
  */
 export const sceneNodeSchema: z.ZodDiscriminatedUnion<
   [
@@ -1392,6 +1459,7 @@ export const sceneNodeSchema: z.ZodDiscriminatedUnion<
     typeof compositionRefNodeSchema,
     typeof satoriNodeSchema,
     typeof particleSystemNodeSchema,
+    typeof volumeNodeSchema,
   ]
 > = z.discriminatedUnion("kind", [
   groupNodeSchema,
@@ -1404,6 +1472,7 @@ export const sceneNodeSchema: z.ZodDiscriminatedUnion<
   compositionRefNodeSchema,
   satoriNodeSchema,
   particleSystemNodeSchema,
+  volumeNodeSchema,
 ]);
 
 type _CheckSceneNode = AssertTrue<AssertEqual<z.infer<typeof sceneNodeSchema>, SceneNode>>;

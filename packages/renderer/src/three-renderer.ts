@@ -1,6 +1,7 @@
 import {
   type CascadedShadowConfig,
   type CompositionEnvironment,
+  type CompositionFog,
   type CompositionShadowQuality,
   computeWhiteBalanceGain,
   type ContactShadowConfig,
@@ -8,6 +9,7 @@ import {
   resolveExposureMultiplier,
   type SceneNode,
   type SceneState,
+  type WhiteBalanceGain,
 } from "@cadra/core";
 import {
   createParticleRuntime as createRealParticleRuntime,
@@ -25,6 +27,7 @@ import { RectAreaLightTexturesLib } from "three/addons/lights/RectAreaLightTextu
 import { RectAreaLightUniformsLib } from "three/addons/lights/RectAreaLightUniformsLib.js";
 import { GroundedSkybox } from "three/addons/objects/GroundedSkybox.js";
 import type { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { exponentialHeightFogFactor, float, fog as fogNodeFn, vec3 } from "three/tsl";
 import * as ThreeWebGPUInternals from "three/webgpu";
 import {
   PMREMGenerator as WebGPUPMREMGenerator,
@@ -34,6 +37,7 @@ import {
 } from "three/webgpu";
 
 import { detectWebGpuSupport, type WebGpuDetector } from "./capability-detection.js";
+import { resolveSceneColor } from "./color/resolve-scene-color.js";
 import {
   createDefaultEnvironmentRegistry,
   type EnvironmentRegistry,
@@ -739,6 +743,7 @@ export class ThreeRenderer implements Renderer {
     );
 
     this.applyEnvironment(renderer, sceneState.environment);
+    this.applyFog(sceneState.fog, whiteBalanceGain);
     this.applyContactShadow(sceneState.shadowQuality?.contactShadows);
     const physicsTransforms = this.resolvePhysicsTransforms(sceneState, frameContext);
     const particleObjects = this.resolveParticleSystems(sceneState, frameContext);
@@ -750,6 +755,8 @@ export class ThreeRenderer implements Renderer {
       whiteBalanceGain,
       physicsTransforms,
       particleObjects,
+      this.resolvedBackend,
+      frameContext.fps,
     );
     if (reconciled === null) {
       // `buildSceneStateRoot` always returns a non-null SceneNode, so
@@ -878,6 +885,71 @@ export class ThreeRenderer implements Renderer {
     this.scene.backgroundIntensity = environment.backgroundIntensity ?? 1;
 
     this.applyGroundedSkybox(environment.groundProjection, prefiltered);
+  }
+
+  /**
+   * Applies `fog` onto `this.scene`, fresh every call (fog config is fixed
+   * for a composition's whole length, but which composition a given call
+   * even renders can differ call to call - the same reasoning
+   * `applyEnvironment`'s own doc gives).
+   *
+   * `"linear"`/`"exponential"` set the classic `scene.fog` (`THREE.Fog`/
+   * `THREE.FogExp2`): read directly by every shaded material on WebGL2, and
+   * auto-converted into the identical TSL fog node by the WebGPU backend
+   * every frame (`NodeManager.updateFog`, verified against this project's
+   * installed `three@0.185.1` source) - one assignment, both backends.
+   * `scene.fogNode` is left `null` so nothing overrides that auto-derived
+   * node.
+   *
+   * `"height"` has no classic-material equivalent at all (see
+   * `CompositionFog`'s own doc), so `scene.fog` is left `null` (WebGL2 gets
+   * no fog for this mode, a silent no-op) and `scene.fogNode` is set
+   * directly to a TSL height-fog node, only when `resolvedBackend` is
+   * `"webgpu"` (on WebGL2 there is nothing to read it anyway).
+   *
+   * `scene.fogNode` is a genuine runtime property `NodeManager` reads
+   * (verified directly against this project's installed source,
+   * `renderers/common/nodes/NodeManager.js`), just not one `@types/three`
+   * declares on `THREE.Scene` - the same kind of documented-in-source-but-
+   * not-in-types gap `ensureWebGpuAreaLightSupport`'s own doc already
+   * covers for `RectAreaLightNode`, worked around here the same way (a
+   * narrow, structurally-typed cast).
+   */
+  private applyFog(fog: CompositionFog | undefined, whiteBalanceGain: WhiteBalanceGain): void {
+    const sceneWithFogNode = this.scene as THREE.Scene & { fogNode: unknown };
+
+    if (fog === undefined) {
+      this.scene.fog = null;
+      sceneWithFogNode.fogNode = null;
+      return;
+    }
+
+    const [r, g, b] = resolveSceneColor(fog.color, whiteBalanceGain);
+    const color = new THREE.Color().setRGB(r, g, b);
+
+    switch (fog.type) {
+      case "linear": {
+        this.scene.fog = new THREE.Fog(color, fog.near, fog.far);
+        sceneWithFogNode.fogNode = null;
+        return;
+      }
+      case "exponential": {
+        this.scene.fog = new THREE.FogExp2(color, fog.density);
+        sceneWithFogNode.fogNode = null;
+        return;
+      }
+      case "height": {
+        this.scene.fog = null;
+        sceneWithFogNode.fogNode =
+          this.resolvedBackend === "webgpu"
+            ? fogNodeFn(
+                vec3(color.r, color.g, color.b),
+                exponentialHeightFogFactor(float(fog.density), float(fog.height)),
+              )
+            : null;
+        return;
+      }
+    }
   }
 
   /** Disposes and clears `this.cachedEnvironment`, and blanks `scene.environment`/`.background`. Safe to call when there is nothing cached (a no-op). */

@@ -64,6 +64,7 @@ export type {
   TextProps,
   VideoFrameMapping,
   VideoProps,
+  VolumeProps,
 } from "./primitives/index.js";
 export {
   Camera,
@@ -102,6 +103,8 @@ export {
   TEXT_ANIMATABLE_PROPERTIES,
   Video,
   VIDEO_ANIMATABLE_PROPERTIES,
+  Volume,
+  VOLUME_ANIMATABLE_PROPERTIES,
 } from "./primitives/index.js";
 export * from "./scene-graph/index.js";
 export * from "./timeline-engine/index.js";

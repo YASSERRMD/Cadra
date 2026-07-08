@@ -992,6 +992,111 @@ describe("ThreeRenderer.renderFrame: image-based lighting environment (Phase 56)
   });
 });
 
+describe("ThreeRenderer.renderFrame: scene fog (Phase 68)", () => {
+  it("leaves scene.fog and scene.fogNode null when no composition has ever set fog", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(makeSceneState(), makeFrameContext());
+
+    const scene = renderer.getScene() as THREE.Scene & { fogNode: unknown };
+    expect(scene.fog).toBeNull();
+    expect(scene.fogNode).toBeNull();
+  });
+
+  it("sets a real THREE.Fog for a 'linear' fog, with the resolved color, near, and far", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({
+        fog: { type: "linear", color: [1, 1, 1, 1], near: 5, far: 100 },
+        colorGrading: { whiteBalanceTemperatureK: 3000, whiteBalanceTint: 0 },
+      }),
+      makeFrameContext(),
+    );
+
+    const fog = renderer.getScene().fog as THREE.Fog;
+    expect(fog).toBeInstanceOf(THREE.Fog);
+    expect(fog.near).toBe(5);
+    expect(fog.far).toBe(100);
+    // The authored fog color [1,1,1,1] is sRGB white, which is also linear
+    // white (1 is a fixed point of the sRGB transfer function), so the
+    // resolved color is exactly the white balance gain with nothing else
+    // mixed in - see the "color workflow" describe block's own identical use
+    // of this fact for a light node's resolved color.
+    const [expectedR, expectedG, expectedB] = computeWhiteBalanceGain(3000, 0);
+    expect(fog.color.r).toBeCloseTo(expectedR);
+    expect(fog.color.g).toBeCloseTo(expectedG);
+    expect(fog.color.b).toBeCloseTo(expectedB);
+  });
+
+  it("sets a real THREE.FogExp2 for an 'exponential' fog, with the resolved density", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({ fog: { type: "exponential", color: [1, 1, 1, 1], density: 0.05 } }),
+      makeFrameContext(),
+    );
+
+    const fog = renderer.getScene().fog as THREE.FogExp2;
+    expect(fog).toBeInstanceOf(THREE.FogExp2);
+    expect(fog.density).toBe(0.05);
+  });
+
+  it("sets scene.fogNode (never scene.fog) for a 'height' fog on the WebGPU backend", async () => {
+    const { deps } = createFakeDeps({ detectWebGpuSupport: () => true });
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({ fog: { type: "height", color: [1, 1, 1, 1], density: 0.1, height: 5 } }),
+      makeFrameContext(),
+    );
+
+    const scene = renderer.getScene() as THREE.Scene & { fogNode: unknown };
+    expect(scene.fog).toBeNull();
+    expect(scene.fogNode).not.toBeNull();
+  });
+
+  it("is a silent no-op for 'height' fog on the WebGL2 fallback backend (no classic equivalent exists)", async () => {
+    const { deps } = createFakeDeps({ detectWebGpuSupport: () => false });
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({ fog: { type: "height", color: [1, 1, 1, 1], density: 0.1, height: 5 } }),
+      makeFrameContext(),
+    );
+
+    const scene = renderer.getScene() as THREE.Scene & { fogNode: unknown };
+    expect(scene.fog).toBeNull();
+    expect(scene.fogNode).toBeNull();
+  });
+
+  it("clears both scene.fog and scene.fogNode once fog is later omitted", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({ fog: { type: "linear", color: [1, 1, 1, 1], near: 5, far: 100 } }),
+      makeFrameContext(1),
+    );
+    expect(renderer.getScene().fog).not.toBeNull();
+
+    renderer.renderFrame(makeSceneState(), makeFrameContext(2));
+
+    const scene = renderer.getScene() as THREE.Scene & { fogNode: unknown };
+    expect(scene.fog).toBeNull();
+    expect(scene.fogNode).toBeNull();
+  });
+});
+
 describe("ThreeRenderer.renderFrame: cascaded shadow maps (Phase 57)", () => {
   it("attaches a real CSMShadowNode to the scene's first directional light on the WebGPU backend", async () => {
     const { deps } = createFakeDeps({ detectWebGpuSupport: () => true });

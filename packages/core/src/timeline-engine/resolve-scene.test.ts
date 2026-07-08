@@ -9,6 +9,7 @@ import { createProject } from "../scene-graph/project-factory.js";
 import type { CompositionRefNode, SceneNode } from "../scene-graph/scene-node.js";
 import type {
   Composition,
+  CompositionFog,
   CompositionPhysics,
   PhysicsConstraintConfig,
   Project,
@@ -890,6 +891,54 @@ describe("resolveSceneAtFrame: environment passthrough", () => {
 
     const state = resolveSceneAtFrame(project, "comp-no-environment", 5);
     expect(state.environment).toBeUndefined();
+  });
+});
+
+describe("resolveSceneAtFrame: fog passthrough (Phase 68)", () => {
+  it("carries the composition's own fog through unchanged", () => {
+    const shape = Shape({ id: "foggy-shape" });
+    const fog: CompositionFog = { type: "exponential", color: [0.7, 0.7, 0.75, 1], density: 0.02 };
+    const composition = createComposition({
+      id: "comp-fog",
+      name: "Fog",
+      fps: 30,
+      durationInFrames: 30,
+      width: 100,
+      height: 100,
+      tracks: [
+        {
+          id: "track-content",
+          clips: [Sequence({ id: "clip-content", from: 0, durationInFrames: 30, content: shape })],
+        },
+      ],
+      fog,
+    });
+    const project = createProject({ id: "p-fog", name: "Project", compositions: [composition] });
+
+    const state = resolveSceneAtFrame(project, "comp-fog", 5);
+    expect(state.fog).toEqual(fog);
+  });
+
+  it("leaves fog undefined when the composition has none", () => {
+    const shape = Shape({ id: "unfogged-shape" });
+    const composition = createComposition({
+      id: "comp-no-fog",
+      name: "No Fog",
+      fps: 30,
+      durationInFrames: 30,
+      width: 100,
+      height: 100,
+      tracks: [
+        {
+          id: "track-content",
+          clips: [Sequence({ id: "clip-content", from: 0, durationInFrames: 30, content: shape })],
+        },
+      ],
+    });
+    const project = createProject({ id: "p-no-fog", name: "Project", compositions: [composition] });
+
+    const state = resolveSceneAtFrame(project, "comp-no-fog", 5);
+    expect(state.fog).toBeUndefined();
   });
 });
 

@@ -12,6 +12,7 @@ import type {
   Composition,
   CompositionColorGrading,
   CompositionEnvironment,
+  CompositionFog,
   CompositionPhysics,
   CompositionPostProcessing,
   CompositionRenderMode,
@@ -20,6 +21,7 @@ import type {
   DepthOfFieldEffectConfig,
   EnvironmentGroundProjection,
   FilmGrainEffectConfig,
+  GodRaysEffectConfig,
   LensDistortionEffectConfig,
   LutEffectConfig,
   MotionBlurEffectConfig,
@@ -36,7 +38,7 @@ import type {
 } from "@cadra/core";
 import { z } from "zod";
 
-import { vector3Schema } from "./primitives.js";
+import { colorRgbaSchema, vector3Schema } from "./primitives.js";
 import { sceneNodeSchema } from "./scene-node.js";
 
 /**
@@ -355,6 +357,33 @@ type _CheckCompositionEnvironment = AssertTrue<
   AssertEqual<z.infer<typeof compositionEnvironmentSchema>, CompositionEnvironment>
 >;
 
+/**
+ * Whole-composition atmospheric fog, mirroring `CompositionFog`. `"linear"`/
+ * `"exponential"` work on either render backend; `"height"` is WebGPU-backend
+ * only (see that type's own doc).
+ */
+export const compositionFogSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.literal("linear"),
+    color: colorRgbaSchema,
+    near: z.number(),
+    far: z.number(),
+  }),
+  z.strictObject({
+    type: z.literal("exponential"),
+    color: colorRgbaSchema,
+    density: z.number().min(0),
+  }),
+  z.strictObject({
+    type: z.literal("height"),
+    color: colorRgbaSchema,
+    density: z.number().min(0),
+    height: z.number(),
+  }),
+]);
+
+type _CheckCompositionFog = AssertTrue<AssertEqual<z.infer<typeof compositionFogSchema>, CompositionFog>>;
+
 /** A quality tier trading render cost against fidelity, mirroring `ShadowQualityTier`. */
 export const shadowQualityTierSchema = z
   .enum(["preview", "final"])
@@ -554,6 +583,29 @@ type _CheckMotionBlurEffectConfig = AssertTrue<
   AssertEqual<z.infer<typeof motionBlurEffectConfigSchema>, MotionBlurEffectConfig>
 >;
 
+/** Screen-space volumetric light shafts ("god rays"), mirroring `GodRaysEffectConfig`. WebGPU-backend only; see that type's own doc. */
+export const godRaysEffectConfigSchema = z.strictObject({
+  type: z.literal("godRays"),
+  lightNodeId: z.string().describe("Id of the LightNode light shafts are cast from."),
+  raymarchSteps: z
+    .number()
+    .optional()
+    .describe("Raymarch steps sampled along each pixel's own view ray. Higher is smoother and more expensive. Defaults to 60."),
+  density: z.number().optional().describe("Overall ray density/brightness. Defaults to 0.7."),
+  maxDensity: z
+    .number()
+    .optional()
+    .describe("Caps how dense (opaque) the accumulated rays can become. Defaults to 0.5."),
+  distanceAttenuation: z
+    .number()
+    .optional()
+    .describe("How strongly rays fade with distance from the light. Defaults to 2."),
+});
+
+type _CheckGodRaysEffectConfig = AssertTrue<
+  AssertEqual<z.infer<typeof godRaysEffectConfigSchema>, GodRaysEffectConfig>
+>;
+
 /** An `[r, g, b]` triple, mirroring `ColorGradeEffectConfig`'s own `lift`/`gamma`/`gain` fields. */
 const rgbTripleSchema = z.tuple([z.number(), z.number(), z.number()]);
 
@@ -602,6 +654,7 @@ export const postEffectConfigSchema = z.discriminatedUnion("type", [
   filmGrainEffectConfigSchema,
   lensDistortionEffectConfigSchema,
   motionBlurEffectConfigSchema,
+  godRaysEffectConfigSchema,
   colorGradeEffectConfigSchema,
   lutEffectConfigSchema,
 ]);
@@ -722,6 +775,7 @@ export const compositionSchema = z.strictObject({
   environment: compositionEnvironmentSchema
     .optional()
     .describe("Optional whole-composition image-based lighting environment."),
+  fog: compositionFogSchema.optional().describe("Optional whole-composition atmospheric fog."),
   shadowQuality: compositionShadowQualitySchema
     .optional()
     .describe("Optional whole-composition shadow and ambient-occlusion tuning."),

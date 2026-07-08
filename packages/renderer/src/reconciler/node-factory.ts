@@ -18,13 +18,20 @@ import {
   type SatoriNode,
   type SceneNode,
   type TextNode,
+  toNumericSeed,
+  type VolumeNode,
+  type VolumeShape,
   type WhiteBalanceGain,
 } from "@cadra/core";
+import { valueNoise3DTSL } from "@cadra/particles";
 import type { PhysicsTransform } from "@cadra/physics";
 import type { PositionedGlyph } from "@cadra/text/browser";
 import * as THREE from "three";
+import { clamp, float, uint, uniform, vec3 } from "three/tsl";
+import { type Node, VolumeNodeMaterial } from "three/webgpu";
 
 import { resolveSceneColor } from "../color/resolve-scene-color.js";
+import type { RendererBackend } from "../renderer.js";
 import { createSvgTexture } from "../svg-layer/create-svg-texture.js";
 import {
   computeSatoriLayerRenderKey,
@@ -141,6 +148,26 @@ export interface NodeFactoryContext {
    * elsewhere rather than assuming it.
    */
   particleObjects?: ReadonlyMap<string, THREE.Object3D>;
+  /**
+   * This renderer's own resolved backend, mutated in place by
+   * `reconciler.ts`'s own `reconcile` at the start of every call, mirroring
+   * `whiteBalanceGain`'s own "fresh per call" treatment even though the
+   * value itself is fixed for a `ThreeRenderer`'s whole lifetime once
+   * `init()` resolves it - `reconcile` has no other way to learn it,
+   * since `createReconciler()` is constructed before `init()` ever runs.
+   * `undefined` only before `init()` completes, which never happens in
+   * practice. Read only by `"volume"` (see that case's own doc for why its
+   * technique is WebGPU-only).
+   */
+  backend?: RendererBackend;
+  /**
+   * This composition's own frames-per-second, mutated in place by
+   * `reconciler.ts`'s own `reconcile` at the start of every call, mirroring
+   * `backend`'s own treatment. Read only by `"volume"`, to convert its own
+   * `driftSpeed` (authored in units per second, so the same composition
+   * looks the same regardless of its own fps) into a per-frame offset.
+   */
+  fps?: number;
 }
 
 /**
@@ -196,6 +223,13 @@ export interface OwnedResources {
   textGlyphs?: readonly PositionedGlyph[];
   /** A `satori` node's own owned resources; see `SatoriLayerResources`'s own doc. */
   satori?: SatoriLayerResources;
+  /**
+   * A `volume` node's own owned geometry/material (only ever populated on
+   * the WebGPU backend; see `"volume"`'s own `buildThreeObject` case doc).
+   * Both are per-node (geometry sized to `VolumeNode.shape`, material
+   * carrying this node's own `scatteringNode`), never registry-shared.
+   */
+  volume?: { geometry: THREE.BufferGeometry; material: VolumeNodeMaterial };
 }
 
 /** The result of building a fresh Three.js object for a node: the object plus what it owns. */
@@ -299,7 +333,93 @@ function buildThreeObject(node: SceneNode, ctx: NodeFactoryContext): BuiltObject
       // collectPhysicsMeshNodes walks the same tree independently of this
       // reconciler's own walk for Phase 66's physics.
       return { object3D: ctx.particleObjects?.get(node.id) ?? new THREE.Group(), owned: undefined };
+
+    case "volume": {
+      // WebGPU-backend only (see VolumeNode's own doc for why): a real
+      // raymarched volume needs a genuine THREE.NodeMaterial
+      // (VolumeNodeMaterial), which only the WebGPU backend's own node
+      // system builds/interprets - a classic WebGLRenderer has nothing to
+      // do with a NodeMaterial at all. An empty group is this reconciler's
+      // usual "nothing to render yet" fallback (mirroring every other
+      // not-ready-yet placeholder here), used for the whole WebGL2 fallback
+      // rather than only until some asset resolves.
+      if (ctx.backend !== "webgpu") {
+        return { object3D: new THREE.Group(), owned: undefined };
+      }
+      const geometry = buildVolumeGeometry(node.shape);
+      const material = buildVolumeMaterial(node);
+      const mesh = new THREE.Mesh(geometry, material);
+      return { object3D: mesh, owned: { volume: { geometry, material } } };
+    }
   }
+}
+
+/** The bounding geometry a `VolumeNode`'s own `shape` maps to, centered on the node's own local origin. */
+function buildVolumeGeometry(shape: VolumeShape): THREE.BufferGeometry {
+  if (shape.type === "box") {
+    return new THREE.BoxGeometry(shape.halfExtents[0] * 2, shape.halfExtents[1] * 2, shape.halfExtents[2] * 2);
+  }
+  return new THREE.SphereGeometry(shape.radius, 24, 16);
+}
+
+/**
+ * The per-frame-mutable uniform nodes a `volume` node's own `scatteringNode`
+ * closes over, stashed in `VolumeNodeMaterial.userData` so `applyVolumeProperties`
+ * can update their `.value` every frame without rebuilding the material or
+ * its shader graph at all (mirroring `@cadra/particles`'s own GPU compute
+ * kernel: build the node graph once, mutate only its uniforms per frame).
+ */
+interface VolumeUniforms {
+  colorR: Node<"float">;
+  colorG: Node<"float">;
+  colorB: Node<"float">;
+  densityMultiplier: Node<"float">;
+  drift: Node<"float">;
+}
+
+/**
+ * Builds a `volume` node's own `VolumeNodeMaterial`: `steps` from
+ * `raymarchSteps`, and a `scatteringNode` returning this volume's own
+ * (per-frame-mutable) color scaled by its density at that raymarch sample
+ * position. Density comes from `@cadra/particles`'s own deterministic
+ * scalar value-noise field (not curl noise - a density is a scalar
+ * quantity, not a flow direction), remapped from noise's own `[-1, 1)`
+ * range to `[0, 1]` and scaled by this volume's own authored density.
+ *
+ * `color`/`density` (both `Property<T>`) and the drift offset (`frame`-
+ * dependent) are not baked in as constants: `applyVolumeProperties` updates
+ * their backing uniforms (`VolumeUniforms`, stashed on `material.userData`)
+ * every frame, exactly like every other node kind's own per-frame
+ * properties, without rebuilding this material or its shader graph.
+ */
+function buildVolumeMaterial(node: VolumeNode): VolumeNodeMaterial {
+  const material = new VolumeNodeMaterial();
+  material.steps = node.raymarchSteps ?? 25;
+
+  const numericSeed = uint(toNumericSeed(node.seed ?? 0));
+  const frequency = node.noiseFrequency ?? 1;
+
+  const uniforms: VolumeUniforms = {
+    colorR: uniform(1, "float") as Node<"float">,
+    colorG: uniform(1, "float") as Node<"float">,
+    colorB: uniform(1, "float") as Node<"float">,
+    densityMultiplier: uniform(1, "float") as Node<"float">,
+    drift: uniform(0, "float") as Node<"float">,
+  };
+  material.userData.volumeUniforms = uniforms;
+
+  material.scatteringNode = ({ positionRay }: { positionRay: Node<"vec3"> }) => {
+    const sampleX = positionRay.x.mul(frequency) as Node<"float">;
+    const sampleY = positionRay.y.mul(frequency) as Node<"float">;
+    const sampleZ = positionRay.z.add(uniforms.drift).mul(frequency) as Node<"float">;
+    const noise = valueNoise3DTSL(numericSeed, uint(0), sampleX, sampleY, sampleZ);
+    const density = clamp(noise.add(1).mul(0.5), float(0), float(1)).mul(uniforms.densityMultiplier) as Node<
+      "float"
+    >;
+    return vec3(uniforms.colorR, uniforms.colorG, uniforms.colorB).mul(density) as Node<"vec3">;
+  };
+
+  return material;
 }
 
 /**
@@ -493,7 +613,61 @@ export function applyNodeProperties(
       // transform/visible prefix above (this node's own authored pose)
       // applies to a particles node.
       return;
+
+    case "volume": {
+      applyVolumeProperties(node, owned?.volume?.material, frame, ctx);
+      return;
+    }
   }
+}
+
+/**
+ * Applies this frame's resolved `color`/`density` and drift offset onto a
+ * `volume` node's own `VolumeNodeMaterial`, by mutating its `VolumeUniforms`'
+ * own `.value`s (see `buildVolumeMaterial`'s own doc) - never rebuilding the
+ * material or its `scatteringNode` shader graph. A no-op when `material` is
+ * `undefined` (the WebGL2 fallback, which never builds one at all - see
+ * `"volume"`'s own `buildThreeObject` case).
+ */
+function applyVolumeProperties(
+  node: VolumeNode,
+  material: VolumeNodeMaterial | undefined,
+  frame: number,
+  ctx: NodeFactoryContext,
+): void {
+  const uniforms = material?.userData.volumeUniforms as VolumeUniforms | undefined;
+  if (uniforms === undefined) {
+    return;
+  }
+
+  const [r, g, b, a] = resolveSceneColor(resolveColorProperty(node.color, frame), ctx.whiteBalanceGain);
+  const density = resolveNumberProperty(node.density, frame) * a;
+  const fps = ctx.fps ?? 30;
+  const drift = (node.driftSpeed ?? 0) * (frame / fps);
+
+  setUniformValue(uniforms.colorR, r);
+  setUniformValue(uniforms.colorG, g);
+  setUniformValue(uniforms.colorB, b);
+  setUniformValue(uniforms.densityMultiplier, density);
+  setUniformValue(uniforms.drift, drift);
+}
+
+/**
+ * Mutates a TSL `uniform(...)` node's own `.value` in place - `Node<"float">`
+ * (this module's own TSL type alias, matching `@cadra/particles`'s own
+ * `ComputeDispatchable` convention) does not itself declare `.value`, since
+ * a plain `Node` might be a `ConstNode` (baked in at shader-compile time,
+ * genuinely immutable) instead. Every node this function is ever called
+ * with is one `buildVolumeMaterial` constructed via `uniform(...)`
+ * specifically (never `float(...)`, which returns a `ConstNode`), so this
+ * cast is sound in context: `UniformNode`'s own `.value` is a real, mutable
+ * runtime property (verified against this project's installed
+ * `three@0.185.1` source, `nodes/core/InputNode.js`), just not one
+ * `@types/three` exposes on the generic `Node` base type `uniform(...)`
+ * itself is typed as returning.
+ */
+function setUniformValue(node: Node<"float">, value: number): void {
+  (node as unknown as { value: number }).value = value;
 }
 
 /**

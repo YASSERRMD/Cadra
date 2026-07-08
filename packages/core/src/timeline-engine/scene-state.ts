@@ -2,6 +2,7 @@ import type { SceneNode } from "../scene-graph/scene-node.js";
 import type {
   CompositionColorGrading,
   CompositionEnvironment,
+  CompositionFog,
   CompositionPhysics,
   CompositionPostProcessing,
   CompositionRenderMode,
@@ -91,6 +92,8 @@ export interface SceneState {
   colorGrading?: CompositionColorGrading;
   /** This composition's own `Composition.environment`, unchanged. `undefined` when the composition has none, i.e. no image-based lighting. */
   environment?: CompositionEnvironment;
+  /** This composition's own `Composition.fog`, unchanged. `undefined` when the composition has none, i.e. no atmospheric fog at all. */
+  fog?: CompositionFog;
   /** This composition's own `Composition.shadowQuality`, unchanged. `undefined` when the composition has none, i.e. ordinary shadows with no cascades, occlusion, or contact shadows. */
   shadowQuality?: CompositionShadowQuality;
   /** This composition's own `Composition.postProcessing`, unchanged. `undefined` when the composition has none, i.e. no post-processing pipeline at all. */

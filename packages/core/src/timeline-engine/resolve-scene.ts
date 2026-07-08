@@ -115,6 +115,7 @@ function resolveComposition(
     ...(activeCameraNodeId !== undefined && { activeCameraNodeId }),
     ...(composition.colorGrading !== undefined && { colorGrading: composition.colorGrading }),
     ...(composition.environment !== undefined && { environment: composition.environment }),
+    ...(composition.fog !== undefined && { fog: composition.fog }),
     ...(composition.shadowQuality !== undefined && { shadowQuality: composition.shadowQuality }),
     ...(composition.postProcessing !== undefined && { postProcessing: composition.postProcessing }),
     ...(composition.renderMode !== undefined && { renderMode: composition.renderMode }),

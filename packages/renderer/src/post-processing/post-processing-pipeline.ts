@@ -16,6 +16,7 @@ import { VignetteShader } from "three/addons/shaders/VignetteShader.js";
 import { bloom as createBloomNode } from "three/addons/tsl/display/BloomNode.js";
 import { chromaticAberration as createChromaticAberrationNode } from "three/addons/tsl/display/ChromaticAberrationNode.js";
 import { dof as createDofNode } from "three/addons/tsl/display/DepthOfFieldNode.js";
+import { godrays as createGodRaysNode } from "three/addons/tsl/display/GodraysNode.js";
 import { ao as createGtaoNode } from "three/addons/tsl/display/GTAONode.js";
 import { lut3D as createLut3DNode } from "three/addons/tsl/display/Lut3DNode.js";
 import { motionBlur as createMotionBlurNode } from "three/addons/tsl/display/MotionBlur.js";
@@ -165,6 +166,7 @@ function isPreTonemapEffect(effect: PostEffectConfig): boolean {
     case "bloom":
     case "depthOfField":
     case "motionBlur":
+    case "godRays":
       return true;
     case "sharpen":
     case "chromaticAberration":
@@ -359,6 +361,9 @@ function buildWebGl2EffectPass(
     case "motionBlur": {
       return undefined;
     }
+    case "godRays": {
+      return undefined;
+    }
     case "colorGrade": {
       const shaderPass = new ShaderPass(ColorGradeShader);
       updateColorGradeUniforms(
@@ -524,7 +529,7 @@ export function buildWebGpuPipeline(
   const { preTonemap, postTonemap } = partitionEffectsByStage(effects);
 
   for (const effect of preTonemap) {
-    node = applyWebGpuEffect(node, effect, scenePass, camera, registerFrameUpdate, resolveLut);
+    node = applyWebGpuEffect(node, effect, scenePass, camera, scene, registerFrameUpdate, resolveLut);
   }
 
   // Mirrors RenderOutputNode's own setup() guard (verified directly against
@@ -541,7 +546,7 @@ export function buildWebGpuPipeline(
   }
 
   for (const effect of postTonemap) {
-    node = applyWebGpuEffect(node, effect, scenePass, camera, registerFrameUpdate, resolveLut);
+    node = applyWebGpuEffect(node, effect, scenePass, camera, scene, registerFrameUpdate, resolveLut);
   }
 
   const renderPipeline = new RenderPipeline(renderer);
@@ -571,7 +576,11 @@ export function buildWebGpuPipeline(
  * mutually incompatible declared subtype `@types/three@0.185.0` happens to
  * assign it. `scenePass` is needed by `depthOfField` (for its own
  * `getViewZNode()`); `camera` is needed by `depthOfField`'s near/far
- * implied by that same view-space depth; `registerFrameUpdate` is called, at
+ * implied by that same view-space depth; `scene` is needed by `godRays` to
+ * resolve `GodRaysEffectConfig.lightNodeId` back to the reconciled
+ * `THREE.Light` via `getObjectByName` (mirrors this codebase's existing
+ * `object3D.name = node.id` convention, used unchanged here rather than
+ * inventing a second lookup mechanism); `registerFrameUpdate` is called, at
  * most once, by any effect whose own uniforms depend on the current frame
  * (currently: `filmGrain`'s seed) - see `BuiltPipeline.updateFrame`'s own
  * doc for why.
@@ -581,6 +590,7 @@ function applyWebGpuEffect(
   effect: PostEffectConfig,
   scenePass: AnyTslNode,
   camera: THREE.Camera,
+  scene: THREE.Scene,
   registerFrameUpdate: (update: (frame: number) => void) => void,
   resolveLut: (ref: string) => THREE.Data3DTexture | undefined,
 ): AnyTslNode {
@@ -673,6 +683,29 @@ function applyWebGpuEffect(
       const velocityTexture: AnyTslNode = scenePass.getTextureNode("velocity");
       const scaledVelocity = velocityTexture.mul(float(computeMotionBlurVelocityScale(effect.shutterAngle ?? 180)));
       return createMotionBlurNode(convertToTexture(colorTexture), scaledVelocity, int(effect.samples ?? 16));
+    }
+    case "godRays": {
+      // Silent no-op (returns colorTexture unchanged) for a missing,
+      // wrong-type, or non-shadow-casting light: see GodRaysEffectConfig's
+      // own doc comment for why this is deliberate rather than a thrown
+      // error - a scene author renaming or removing a light shouldn't break
+      // the whole render. GodraysNode itself requires a real shadow map
+      // (light.shadow.map), which Three.js only populates for
+      // castShadow: true lights, so that check is not optional here.
+      const light = scene.getObjectByName(effect.lightNodeId);
+      if (!(light instanceof THREE.DirectionalLight || light instanceof THREE.PointLight)) {
+        return colorTexture;
+      }
+      if (!light.castShadow) {
+        return colorTexture;
+      }
+      const depthTexture: AnyTslNode = scenePass.getTextureNode("depth");
+      const godRaysNode = createGodRaysNode(depthTexture, camera, light);
+      godRaysNode.raymarchSteps.value = effect.raymarchSteps ?? 60;
+      godRaysNode.density.value = effect.density ?? 0.7;
+      godRaysNode.maxDensity.value = effect.maxDensity ?? 0.5;
+      godRaysNode.distanceAttenuation.value = effect.distanceAttenuation ?? 2;
+      return colorTexture.add(godRaysNode.getTextureNode());
     }
     case "colorGrade": {
       // Reproduces applyColorGrade's exact formula (see that function's own

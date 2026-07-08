@@ -7,6 +7,7 @@ export {
   SHAPE_ANIMATABLE_PROPERTIES,
   TEXT_ANIMATABLE_PROPERTIES,
   VIDEO_ANIMATABLE_PROPERTIES,
+  VOLUME_ANIMATABLE_PROPERTIES,
 } from "./animatable-properties.js";
 export type { CameraProps } from "./camera.js";
 export { Camera } from "./camera.js";
@@ -59,3 +60,5 @@ export type { ResolvedTextUnitState } from "./text-stagger.js";
 export { computeStaggerRanks, resolveTextUnitState } from "./text-stagger.js";
 export type { VideoFrameMapping, VideoProps } from "./video.js";
 export { resolveVideoSourceFrame, Video } from "./video.js";
+export type { VolumeProps } from "./volume.js";
+export { Volume } from "./volume.js";
