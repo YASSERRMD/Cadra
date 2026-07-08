@@ -1,5 +1,5 @@
 import type { PixelReadableRenderer, RenderSize, RenderTarget, ThreeRendererDependencies } from "@cadra/renderer";
-import { ThreeRenderer } from "@cadra/renderer";
+import { defaultThreeRendererDependencies, ThreeRenderer } from "@cadra/renderer";
 import type { Texture } from "three";
 import { PMREMGenerator, WebGPURenderer } from "three/webgpu";
 
@@ -473,6 +473,8 @@ export function createNativeGpuHeadlessRenderer(
           "this experimental renderer always forces the WebGPU path.",
       );
     },
+    initPhysics: defaultThreeRendererDependencies.initPhysics,
+    createPhysicsBake: defaultThreeRendererDependencies.createPhysicsBake,
   };
 
   const inner = new ThreeRenderer(deps);

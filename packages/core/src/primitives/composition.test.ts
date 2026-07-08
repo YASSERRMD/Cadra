@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { CompositionPhysics, PhysicsConstraintConfig } from "../scene-graph/timeline.js";
 import { createComposition } from "./composition.js";
 
 describe("createComposition", () => {
@@ -40,7 +41,7 @@ describe("createComposition", () => {
     expect(composition.tracks).toEqual(tracks);
   });
 
-  it("omits activeCameraTrack, audioTracks, colorGrading, environment, shadowQuality, postProcessing, renderMode, and pathTracing entirely when not provided", () => {
+  it("omits activeCameraTrack, audioTracks, colorGrading, environment, shadowQuality, postProcessing, renderMode, pathTracing, physics, and physicsConstraints entirely when not provided", () => {
     const composition = createComposition({
       id: "comp-1",
       name: "Main",
@@ -58,6 +59,8 @@ describe("createComposition", () => {
     expect("postProcessing" in composition).toBe(false);
     expect("renderMode" in composition).toBe(false);
     expect("pathTracing" in composition).toBe(false);
+    expect("physics" in composition).toBe(false);
+    expect("physicsConstraints" in composition).toBe(false);
   });
 
   it("preserves activeCameraTrack when provided", () => {
@@ -177,5 +180,34 @@ describe("createComposition", () => {
 
     expect(composition.renderMode).toBe("pathTraced");
     expect(composition.pathTracing).toEqual(pathTracing);
+  });
+
+  it("preserves physics and physicsConstraints when provided", () => {
+    const physics: CompositionPhysics = { gravity: [0, -9.81, 0], substeps: 4 };
+    const physicsConstraints: PhysicsConstraintConfig[] = [
+      {
+        id: "joint-1",
+        type: "revolute",
+        bodyA: "body-a",
+        bodyB: "body-b",
+        anchorA: [0, 0, 0],
+        anchorB: [0, 1, 0],
+        axis: [1, 0, 0],
+      },
+    ];
+
+    const composition = createComposition({
+      id: "comp-1",
+      name: "Main",
+      fps: 30,
+      durationInFrames: 300,
+      width: 1920,
+      height: 1080,
+      physics,
+      physicsConstraints,
+    });
+
+    expect(composition.physics).toEqual(physics);
+    expect(composition.physicsConstraints).toEqual(physicsConstraints);
   });
 });

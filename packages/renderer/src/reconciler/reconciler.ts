@@ -1,4 +1,5 @@
 import type { SceneNode, SceneNodeKind, WhiteBalanceGain } from "@cadra/core";
+import type { PhysicsTransform } from "@cadra/physics";
 import type * as THREE from "three";
 
 import type { SatoriLayerRenderRegistry } from "../svg-layer/satori-layer-render-registry.js";
@@ -67,11 +68,17 @@ export interface Reconciler {
    * doc), but still supplied fresh each call rather than once at
    * `createReconciler` time, since which composition (and so which grade)
    * a given `renderFrame` call is even rendering can differ call to call.
+   *
+   * `physicsTransforms` is this call's own baked physics result (see
+   * `NodeFactoryContext.physicsTransforms`'s own doc), supplied fresh each
+   * call for the same reason `whiteBalanceGain` is. Defaults to no override
+   * at all when omitted, matching every mesh's pre-Phase-66 behavior.
    */
   reconcile(
     nextRoot: SceneNode | null,
     frame: number,
     whiteBalanceGain?: WhiteBalanceGain,
+    physicsTransforms?: ReadonlyMap<string, PhysicsTransform>,
   ): THREE.Object3D | null;
 }
 
@@ -114,8 +121,10 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
     nextRoot: SceneNode | null,
     frame: number,
     whiteBalanceGain?: WhiteBalanceGain,
+    physicsTransforms?: ReadonlyMap<string, PhysicsTransform>,
   ): THREE.Object3D | null {
     ctx.whiteBalanceGain = whiteBalanceGain ?? [1, 1, 1];
+    ctx.physicsTransforms = physicsTransforms;
 
     if (nextRoot === null) {
       teardownAll();

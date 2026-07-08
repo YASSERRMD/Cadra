@@ -2,10 +2,12 @@ import type { SceneNode } from "../scene-graph/scene-node.js";
 import type {
   CompositionColorGrading,
   CompositionEnvironment,
+  CompositionPhysics,
   CompositionPostProcessing,
   CompositionRenderMode,
   CompositionShadowQuality,
   PathTracingConfig,
+  PhysicsConstraintConfig,
 } from "../scene-graph/timeline.js";
 
 /**
@@ -97,4 +99,8 @@ export interface SceneState {
   renderMode?: CompositionRenderMode;
   /** This composition's own `Composition.pathTracing`, unchanged. `undefined` when the composition has none, i.e. every path-tracing field's own default. */
   pathTracing?: PathTracingConfig;
+  /** This composition's own `Composition.physics`, unchanged. `undefined` when the composition has none, i.e. every physics-world field's own default (still only relevant if some node in `layers` actually has a `rigidBody`). */
+  physics?: CompositionPhysics;
+  /** This composition's own `Composition.physicsConstraints`, unchanged. `undefined` when the composition has none. */
+  physicsConstraints?: PhysicsConstraintConfig[];
 }

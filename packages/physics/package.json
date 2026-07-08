@@ -1,8 +1,8 @@
 {
-  "name": "@cadra/renderer",
+  "name": "@cadra/physics",
   "version": "0.0.0",
   "private": false,
-  "description": "Cadra renderer package",
+  "description": "Cadra deterministic rigid-body physics package",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -24,16 +24,9 @@
   },
   "dependencies": {
     "@cadra/core": "workspace:*",
-    "@cadra/pathtracer": "workspace:*",
-    "@cadra/physics": "workspace:*",
-    "@cadra/satori-layer": "workspace:*",
-    "@cadra/svg-raster": "workspace:*",
-    "@cadra/text": "workspace:*",
-    "three": "^0.185.1"
+    "@dimforge/rapier3d-compat": "^0.19.3"
   },
   "devDependencies": {
-    "@types/three": "^0.185.0",
-    "jsdom": "^25.0.1",
     "typescript": "^5.7.3",
     "vitest": "^2.1.8"
   }

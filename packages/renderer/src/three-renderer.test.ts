@@ -1,13 +1,16 @@
 import {
+  type CompositionPhysics,
   computeWhiteBalanceGain,
   createFrameContext,
   createIdentityTransform,
   type FrameContext,
   type LightNode,
   type MeshNode,
+  type PhysicsConstraintConfig,
   type SceneNode,
   type SceneState,
 } from "@cadra/core";
+import type { PhysicsTransform } from "@cadra/physics";
 import * as THREE from "three";
 import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
 import { GroundedSkybox } from "three/addons/objects/GroundedSkybox.js";
@@ -34,6 +37,14 @@ function createFakeThreeRenderer() {
   };
 }
 
+/** A minimal fake standing in for a real `PhysicsBake`: records calls, touches no real Rapier/WASM. */
+function createFakePhysicsBake() {
+  return {
+    advanceTo: vi.fn(() => new Map()),
+    dispose: vi.fn(),
+  };
+}
+
 /** Builds a `ThreeRendererDependencies` set from fakes, defaulting WebGPU to "available". */
 function createFakeDeps(overrides: Partial<ThreeRendererDependencies> = {}): {
   deps: ThreeRendererDependencies;
@@ -47,6 +58,8 @@ function createFakeDeps(overrides: Partial<ThreeRendererDependencies> = {}): {
     detectWebGpuSupport: () => true,
     createWebGpuRenderer: vi.fn(() => webGpuRenderer) as ThreeRendererFactory,
     createWebGl2Renderer: vi.fn(() => webGl2Renderer) as ThreeRendererFactory,
+    initPhysics: vi.fn().mockResolvedValue(undefined),
+    createPhysicsBake: vi.fn(() => createFakePhysicsBake()) as unknown as ThreeRendererDependencies["createPhysicsBake"],
     ...overrides,
   };
 
@@ -1419,5 +1432,155 @@ describe("ThreeRenderer.renderFrame: post-processing (Phase 58)", () => {
     // it was resolved at, not that the two render() calls got byte-identical
     // args.
     expect(second.postProcessing).toEqual(first.postProcessing);
+  });
+});
+
+describe("ThreeRenderer: physics (Phase 66)", () => {
+  /** A minimal fake standing in for a real `PhysicsBake`: records calls, touches no real Rapier/WASM. */
+  function createFakePhysicsBakeInstance(transformsByFrame: Map<number, ReadonlyMap<string, PhysicsTransform>> = new Map()) {
+    return {
+      advanceTo: vi.fn((frame: number) => transformsByFrame.get(frame) ?? new Map()),
+      dispose: vi.fn(),
+    };
+  }
+
+  it("calls initPhysics during init()", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    expect(deps.initPhysics).toHaveBeenCalledOnce();
+  });
+
+  it("applies the baked physics transform onto the corresponding dynamic-body mesh's own Object3D", async () => {
+    const fakeBake = createFakePhysicsBakeInstance(
+      new Map([[3, new Map([["mesh-1", { position: [7, 8, 9], rotation: [0, 0, 0] }]])]]),
+    );
+    const createPhysicsBake = vi.fn(() => fakeBake) as unknown as ThreeRendererDependencies["createPhysicsBake"];
+    const { deps } = createFakeDeps({ createPhysicsBake });
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    const sceneState = makeSceneState({
+      layers: [
+        {
+          compositionId: "comp-1",
+          trackId: "track-1",
+          clipId: "clip-1",
+          node: meshNode("mesh-1", {
+            rigidBody: { bodyType: "dynamic", collider: { shape: "sphere", radius: 1 } },
+          }),
+          zIndex: 0,
+          localFrame: 3,
+          opacity: 1,
+        },
+      ],
+    });
+
+    renderer.renderFrame(sceneState, makeFrameContext(3));
+
+    const mesh = renderer.getObject3DByNodeId("mesh-1")!;
+    expect([mesh.position.x, mesh.position.y, mesh.position.z]).toEqual([7, 8, 9]);
+  });
+
+  it("builds the physics bake once per (compositionId, seed) pair, reusing it across frames with the same pair", async () => {
+    const fakeBake = createFakePhysicsBakeInstance();
+    const createPhysicsBake = vi.fn(() => fakeBake) as unknown as ThreeRendererDependencies["createPhysicsBake"];
+    const { deps } = createFakeDeps({ createPhysicsBake });
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(makeSceneState(), makeFrameContext(1));
+    renderer.renderFrame(makeSceneState(), makeFrameContext(2));
+
+    expect(createPhysicsBake).toHaveBeenCalledOnce();
+    expect(fakeBake.advanceTo).toHaveBeenNthCalledWith(1, 1);
+    expect(fakeBake.advanceTo).toHaveBeenNthCalledWith(2, 2);
+  });
+
+  it("rebuilds (disposing the old one) when compositionId changes", async () => {
+    const firstBake = createFakePhysicsBakeInstance();
+    const secondBake = createFakePhysicsBakeInstance();
+    const createPhysicsBake = vi
+      .fn()
+      .mockReturnValueOnce(firstBake)
+      .mockReturnValueOnce(secondBake) as unknown as ThreeRendererDependencies["createPhysicsBake"];
+    const { deps } = createFakeDeps({ createPhysicsBake });
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(makeSceneState({ compositionId: "comp-1" }), makeFrameContext(1));
+    renderer.renderFrame(makeSceneState({ compositionId: "comp-2" }), makeFrameContext(1));
+
+    expect(createPhysicsBake).toHaveBeenCalledTimes(2);
+    expect(firstBake.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("rebuilds when seed changes, even with the same compositionId", async () => {
+    const firstBake = createFakePhysicsBakeInstance();
+    const secondBake = createFakePhysicsBakeInstance();
+    const createPhysicsBake = vi
+      .fn()
+      .mockReturnValueOnce(firstBake)
+      .mockReturnValueOnce(secondBake) as unknown as ThreeRendererDependencies["createPhysicsBake"];
+    const { deps } = createFakeDeps({ createPhysicsBake });
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState(),
+      createFrameContext({ frame: 1, fps: 30, durationInFrames: 90, seed: "seed-a" }),
+    );
+    renderer.renderFrame(
+      makeSceneState(),
+      createFrameContext({ frame: 1, fps: 30, durationInFrames: 90, seed: "seed-b" }),
+    );
+
+    expect(createPhysicsBake).toHaveBeenCalledTimes(2);
+    expect(firstBake.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("passes this composition's own physics/physicsConstraints and frame rate through to createPhysicsBake", async () => {
+    const fakeBake = createFakePhysicsBakeInstance();
+    const createPhysicsBake = vi.fn(() => fakeBake) as unknown as ThreeRendererDependencies["createPhysicsBake"];
+    const { deps } = createFakeDeps({ createPhysicsBake });
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    const physics: CompositionPhysics = { gravity: [0, -20, 0], substeps: 4 };
+    const physicsConstraints: PhysicsConstraintConfig[] = [
+      {
+        id: "joint-1",
+        type: "fixed",
+        bodyA: "a",
+        bodyB: "b",
+        anchorA: [0, 0, 0],
+        anchorB: [0, 0, 0],
+      },
+    ];
+    const sceneState = makeSceneState({ physics, physicsConstraints });
+
+    renderer.renderFrame(sceneState, createFrameContext({ frame: 1, fps: 24, durationInFrames: 90, seed: "s" }));
+
+    expect(createPhysicsBake).toHaveBeenCalledWith(
+      sceneState.layers.map((layer) => layer.node),
+      physics,
+      physicsConstraints,
+      24,
+    );
+  });
+
+  it("dispose() disposes the physics bake", async () => {
+    const fakeBake = createFakePhysicsBakeInstance();
+    const createPhysicsBake = vi.fn(() => fakeBake) as unknown as ThreeRendererDependencies["createPhysicsBake"];
+    const { deps } = createFakeDeps({ createPhysicsBake });
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+    renderer.renderFrame(makeSceneState(), makeFrameContext());
+
+    renderer.dispose();
+
+    expect(fakeBake.dispose).toHaveBeenCalledOnce();
   });
 });

@@ -313,6 +313,92 @@ function buildProjectWithPathTracingAndDenoise(): Project {
   return { ...project, compositions: [withDenoise] };
 }
 
+const PHYSICS_DURATION_IN_FRAMES = 10;
+
+/**
+ * A single box, lit and framed identically to `buildProject`'s own scene,
+ * over a longer window (`PHYSICS_DURATION_IN_FRAMES`, not the shared
+ * `DURATION_IN_FRAMES`) so a falling body's own real motion (Phase 66) has
+ * enough frames to visibly arc across. `dynamic: true` gives the box a
+ * `rigidBody` that falls under gravity from its own frame-0 position;
+ * `dynamic: false` gives the identical scene a `"fixed"` body instead (never
+ * moves), the exact comparison baseline the test below needs to prove the
+ * dynamic case's own per-frame motion is real, not an artifact of the scene
+ * itself.
+ */
+function buildProjectWithPhysics(dynamic: boolean): Project {
+  const shape = Shape({
+    id: "shape-1",
+    transform: { position: [0, 3, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    rigidBody: {
+      bodyType: dynamic ? "dynamic" : "fixed",
+      collider: { shape: "box", halfExtents: [0.5, 0.5, 0.5] },
+    },
+  });
+  const camera = Camera({
+    id: "camera-1",
+    transform: { position: [0, 0, 8], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  });
+  const ambientLight = Light({ id: "light-ambient", lightType: "ambient", intensity: 1.5 });
+  const directionalLight = Light({
+    id: "light-directional",
+    transform: { position: [2, 3, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    lightType: "directional",
+    intensity: 1.5,
+  });
+
+  const composition = createComposition({
+    id: "comp-1",
+    name: "Main",
+    fps: FPS,
+    durationInFrames: PHYSICS_DURATION_IN_FRAMES,
+    width: WIDTH,
+    height: HEIGHT,
+    tracks: [
+      {
+        id: "track-shape",
+        clips: [
+          Sequence({ id: "clip-shape", from: 0, durationInFrames: PHYSICS_DURATION_IN_FRAMES, content: shape }),
+        ],
+      },
+      {
+        id: "track-camera",
+        clips: [
+          Sequence({ id: "clip-camera", from: 0, durationInFrames: PHYSICS_DURATION_IN_FRAMES, content: camera }),
+        ],
+      },
+      {
+        id: "track-ambient-light",
+        clips: [
+          Sequence({
+            id: "clip-ambient-light",
+            from: 0,
+            durationInFrames: PHYSICS_DURATION_IN_FRAMES,
+            content: ambientLight,
+          }),
+        ],
+      },
+      {
+        id: "track-directional-light",
+        clips: [
+          Sequence({
+            id: "clip-directional-light",
+            from: 0,
+            durationInFrames: PHYSICS_DURATION_IN_FRAMES,
+            content: directionalLight,
+          }),
+        ],
+      },
+    ],
+  });
+  const withActiveCameraTrack: Composition = {
+    ...composition,
+    activeCameraTrack: [{ startFrame: 0, durationInFrames: PHYSICS_DURATION_IN_FRAMES, cameraNodeId: "camera-1" }],
+  };
+
+  return createProject({ id: "p1", name: "Project", compositions: [withActiveCameraTrack] });
+}
+
 /**
  * Whether real Chromium is available in this environment: checked
  * synchronously via Playwright's own `chromium.executablePath()` (the exact
@@ -750,6 +836,75 @@ describe("renderCompositionHeadlessServer: real end-to-end browser render", () =
         );
       } finally {
         rmSync(outputPath, { force: true });
+      }
+    },
+    120_000,
+  );
+
+  it(
+    "a dynamic rigidBody actually falls under gravity, via a real headless browser (Phase 66)",
+    async () => {
+      if (!chromiumAvailable) {
+        console.log(
+          "renderCompositionHeadlessServer physics e2e test: skipping, real Chromium not found (no cached Playwright browser in this environment).",
+        );
+        return;
+      }
+
+      const outputPaths = {
+        dynamic: join(tmpdir(), `cadra-headless-e2e-physics-dynamic-${Date.now()}-${Math.random().toString(36).slice(2)}.mp4`),
+        fixed: join(tmpdir(), `cadra-headless-e2e-physics-fixed-${Date.now()}-${Math.random().toString(36).slice(2)}.mp4`),
+      };
+
+      try {
+        await renderCompositionHeadlessServer({
+          project: buildProjectWithPhysics(true),
+          compositionId: "comp-1",
+          seed: "e2e-physics-seed",
+          format: "mp4",
+          bitrate: 1_000_000,
+          destination: createWriteStream(outputPaths.dynamic),
+          entryFilePath: BROWSER_HEADLESS_RENDER_ENTRY_PATH,
+          onProgress: () => {},
+          timeoutMs: 45_000,
+          maxAttempts: 1,
+        });
+
+        await renderCompositionHeadlessServer({
+          project: buildProjectWithPhysics(false),
+          compositionId: "comp-1",
+          seed: "e2e-physics-seed",
+          format: "mp4",
+          bitrate: 1_000_000,
+          destination: createWriteStream(outputPaths.fixed),
+          entryFilePath: BROWSER_HEADLESS_RENDER_ENTRY_PATH,
+          onProgress: () => {},
+          timeoutMs: 45_000,
+          maxAttempts: 1,
+        });
+
+        const dynamicBytes = readFileSync(outputPaths.dynamic);
+        const fixedBytes = readFileSync(outputPaths.fixed);
+        expect(dynamicBytes.byteLength).toBeGreaterThan(0);
+        expect(fixedBytes.byteLength).toBeGreaterThan(0);
+
+        const dynamicTimescale = readMp4TrackTimescale(dynamicBytes);
+        expect(readMp4FragmentedDurationTicks(dynamicBytes)).toBe(
+          expectedMp4DurationTicks(PHYSICS_DURATION_IN_FRAMES, FPS, dynamicTimescale),
+        );
+
+        // The whole point of this test: the identical scene, differing only
+        // in rigidBody.bodyType, must actually render differently. A fixed
+        // body's own frame is byte-identical every frame (the encoder's own
+        // inter-frame prediction compresses that near-perfectly); a falling
+        // dynamic body genuinely moves frame to frame, giving the encoder
+        // real per-frame residual to spend bits on - so the dynamic
+        // encode is reliably larger than the fixed one, proving physics
+        // actually drove the render, not just that both renders succeeded.
+        expect(dynamicBytes.byteLength).toBeGreaterThan(fixedBytes.byteLength);
+      } finally {
+        rmSync(outputPaths.dynamic, { force: true });
+        rmSync(outputPaths.fixed, { force: true });
       }
     },
     120_000,

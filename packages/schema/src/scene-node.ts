@@ -1,5 +1,6 @@
 import type {
   CameraNode,
+  ColliderConfig,
   CompositionRefNode,
   EasingName,
   GroupNode,
@@ -9,6 +10,7 @@ import type {
   LightType,
   MeshMaterialConfig,
   MeshNode,
+  RigidBodyConfig,
   SatoriElementKeyframes,
   SatoriLayerFontRef,
   SatoriNode,
@@ -269,6 +271,46 @@ type _CheckMeshMaterialConfig = AssertTrue<
   AssertEqual<z.infer<typeof meshMaterialConfigSchema>, MeshMaterialConfig>
 >;
 
+/** A rigid-body collision shape, mirroring `ColliderConfig`. A discriminated union on `shape`. */
+export const colliderConfigSchema = z.discriminatedUnion("shape", [
+  z.strictObject({
+    shape: z.literal("box"),
+    halfExtents: vector3Schema.describe("Half-width, half-height, half-depth of the box, in the mesh node's own local units."),
+  }),
+  z.strictObject({
+    shape: z.literal("sphere"),
+    radius: z.number().positive(),
+  }),
+  z.strictObject({
+    shape: z.literal("capsule"),
+    halfHeight: z.number().positive().describe("Half the length of the capsule's own straight cylindrical section, excluding its rounded caps."),
+    radius: z.number().positive(),
+  }),
+  z.strictObject({
+    shape: z.literal("cylinder"),
+    halfHeight: z.number().positive(),
+    radius: z.number().positive(),
+  }),
+]);
+
+type _CheckColliderConfig = AssertTrue<AssertEqual<z.infer<typeof colliderConfigSchema>, ColliderConfig>>;
+
+/** Rigid-body physics for a `MeshNode`, mirroring `RigidBodyConfig`. */
+export const rigidBodyConfigSchema = z.strictObject({
+  bodyType: z.enum(["dynamic", "fixed", "kinematic"]),
+  collider: colliderConfigSchema,
+  mass: z.number().positive().optional(),
+  friction: z.number().min(0).optional(),
+  restitution: z.number().min(0).max(1).optional(),
+  linearDamping: z.number().min(0).optional(),
+  angularDamping: z.number().min(0).optional(),
+  initialLinearVelocity: vector3Schema.optional(),
+  initialAngularVelocity: vector3Schema.optional(),
+  ccdEnabled: z.boolean().optional(),
+});
+
+type _CheckRigidBodyConfig = AssertTrue<AssertEqual<z.infer<typeof rigidBodyConfigSchema>, RigidBodyConfig>>;
+
 /**
  * A renderable mesh. `geometryRef` and `materialRef` are ids resolved
  * against a geometry and material registry by a later phase; the scene DSL
@@ -304,6 +346,9 @@ export const meshNodeSchema = z.strictObject({
     .boolean()
     .optional()
     .describe("Whether this mesh receives shadows cast by shadow-casting lights. Defaults to false."),
+  rigidBody: rigidBodyConfigSchema
+    .optional()
+    .describe("Rigid-body physics simulated by @cadra/physics. Omitted means this mesh is not physics-driven."),
   get children(): z.ZodArray<typeof sceneNodeSchema> {
     return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
   },

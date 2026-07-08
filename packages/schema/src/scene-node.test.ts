@@ -94,6 +94,86 @@ describe("sceneNodeSchema: mesh", () => {
   });
 });
 
+describe("sceneNodeSchema: mesh rigidBody (Phase 66)", () => {
+  function meshWith(rigidBody: unknown) {
+    return sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "mesh",
+      geometryRef: "geo-1",
+      materialRef: "mat-1",
+      rigidBody,
+    });
+  }
+
+  it("accepts a dynamic body with each collider shape", () => {
+    expect(meshWith({ bodyType: "dynamic", collider: { shape: "box", halfExtents: [1, 1, 1] } }).success).toBe(true);
+    expect(meshWith({ bodyType: "dynamic", collider: { shape: "sphere", radius: 0.5 } }).success).toBe(true);
+    expect(meshWith({ bodyType: "dynamic", collider: { shape: "capsule", halfHeight: 1, radius: 0.5 } }).success).toBe(true);
+    expect(meshWith({ bodyType: "dynamic", collider: { shape: "cylinder", halfHeight: 1, radius: 0.5 } }).success).toBe(true);
+  });
+
+  it("accepts fixed and kinematic body types", () => {
+    expect(meshWith({ bodyType: "fixed", collider: { shape: "box", halfExtents: [1, 1, 1] } }).success).toBe(true);
+    expect(meshWith({ bodyType: "kinematic", collider: { shape: "box", halfExtents: [1, 1, 1] } }).success).toBe(true);
+  });
+
+  it("rejects an unrecognized bodyType", () => {
+    expect(meshWith({ bodyType: "static", collider: { shape: "box", halfExtents: [1, 1, 1] } }).success).toBe(false);
+  });
+
+  it("rejects an unrecognized collider shape", () => {
+    expect(meshWith({ bodyType: "dynamic", collider: { shape: "cone", radius: 0.5 } }).success).toBe(false);
+  });
+
+  it("rejects a non-positive sphere radius", () => {
+    expect(meshWith({ bodyType: "dynamic", collider: { shape: "sphere", radius: 0 } }).success).toBe(false);
+    expect(meshWith({ bodyType: "dynamic", collider: { shape: "sphere", radius: -1 } }).success).toBe(false);
+  });
+
+  it("rejects restitution outside [0, 1]", () => {
+    expect(
+      meshWith({
+        bodyType: "dynamic",
+        collider: { shape: "sphere", radius: 0.5 },
+        restitution: 1.5,
+      }).success,
+    ).toBe(false);
+    expect(
+      meshWith({
+        bodyType: "dynamic",
+        collider: { shape: "sphere", radius: 0.5 },
+        restitution: -0.1,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts every optional physical property together", () => {
+    const result = meshWith({
+      bodyType: "dynamic",
+      collider: { shape: "box", halfExtents: [1, 1, 1] },
+      mass: 2,
+      friction: 0.4,
+      restitution: 0.6,
+      linearDamping: 0.1,
+      angularDamping: 0.1,
+      initialLinearVelocity: [0, 1, 0],
+      initialAngularVelocity: [0, 0, 0],
+      ccdEnabled: true,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("omitting rigidBody entirely still validates (not physics-driven)", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "mesh",
+      geometryRef: "geo-1",
+      materialRef: "mat-1",
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
 describe("sceneNodeSchema: camera", () => {
   it("accepts a camera node with fov, near, far, and target", () => {
     const result = sceneNodeSchema.safeParse({

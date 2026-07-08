@@ -3,11 +3,13 @@ import {
   type LightNode,
   type LightType,
   type MeshMaterialConfig,
+  type MeshNode,
   type SatoriNode,
   type SceneNode,
   type TextPhysicsConfig,
   type TextStaggerConfig,
 } from "@cadra/core";
+import type { PhysicsTransform } from "@cadra/physics";
 import type { RasterizedSvg } from "@cadra/svg-raster";
 import type { TextRenderData } from "@cadra/text";
 import * as THREE from "three";
@@ -1028,6 +1030,108 @@ describe("node-factory: PBR advanced materials (Phase 64)", () => {
     expect(metalMaterial.transmission).toBe(0);
     expect(glassMaterial.transmission).toBe(1);
     expect(glassMaterial.metalness).toBe(0);
+  });
+});
+
+/** A mesh node with the given `rigidBody`, at a known, easily-asserted transform. */
+function meshNodeWithRigidBody(rigidBody: MeshNode["rigidBody"]): SceneNode {
+  return {
+    id: "physics-mesh",
+    kind: "mesh",
+    transform: { position: [1, 2, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    visible: true,
+    children: [],
+    geometryRef: "box",
+    materialRef: "default",
+    rigidBody,
+  };
+}
+
+/** `makeCtx()` plus a `physicsTransforms` lookup pre-populated with `entries`. */
+function makeCtxWithPhysics(entries: ReadonlyMap<string, PhysicsTransform>): NodeFactoryContext {
+  return { ...makeCtx(), physicsTransforms: entries };
+}
+
+describe("node-factory: physics-driven mesh transforms (Phase 66)", () => {
+  it("overrides position and rotation for a dynamic body when physicsTransforms has an entry for it", () => {
+    const ctx = makeCtxWithPhysics(
+      new Map([["physics-mesh", { position: [10, 20, 30], rotation: [0.1, 0.2, 0.3] }]]),
+    );
+    const node = meshNodeWithRigidBody({ bodyType: "dynamic", collider: { shape: "box", halfExtents: [1, 1, 1] } });
+    const built = createThreeObject(node, ctx);
+    const mesh = built.object3D as THREE.Mesh;
+    applyNodeProperties(node, mesh, ctx, 0, built.owned);
+
+    expect([mesh.position.x, mesh.position.y, mesh.position.z]).toEqual([10, 20, 30]);
+    expect([mesh.rotation.x, mesh.rotation.y, mesh.rotation.z]).toEqual([0.1, 0.2, 0.3]);
+  });
+
+  it("falls back to the authored transform when physicsTransforms has no entry for this node id", () => {
+    const ctx = makeCtxWithPhysics(new Map([["some-other-node", { position: [10, 20, 30], rotation: [0, 0, 0] }]]));
+    const node = meshNodeWithRigidBody({ bodyType: "dynamic", collider: { shape: "box", halfExtents: [1, 1, 1] } });
+    const built = createThreeObject(node, ctx);
+    const mesh = built.object3D as THREE.Mesh;
+    applyNodeProperties(node, mesh, ctx, 0, built.owned);
+
+    expect([mesh.position.x, mesh.position.y, mesh.position.z]).toEqual([1, 2, 3]);
+  });
+
+  it("never overrides a fixed body's transform, even if physicsTransforms happens to have an entry for it", () => {
+    const ctx = makeCtxWithPhysics(new Map([["physics-mesh", { position: [10, 20, 30], rotation: [0, 0, 0] }]]));
+    const node = meshNodeWithRigidBody({ bodyType: "fixed", collider: { shape: "box", halfExtents: [1, 1, 1] } });
+    const built = createThreeObject(node, ctx);
+    const mesh = built.object3D as THREE.Mesh;
+    applyNodeProperties(node, mesh, ctx, 0, built.owned);
+
+    expect([mesh.position.x, mesh.position.y, mesh.position.z]).toEqual([1, 2, 3]);
+  });
+
+  it("never overrides a kinematic body's transform, even if physicsTransforms happens to have an entry for it", () => {
+    const ctx = makeCtxWithPhysics(new Map([["physics-mesh", { position: [10, 20, 30], rotation: [0, 0, 0] }]]));
+    const node = meshNodeWithRigidBody({ bodyType: "kinematic", collider: { shape: "box", halfExtents: [1, 1, 1] } });
+    const built = createThreeObject(node, ctx);
+    const mesh = built.object3D as THREE.Mesh;
+    applyNodeProperties(node, mesh, ctx, 0, built.owned);
+
+    expect([mesh.position.x, mesh.position.y, mesh.position.z]).toEqual([1, 2, 3]);
+  });
+
+  it("does not throw when a dynamic body has rigidBody set but physicsTransforms is entirely omitted", () => {
+    const ctx = makeCtx();
+    const node = meshNodeWithRigidBody({ bodyType: "dynamic", collider: { shape: "box", halfExtents: [1, 1, 1] } });
+    const built = createThreeObject(node, ctx);
+
+    expect(() => applyNodeProperties(node, built.object3D, ctx, 0, built.owned)).not.toThrow();
+  });
+
+  it("a mesh with no rigidBody at all ignores physicsTransforms entirely, keeping its own authored transform", () => {
+    const ctx = makeCtxWithPhysics(new Map([["physics-mesh", { position: [10, 20, 30], rotation: [0, 0, 0] }]]));
+    const node: SceneNode = {
+      id: "physics-mesh",
+      kind: "mesh",
+      transform: { position: [1, 2, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      visible: true,
+      children: [],
+      geometryRef: "box",
+      materialRef: "default",
+    };
+    const built = createThreeObject(node, ctx);
+    const mesh = built.object3D as THREE.Mesh;
+    applyNodeProperties(node, mesh, ctx, 0, built.owned);
+
+    expect([mesh.position.x, mesh.position.y, mesh.position.z]).toEqual([1, 2, 3]);
+  });
+
+  it("re-applies the current physicsTransforms entry every frame, via applyNodeProperties", () => {
+    const node = meshNodeWithRigidBody({ bodyType: "dynamic", collider: { shape: "box", halfExtents: [1, 1, 1] } });
+    const ctxAtFrame0 = makeCtxWithPhysics(new Map([["physics-mesh", { position: [1, 0, 0], rotation: [0, 0, 0] }]]));
+    const built = createThreeObject(node, ctxAtFrame0);
+    const mesh = built.object3D as THREE.Mesh;
+
+    const ctxAtFrame1 = makeCtxWithPhysics(new Map([["physics-mesh", { position: [2, 0, 0], rotation: [0, 0, 0] }]]));
+    applyNodeProperties(node, mesh, ctxAtFrame1, 1, built.owned);
+
+    expect(mesh.position.x).toBe(2);
   });
 });
 
