@@ -168,6 +168,95 @@ describe("Cadra MCP add_text_node tool", () => {
     expect(parseScene(payload.document).success).toBe(true);
   });
 
+  it("applies a typePreset's own fontSize/stagger onto the new node", async () => {
+    const connectedClient = await connectClient();
+    await createEmptyScene(connectedClient, "scene-1");
+
+    const result = await connectedClient.callTool({
+      name: ADD_TEXT_NODE_TOOL_NAME,
+      arguments: {
+        sceneId: "scene-1",
+        compositionId: "comp-1",
+        newTrackId: "track-1",
+        clipId: "clip-1",
+        textNodeId: "text-1",
+        startFrame: 0,
+        durationInFrames: 90,
+        content: "CADRA",
+        typePreset: "title",
+      },
+    });
+    const payload = parseToolResult<AddTextNodePayload>(result as ToolTextResult);
+
+    expect(payload.success).toBe(true);
+    if (!payload.success) {
+      throw new Error("Expected add_text_node to succeed.");
+    }
+    const node = payload.document.project.compositions[0]!.tracks[0]!.clips[0]!.node;
+    expect(node.kind === "text" ? node.fontSize : undefined).toBe(96);
+    expect(node.kind === "text" ? node.stagger?.preset : undefined).toBe("fadeInUp");
+    expect(node.kind === "text" ? node.stagger?.grouping : undefined).toBe("word");
+    expect(node.kind === "text" ? node.glow?.radius : undefined).toBe(0.06);
+    expect(parseScene(payload.document).success).toBe(true);
+  });
+
+  it("lets an explicit field override typePreset's own value for that one field", async () => {
+    const connectedClient = await connectClient();
+    await createEmptyScene(connectedClient, "scene-1");
+
+    const result = await connectedClient.callTool({
+      name: ADD_TEXT_NODE_TOOL_NAME,
+      arguments: {
+        sceneId: "scene-1",
+        compositionId: "comp-1",
+        newTrackId: "track-1",
+        clipId: "clip-1",
+        textNodeId: "text-1",
+        startFrame: 0,
+        durationInFrames: 90,
+        content: "CADRA",
+        typePreset: "title",
+        fontSize: 150,
+      },
+    });
+    const payload = parseToolResult<AddTextNodePayload>(result as ToolTextResult);
+
+    expect(payload.success).toBe(true);
+    if (!payload.success) {
+      throw new Error("Expected add_text_node to succeed.");
+    }
+    const node = payload.document.project.compositions[0]!.tracks[0]!.clips[0]!.node;
+    // The explicit fontSize wins, but the rest of the "title" preset (its
+    // own stagger/glow) still applies.
+    expect(node.kind === "text" ? node.fontSize : undefined).toBe(150);
+    expect(node.kind === "text" ? node.stagger?.preset : undefined).toBe("fadeInUp");
+  });
+
+  it("rejects an unknown typePreset name", async () => {
+    const connectedClient = await connectClient();
+    await createEmptyScene(connectedClient, "scene-1");
+
+    const result = await connectedClient.callTool({
+      name: ADD_TEXT_NODE_TOOL_NAME,
+      arguments: {
+        sceneId: "scene-1",
+        compositionId: "comp-1",
+        newTrackId: "track-1",
+        clipId: "clip-1",
+        textNodeId: "text-1",
+        startFrame: 0,
+        durationInFrames: 90,
+        content: "CADRA",
+        typePreset: "not-a-real-preset",
+      },
+    });
+
+    // typePreset is a z.enum of TYPE_PRESETS' own keys, so an unknown value
+    // is rejected by MCP's own input-schema validation before this tool's
+    // handler ever runs (isError, not this tool's own JSON failure shape).
+    expect((result as { isError?: boolean }).isError).toBe(true);
+  });
+
   it("accepts real Arabic (right-to-left) content as plain text", async () => {
     const connectedClient = await connectClient();
     await createEmptyScene(connectedClient, "scene-1");
@@ -193,6 +282,36 @@ describe("Cadra MCP add_text_node tool", () => {
     }
     const node = payload.document.project.compositions[0]!.tracks[0]!.clips[0]!.node;
     expect(node.kind === "text" ? node.content : undefined).toBe("مرحبا بالعالم");
+    expect(parseScene(payload.document).success).toBe(true);
+  });
+
+  it("combines typePreset with real Arabic content, since TYPE_PRESETS groups by word/line (reading-order-safe), never character/grapheme (Phase 73 task 4)", async () => {
+    const connectedClient = await connectClient();
+    await createEmptyScene(connectedClient, "scene-1");
+
+    const result = await connectedClient.callTool({
+      name: ADD_TEXT_NODE_TOOL_NAME,
+      arguments: {
+        sceneId: "scene-1",
+        compositionId: "comp-1",
+        newTrackId: "track-1",
+        clipId: "clip-1",
+        textNodeId: "text-arabic-lower-third",
+        startFrame: 0,
+        durationInFrames: 90,
+        content: "مرحبا بالعالم",
+        typePreset: "lowerThird",
+      },
+    });
+    const payload = parseToolResult<AddTextNodePayload>(result as ToolTextResult);
+
+    expect(payload.success).toBe(true);
+    if (!payload.success) {
+      throw new Error("Expected add_text_node to succeed.");
+    }
+    const node = payload.document.project.compositions[0]!.tracks[0]!.clips[0]!.node;
+    expect(node.kind === "text" ? node.content : undefined).toBe("مرحبا بالعالم");
+    expect(node.kind === "text" ? node.stagger?.grouping : undefined).toBe("word");
     expect(parseScene(payload.document).success).toBe(true);
   });
 

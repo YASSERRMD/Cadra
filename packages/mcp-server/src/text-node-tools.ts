@@ -11,8 +11,18 @@
  * Mirrors `add_generated_clip`'s own "read, validate, mutate, re-validate,
  * persist" shape (`./generation-clip-tools.ts`) and reuses its exact
  * track-selector semantics (`./track-insertion.ts`).
+ *
+ * Phase 73's own `typePreset` parameter names one of `@cadra/core`'s
+ * `TYPE_PRESETS` (`"title"`/`"lowerThird"`/`"caption"`/`"kineticWordReveal"`)
+ * as this call's own starting point for `transform`/`fontSize`/`extrudeDepth`/
+ * `stagger`/`physics`/`path`/`morph`/`fill`/`outline`/`glow`/`shadow`: any of
+ * those fields this call *also* passes explicitly overrides that one field
+ * from the preset, exactly like spreading and overriding `TYPE_PRESETS` in
+ * TypeScript directly (`{ ...TYPE_PRESETS.title, fontSize: 120 }`) - the
+ * MCP-reachable equivalent, since an agent has no way to `import` that
+ * constant itself.
  */
-import { Text } from "@cadra/core";
+import { Text, TYPE_PRESETS } from "@cadra/core";
 import {
   colorRgbaSchema,
   parseScene,
@@ -81,7 +91,9 @@ export function registerCadraTextNodeTools(
         "existing scene's timeline, in one step - the one-call alternative to hand-writing the " +
         "full TextNode JSON via update_scene. Every field here is a plain (non-keyframed) value; " +
         "keyframe any of them afterward via update_scene if the effect itself needs to change " +
-        "over time.",
+        "over time. Pass typePreset to start from one of @cadra/core's curated TYPE_PRESETS " +
+        "(title/lowerThird/caption/kineticWordReveal); any other field passed alongside it " +
+        "overrides that one field from the preset.",
       inputSchema: {
         sceneId: z.string().describe("Id of the persisted scene to add the text node to."),
         compositionId: z.string().describe("Id of the composition, within that scene, to add the text node to."),
@@ -98,9 +110,17 @@ export function registerCadraTextNodeTools(
           .int()
           .positive()
           .describe("How many frames the new clip is visible for."),
+        typePreset: z
+          .enum(Object.keys(TYPE_PRESETS) as [string, ...string[]])
+          .optional()
+          .describe(
+            "Starts from one of @cadra/core's curated TYPE_PRESETS (a tasteful fontSize/transform/" +
+              "stagger/outline/glow/shadow combination for a common on-screen role). Any other field " +
+              "passed alongside it overrides that one field from the preset.",
+          ),
         transform: transformSchema
           .optional()
-          .describe("Position/rotation/scale for the new text node. Defaults to identity (origin, no rotation, unit scale)."),
+          .describe("Position/rotation/scale for the new text node. Defaults to identity (origin, no rotation, unit scale), or typePreset's own if given."),
         content: z.string().describe("The text to render."),
         fontRef: z
           .string()
@@ -140,6 +160,7 @@ export function registerCadraTextNodeTools(
       textNodeId,
       startFrame,
       durationInFrames,
+      typePreset,
       transform,
       content,
       fontRef,
@@ -228,22 +249,39 @@ export function registerCadraTextNodeTools(
         );
       }
 
+      // typePreset supplies the starting value for each field it defines;
+      // any of this call's own explicit fields still overrides that one
+      // field, exactly like spreading and overriding TYPE_PRESETS directly
+      // in TypeScript (`{ ...TYPE_PRESETS.title, fontSize: 120 }`).
+      const preset = typePreset !== undefined ? TYPE_PRESETS[typePreset] : undefined;
+      const effectiveTransform = transform ?? preset?.transform;
+      const effectiveFontSize = fontSize ?? preset?.fontSize;
+      const effectiveExtrudeDepth = extrudeDepth ?? preset?.extrudeDepth;
+      const effectiveStagger = stagger ?? preset?.stagger;
+      const effectivePhysics = physics ?? preset?.physics;
+      const effectivePath = path ?? preset?.path;
+      const effectiveMorph = morph ?? preset?.morph;
+      const effectiveFill = fill ?? preset?.fill;
+      const effectiveOutline = outline ?? preset?.outline;
+      const effectiveGlow = glow ?? preset?.glow;
+      const effectiveShadow = shadow ?? preset?.shadow;
+
       const textNode = Text({
         id: textNodeId,
-        ...(transform !== undefined && { transform }),
+        ...(effectiveTransform !== undefined && { transform: effectiveTransform }),
         content,
         ...(fontRef !== undefined && { fontRef }),
-        ...(fontSize !== undefined && { fontSize }),
+        ...(effectiveFontSize !== undefined && { fontSize: effectiveFontSize }),
         ...(color !== undefined && { color }),
-        ...(extrudeDepth !== undefined && { extrudeDepth }),
-        ...(stagger !== undefined && { stagger }),
-        ...(physics !== undefined && { physics }),
-        ...(path !== undefined && { path }),
-        ...(morph !== undefined && { morph }),
-        ...(fill !== undefined && { fill }),
-        ...(outline !== undefined && { outline }),
-        ...(glow !== undefined && { glow }),
-        ...(shadow !== undefined && { shadow }),
+        ...(effectiveExtrudeDepth !== undefined && { extrudeDepth: effectiveExtrudeDepth }),
+        ...(effectiveStagger !== undefined && { stagger: effectiveStagger }),
+        ...(effectivePhysics !== undefined && { physics: effectivePhysics }),
+        ...(effectivePath !== undefined && { path: effectivePath }),
+        ...(effectiveMorph !== undefined && { morph: effectiveMorph }),
+        ...(effectiveFill !== undefined && { fill: effectiveFill }),
+        ...(effectiveOutline !== undefined && { outline: effectiveOutline }),
+        ...(effectiveGlow !== undefined && { glow: effectiveGlow }),
+        ...(effectiveShadow !== undefined && { shadow: effectiveShadow }),
         ...(variationAxes !== undefined && { variationAxes }),
       });
 
