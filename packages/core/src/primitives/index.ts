@@ -25,6 +25,22 @@ export { Model } from "./model.js";
 export type { ParticlesProps } from "./particles.js";
 export { Particles } from "./particles.js";
 export { POST_PROCESSING_LOOK_PRESETS } from "./post-processing-presets.js";
+export type {
+  FollowPathOptions,
+  FollowPathResult,
+  MotionPathConfig,
+  NoiseMotionConfig,
+  OrbitAxis,
+  OrbitConfig,
+  SecondarySpringConfig,
+} from "./procedural-motion.js";
+export {
+  computeLookAtRotation,
+  followPath,
+  noiseMotion,
+  orbit,
+  secondarySpringMotion,
+} from "./procedural-motion.js";
 export type { SatoriProps } from "./satori.js";
 export { Satori } from "./satori.js";
 export type { ResolvedSatoriElementStyle } from "./satori-element-animation.js";
