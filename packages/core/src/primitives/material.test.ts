@@ -13,6 +13,12 @@ describe("resolveMeshMaterial: defaults", () => {
       emissiveIntensity: 1,
       clearcoat: 0,
       clearcoatRoughness: 0,
+      transmission: 0,
+      ior: 1.5,
+      thickness: 0,
+      sheen: 0,
+      sheenRoughness: 1,
+      sheenColor: [0, 0, 0, 1],
       opacity: 1,
       normalMapRef: undefined,
       aoMapRef: undefined,
@@ -28,6 +34,12 @@ describe("resolveMeshMaterial: defaults", () => {
       emissiveIntensity: 3,
       clearcoat: 0.5,
       clearcoatRoughness: 0.1,
+      transmission: 0.9,
+      ior: 1.33,
+      thickness: 0.6,
+      sheen: 0.7,
+      sheenRoughness: 0.4,
+      sheenColor: [0.8, 0.6, 0.7, 1],
       opacity: 0.8,
       normalMapRef: "normal-1",
       aoMapRef: "ao-1",
@@ -40,6 +52,12 @@ describe("resolveMeshMaterial: defaults", () => {
       emissiveIntensity: 3,
       clearcoat: 0.5,
       clearcoatRoughness: 0.1,
+      transmission: 0.9,
+      ior: 1.33,
+      thickness: 0.6,
+      sheen: 0.7,
+      sheenRoughness: 0.4,
+      sheenColor: [0.8, 0.6, 0.7, 1],
       opacity: 0.8,
       normalMapRef: "normal-1",
       aoMapRef: "ao-1",
@@ -103,6 +121,10 @@ describe("PBR_PRESETS", () => {
       expect(resolved.roughness, name).toBeLessThanOrEqual(1);
       expect(resolved.clearcoat, name).toBeGreaterThanOrEqual(0);
       expect(resolved.clearcoat, name).toBeLessThanOrEqual(1);
+      expect(resolved.transmission, name).toBeGreaterThanOrEqual(0);
+      expect(resolved.transmission, name).toBeLessThanOrEqual(1);
+      expect(resolved.sheen, name).toBeGreaterThanOrEqual(0);
+      expect(resolved.sheen, name).toBeLessThanOrEqual(1);
     }
   });
 
@@ -118,5 +140,19 @@ describe("PBR_PRESETS", () => {
 
   it("carPaint has a strong clearcoat layer", () => {
     expect(resolveMeshMaterial(PBR_PRESETS.carPaint as MeshMaterialConfig, 0).clearcoat).toBe(1);
+  });
+
+  it("clearGlass and frostedGlass are fully transmissive, differing only in roughness", () => {
+    const clear = resolveMeshMaterial(PBR_PRESETS.clearGlass as MeshMaterialConfig, 0);
+    const frosted = resolveMeshMaterial(PBR_PRESETS.frostedGlass as MeshMaterialConfig, 0);
+    expect(clear.transmission).toBe(1);
+    expect(frosted.transmission).toBe(1);
+    expect(frosted.roughness).toBeGreaterThan(clear.roughness);
+  });
+
+  it("velvet has a strong, tinted sheen layer", () => {
+    const resolved = resolveMeshMaterial(PBR_PRESETS.velvet as MeshMaterialConfig, 0);
+    expect(resolved.sheen).toBe(1);
+    expect(resolved.sheenColor).not.toEqual([0, 0, 0, 1]);
   });
 });

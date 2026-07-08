@@ -76,6 +76,18 @@ export interface MeshMaterialConfig {
   clearcoat?: Property<number>;
   /** The clearcoat layer's own roughness, independent of the base surface's `roughness`. Defaults to `0` (a glassy-smooth clearcoat). */
   clearcoatRoughness?: Property<number>;
+  /** How much light passes through the surface instead of reflecting (glass, water, thin plastic), `0` to `1`. Defaults to `0` (fully opaque to light, matching every material authored before Phase 64). When non-zero, `opacity` should stay at its own default of `1` - transmission, not alpha blending, is what makes the surface see-through. */
+  transmission?: Property<number>;
+  /** The index of refraction, controlling how sharply light bends passing through a `transmission`-ed surface. Defaults to Three.js's own `1.5` (window glass); water is around `1.33`, diamond around `2.42`. Read only when `transmission` is non-zero. */
+  ior?: Property<number>;
+  /** The volume's thickness beneath the surface, in the mesh's own local units, controlling how much a `transmission`-ed color tints/attenuates over distance. Defaults to `0` (a thin-walled shell with no depth-dependent attenuation). Read only when `transmission` is non-zero. */
+  thickness?: Property<number>;
+  /** A soft, fabric-like retroreflective sheen at grazing angles (velvet, felt, brushed textiles), `0` to `1`. Defaults to `0` (no sheen, matching every material authored before Phase 64). */
+  sheen?: Property<number>;
+  /** The sheen layer's own roughness, independent of the base surface's `roughness`. Defaults to Three.js's own `1` (a fully soft, diffuse sheen). Read only when `sheen` is non-zero. */
+  sheenRoughness?: Property<number>;
+  /** The sheen layer's own tint. Defaults to black - with `sheen` non-zero and this left black, the sheen only lightens (a neutral highlight); a colored value tints it. Read only when `sheen` is non-zero. */
+  sheenColor?: Property<ColorRGBA>;
   /** Overall opacity, `0` to `1`. Defaults to `1` (fully opaque). */
   opacity?: Property<number>;
   /** Id of a normal map texture asset, resolved against a texture registry by the renderer. Omitted means a geometrically flat surface (no bump detail). */
