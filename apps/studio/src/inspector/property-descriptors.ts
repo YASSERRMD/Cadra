@@ -82,11 +82,59 @@ function buildDescriptors(
   });
 }
 
-/** Extra (beyond transform/visible) descriptors for `TEXT_ANIMATABLE_PROPERTIES`. */
+/**
+ * Extra (beyond transform/visible) descriptors for `TEXT_ANIMATABLE_PROPERTIES`.
+ * `path.*`/`morph.*`/`outline.*`/`glow.*`/`shadow.*` (Phase 72) are the
+ * nested `Property<T>` fields of a `TextNode`'s optional effect configs -
+ * see `TEXT_ANIMATABLE_PROPERTIES`'s own doc in `@cadra/core` for exactly
+ * which sub-fields of each config are genuinely keyframeable (`stagger`/
+ * `physics`/`fill` are deliberately not represented here at all: none of
+ * their own fields are `Property<T>`, or (for `fill`) the one that is
+ * already duplicates `color` above).
+ */
 const TEXT_EXTRA_DESCRIPTORS = new Map<string, PropertyDescriptor>([
   ["color", { path: "color", label: "Color", valueKind: "color" }],
   ["fontSize", { path: "fontSize", label: "Font Size", valueKind: "number" }],
   ["extrudeDepth", { path: "extrudeDepth", label: "Extrude Depth", valueKind: "number" }],
+  ["path.progress", { path: "path.progress", label: "Path Progress", valueKind: "number" }],
+  ["path.startOffset", { path: "path.startOffset", label: "Path Start Offset", valueKind: "number" }],
+  ["morph.progress", { path: "morph.progress", label: "Morph Progress", valueKind: "number" }],
+  ["outline.width", { path: "outline.width", label: "Outline Width", valueKind: "number" }],
+  ["outline.color", { path: "outline.color", label: "Outline Color", valueKind: "color" }],
+  ["glow.radius", { path: "glow.radius", label: "Glow Radius", valueKind: "number" }],
+  ["glow.color", { path: "glow.color", label: "Glow Color", valueKind: "color" }],
+  ["glow.intensity", { path: "glow.intensity", label: "Glow Intensity", valueKind: "number" }],
+  ["shadow.offsetX", { path: "shadow.offsetX", label: "Shadow Offset X", valueKind: "number" }],
+  ["shadow.offsetY", { path: "shadow.offsetY", label: "Shadow Offset Y", valueKind: "number" }],
+  ["shadow.blur", { path: "shadow.blur", label: "Shadow Blur", valueKind: "number" }],
+  ["shadow.color", { path: "shadow.color", label: "Shadow Color", valueKind: "color" }],
+]);
+
+/** Extra (beyond transform/visible) descriptors for `SHAPE_ANIMATABLE_PROPERTIES`: every genuinely `Property<T>`-typed field of an inline `material` (Phase 72). See `SHAPE_ANIMATABLE_PROPERTIES`'s own doc in `@cadra/core` for why these are listed even though `material` itself is optional. */
+const MESH_EXTRA_DESCRIPTORS = new Map<string, PropertyDescriptor>([
+  ["material.baseColor", { path: "material.baseColor", label: "Base Color", valueKind: "color" }],
+  ["material.metalness", { path: "material.metalness", label: "Metalness", valueKind: "number" }],
+  ["material.roughness", { path: "material.roughness", label: "Roughness", valueKind: "number" }],
+  ["material.emissive", { path: "material.emissive", label: "Emissive", valueKind: "color" }],
+  [
+    "material.emissiveIntensity",
+    { path: "material.emissiveIntensity", label: "Emissive Intensity", valueKind: "number" },
+  ],
+  ["material.clearcoat", { path: "material.clearcoat", label: "Clearcoat", valueKind: "number" }],
+  [
+    "material.clearcoatRoughness",
+    { path: "material.clearcoatRoughness", label: "Clearcoat Roughness", valueKind: "number" },
+  ],
+  ["material.transmission", { path: "material.transmission", label: "Transmission", valueKind: "number" }],
+  ["material.ior", { path: "material.ior", label: "IOR", valueKind: "number" }],
+  ["material.thickness", { path: "material.thickness", label: "Thickness", valueKind: "number" }],
+  ["material.sheen", { path: "material.sheen", label: "Sheen", valueKind: "number" }],
+  [
+    "material.sheenRoughness",
+    { path: "material.sheenRoughness", label: "Sheen Roughness", valueKind: "number" },
+  ],
+  ["material.sheenColor", { path: "material.sheenColor", label: "Sheen Color", valueKind: "color" }],
+  ["material.opacity", { path: "material.opacity", label: "Opacity", valueKind: "number" }],
 ]);
 
 /** Extra descriptors for `VIDEO_ANIMATABLE_PROPERTIES`. */
@@ -134,7 +182,7 @@ const VOLUME_EXTRA_DESCRIPTORS = new Map<string, PropertyDescriptor>([
 export const NODE_KIND_PROPERTY_DESCRIPTORS: Record<SceneNodeKind, PropertyDescriptor[]> = {
   group: [...TRANSFORM_DESCRIPTORS, VISIBLE_DESCRIPTOR],
   compositionRef: [...TRANSFORM_DESCRIPTORS, VISIBLE_DESCRIPTOR],
-  mesh: buildDescriptors(SHAPE_ANIMATABLE_PROPERTIES, new Map()),
+  mesh: buildDescriptors(SHAPE_ANIMATABLE_PROPERTIES, MESH_EXTRA_DESCRIPTORS),
   text: buildDescriptors(TEXT_ANIMATABLE_PROPERTIES, TEXT_EXTRA_DESCRIPTORS),
   image: buildDescriptors(IMAGE_ANIMATABLE_PROPERTIES, new Map()),
   video: buildDescriptors(VIDEO_ANIMATABLE_PROPERTIES, VIDEO_EXTRA_DESCRIPTORS),
