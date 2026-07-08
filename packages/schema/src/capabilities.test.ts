@@ -51,9 +51,9 @@ describe("generateCapabilityManifest", () => {
     expect(text?.animatableProperties).toEqual(expect.arrayContaining(["color", "fontSize"]));
   });
 
-  it("lists all 14 easing names, exactly one of which ('hold') is non-continuous", () => {
+  it("lists all 17 easing names, exactly one of which ('hold') is non-continuous", () => {
     const manifest = generateCapabilityManifest();
-    expect(manifest.easings).toHaveLength(14);
+    expect(manifest.easings).toHaveLength(17);
 
     const hold = manifest.easings.find((easing) => easing.name === "hold");
     expect(hold?.continuous).toBe(false);
@@ -80,6 +80,9 @@ describe("generateCapabilityManifest", () => {
         "easeInElastic",
         "easeOutElastic",
         "easeInOutElastic",
+        "easeInBounce",
+        "easeOutBounce",
+        "easeInOutBounce",
         "hold",
       ]),
     );

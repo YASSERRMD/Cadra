@@ -41,6 +41,9 @@ export const easingSchema = z
     "easeInElastic",
     "easeOutElastic",
     "easeInOutElastic",
+    "easeInBounce",
+    "easeOutBounce",
+    "easeInOutBounce",
     "hold",
   ])
   .describe(

@@ -513,6 +513,9 @@ export const easingNameSchema = z
     "easeInElastic",
     "easeOutElastic",
     "easeInOutElastic",
+    "easeInBounce",
+    "easeOutBounce",
+    "easeInOutBounce",
   ])
   .describe("Which named easing curve to apply.");
 
