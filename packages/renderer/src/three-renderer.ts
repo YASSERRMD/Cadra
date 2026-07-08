@@ -9,6 +9,11 @@ import {
   type SceneNode,
   type SceneState,
 } from "@cadra/core";
+import {
+  createPhysicsBake as createRealPhysicsBake,
+  initPhysics as initRealPhysics,
+  type PhysicsBake,
+} from "@cadra/physics";
 import * as THREE from "three";
 import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
 import { RectAreaLightTexturesLib } from "three/addons/lights/RectAreaLightTexturesLib.js";
@@ -103,6 +108,22 @@ export interface ThreeRendererDependencies {
   detectWebGpuSupport: WebGpuDetector;
   createWebGpuRenderer: ThreeRendererFactory;
   createWebGl2Renderer: ThreeRendererFactory;
+  /**
+   * Loads `@cadra/physics`'s own Rapier WASM module. Called once, during
+   * `init()`, concurrently with backend construction (see `init`'s own
+   * body): a small, fixed, one-time cost paid once per renderer instance,
+   * even for a composition that never uses `rigidBody` at all - kept this
+   * simple deliberately, rather than threading a "does this composition
+   * need physics" hint through `init`'s own fixed `Renderer` interface
+   * signature just to skip it.
+   */
+  initPhysics: () => Promise<void>;
+  /**
+   * Builds one composition's own physics simulation. Called fresh (see
+   * `renderFrame`'s own `resolvePhysicsTransforms`) whenever the
+   * `(compositionId, seed)` pair being rendered changes.
+   */
+  createPhysicsBake: typeof createRealPhysicsBake;
 }
 
 /**
@@ -380,6 +401,8 @@ export const defaultThreeRendererDependencies: ThreeRendererDependencies = {
   detectWebGpuSupport,
   createWebGpuRenderer: createRealWebGpuRenderer,
   createWebGl2Renderer: createRealWebGl2Renderer,
+  initPhysics: initRealPhysics,
+  createPhysicsBake: createRealPhysicsBake,
 };
 
 /**
@@ -569,6 +592,18 @@ export class ThreeRenderer implements Renderer {
    * pattern.
    */
   private contactShadowMesh: THREE.Mesh | undefined;
+  /**
+   * This renderer's own current composition's physics simulation (see
+   * `resolvePhysicsTransforms`, below). `undefined` before the first
+   * `renderFrame` call. Rebuilt (never mutated in place) whenever
+   * `physicsBakeKey` no longer matches the `sceneState`/`frameContext` a
+   * `renderFrame` call is given - stepping a `PhysicsBake` is inherently
+   * sequential (each frame's own state depends on every prior one), so a
+   * changed composition or seed cannot simply resume an old bake.
+   */
+  private physicsBake: PhysicsBake | undefined;
+  /** The `(compositionId, seed)` pair `physicsBake` was built for; see that field's own doc. */
+  private physicsBakeKey: string | undefined;
 
   constructor(
     deps: ThreeRendererDependencies = defaultThreeRendererDependencies,
@@ -582,6 +617,11 @@ export class ThreeRenderer implements Renderer {
   }
 
   async init(target: RenderTarget, size: RenderSize): Promise<void> {
+    // Kicked off before the backend branch below so it runs concurrently
+    // with whatever that takes (WebGPU's own async candidate.init(), in
+    // particular), not added to init()'s own wall-clock time on top of it.
+    const physicsInitPromise = this.deps.initPhysics();
+
     const webGpuAvailable = this.deps.detectWebGpuSupport();
 
     if (webGpuAvailable) {
@@ -595,6 +635,7 @@ export class ThreeRenderer implements Renderer {
       this.resolvedBackend = "webgl2";
       this.wasFallback = true;
     }
+    await physicsInitPromise;
 
     this.threeRenderer.setSize(size.width, size.height, false);
     this.domTarget = target;
@@ -612,9 +653,15 @@ export class ThreeRenderer implements Renderer {
 
     this.applyEnvironment(renderer, sceneState.environment);
     this.applyContactShadow(sceneState.shadowQuality?.contactShadows);
+    const physicsTransforms = this.resolvePhysicsTransforms(sceneState, frameContext);
 
     const wrapperRoot = buildSceneStateRoot(sceneState);
-    const reconciled = this.reconciler.reconcile(wrapperRoot, frameContext.frame, whiteBalanceGain);
+    const reconciled = this.reconciler.reconcile(
+      wrapperRoot,
+      frameContext.frame,
+      whiteBalanceGain,
+      physicsTransforms,
+    );
     if (reconciled === null) {
       // `buildSceneStateRoot` always returns a non-null SceneNode, so
       // `reconcile` never actually returns null here; this satisfies the
@@ -653,6 +700,38 @@ export class ThreeRenderer implements Renderer {
       frame: frameContext.frame,
       resolveLut: (ref: string) => this.lutRegistry.resolve(ref),
     });
+  }
+
+  /**
+   * Resolves this frame's own physics-driven mesh transforms: rebuilds
+   * `this.physicsBake` (disposing whatever it was before) whenever
+   * `sceneState.compositionId`/`frameContext.seed` no longer match what it
+   * was last built for, then steps (or, for a backward seek, resets and
+   * re-simulates - see `PhysicsBake.advanceTo`'s own doc in `@cadra/physics`)
+   * to `frameContext.frame`.
+   *
+   * A composition with no `rigidBody` anywhere in `sceneState.layers`
+   * still builds a (trivial, body-less) `PhysicsBake`: `createPhysicsBake`
+   * itself is cheap to call and step when there is nothing to simulate, and
+   * this keeps that decision in one place (`@cadra/physics`) rather than
+   * duplicating "does this scene even use physics" detection here too.
+   */
+  private resolvePhysicsTransforms(
+    sceneState: SceneState,
+    frameContext: FrameContext,
+  ): ReturnType<PhysicsBake["advanceTo"]> {
+    const key = `${sceneState.compositionId}:${frameContext.seed}`;
+    if (this.physicsBake === undefined || this.physicsBakeKey !== key) {
+      this.physicsBake?.dispose();
+      this.physicsBake = this.deps.createPhysicsBake(
+        sceneState.layers.map((layer) => layer.node),
+        sceneState.physics,
+        sceneState.physicsConstraints,
+        frameContext.fps,
+      );
+      this.physicsBakeKey = key;
+    }
+    return this.physicsBake.advanceTo(frameContext.frame);
   }
 
   /**
@@ -884,6 +963,7 @@ export class ThreeRenderer implements Renderer {
     this.removeGroundedSkybox();
     this.clearCascadedShadows();
     this.removeContactShadowMesh();
+    this.physicsBake?.dispose();
     this.requireInitialized().dispose();
   }
 

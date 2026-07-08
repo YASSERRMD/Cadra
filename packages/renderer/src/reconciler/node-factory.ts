@@ -20,6 +20,7 @@ import {
   type TextNode,
   type WhiteBalanceGain,
 } from "@cadra/core";
+import type { PhysicsTransform } from "@cadra/physics";
 import type { PositionedGlyph } from "@cadra/text/browser";
 import * as THREE from "three";
 
@@ -110,6 +111,19 @@ export interface NodeFactoryContext {
    * handed to a Three.js color API directly.
    */
   whiteBalanceGain: WhiteBalanceGain;
+  /**
+   * This frame's own baked physics result (`@cadra/physics`'s own
+   * `PhysicsBake.advanceTo`), by node id - only ever populated for a
+   * `"dynamic"` `RigidBodyConfig` (see that type's own doc for why
+   * `"fixed"`/`"kinematic"` bodies are never in here). Mutated in place by
+   * `reconciler.ts`'s own `reconcile` at the start of every call, mirroring
+   * `whiteBalanceGain`'s own "fresh per call, not fixed at
+   * `createReconciler` time" treatment: which composition (and so which
+   * physics bake) a given call is even rendering can differ call to call.
+   * `undefined`/omitted means no physics-driven mesh renders any
+   * differently than it did before Phase 66.
+   */
+  physicsTransforms?: ReadonlyMap<string, PhysicsTransform>;
 }
 
 /**
@@ -360,6 +374,7 @@ export function applyNodeProperties(
       }
       mesh.castShadow = node.castShadow ?? false;
       mesh.receiveShadow = node.receiveShadow ?? false;
+      applyPhysicsTransform(node, object3D, ctx);
       return;
     }
 
@@ -465,6 +480,31 @@ function applyTransform(
   object3D.rotation.set(rotation[0], rotation[1], rotation[2]);
   const scale = resolveVector3Property(transform.scale, frame);
   object3D.scale.set(scale[0], scale[1], scale[2]);
+}
+
+/**
+ * Overrides `object3D`'s own position/rotation (already set by `applyTransform`
+ * above, from `node.transform`) with this frame's own baked physics result,
+ * when `node` has a `"dynamic"` `rigidBody`: physics owns a dynamic body's
+ * pose from frame 0 onward (see `RigidBodyConfig`'s own doc, `@cadra/core`),
+ * so its own authored `transform` is only ever this body's *initial* pose,
+ * superseded here for every frame physics actually reports a result for.
+ * A no-op for every other mesh (no `rigidBody`, or `"fixed"`/`"kinematic"`,
+ * neither of which `ctx.physicsTransforms` ever contains an entry for - see
+ * `PhysicsBake.advanceTo`'s own doc in `@cadra/physics`), or if physics has
+ * not resolved a pose for this exact node id (e.g. this composition's own
+ * `sceneState.physics` is unset and nothing in it uses `rigidBody` at all).
+ */
+function applyPhysicsTransform(node: MeshNode, object3D: THREE.Object3D, ctx: NodeFactoryContext): void {
+  if (node.rigidBody?.bodyType !== "dynamic") {
+    return;
+  }
+  const baked = ctx.physicsTransforms?.get(node.id);
+  if (baked === undefined) {
+    return;
+  }
+  object3D.position.set(baked.position[0], baked.position[1], baked.position[2]);
+  object3D.rotation.set(baked.rotation[0], baked.rotation[1], baked.rotation[2]);
 }
 
 function resolveMeshGeometry(ref: string, registry: GeometryRegistry): THREE.BufferGeometry {

@@ -33,6 +33,11 @@ function createFakeDeps(): ThreeRendererDependencies {
     detectWebGpuSupport: () => true,
     createWebGpuRenderer: vi.fn(() => createFakeThreeRenderer()) as ThreeRendererFactory,
     createWebGl2Renderer: vi.fn(() => createFakeThreeRenderer()) as ThreeRendererFactory,
+    initPhysics: vi.fn().mockResolvedValue(undefined),
+    createPhysicsBake: vi.fn(() => ({
+      advanceTo: vi.fn(() => new Map()),
+      dispose: vi.fn(),
+    })) as unknown as ThreeRendererDependencies["createPhysicsBake"],
   };
 }
 
