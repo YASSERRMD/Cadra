@@ -105,12 +105,23 @@ describe("@cadra/renderer public surface", () => {
  * (`three/addons/loaders/GLTFLoader.js`) directly to do the real parsing,
  * exactly like `three-renderer.ts`/the gizmo/picking modules above.
  *
+ * `assets/model-registry.ts` is excluded for a different reason, as of Phase
+ * 69, mirroring `./reconciler` instead: `LoadedModel`'s own declared shape
+ * (`{scene: THREE.Object3D, animations: THREE.AnimationClip[]}`) genuinely,
+ * deliberately exposes real Three.js types as part of its own contract - a
+ * caller (namely `@cadra/headless`'s experimental native-GPU path, which
+ * needs to register a real model before rendering one) constructs and
+ * populates a `ModelRegistry` outside this package entirely, so unlike
+ * `createDefaultParseGltf` above, there is no Three.js-free signature to
+ * preserve here; scanning this file for "no Three.js" would contradict its
+ * entire purpose the same way scanning `./reconciler` would.
+ *
  * What this proves: none of the source files that make up the `Renderer`-facing
  * export graph (`index.ts` itself, plus every local module it re-exports
  * types or values from, excluding `./reconciler/*`, `three-renderer.ts`,
- * `gizmo/attach-transform-gizmo.ts`, `picking/pick-node-at-point.ts`, and
- * `assets/gltf-loader.ts`) contain a `from "three"` or `from "three/*"`
- * import. Since those are
+ * `gizmo/attach-transform-gizmo.ts`, `picking/pick-node-at-point.ts`,
+ * `assets/gltf-loader.ts`, and `assets/model-registry.ts`) contain a
+ * `from "three"` or `from "three/*"` import. Since those are
  * exactly the files whose declared export shapes become that part of
  * `@cadra/renderer`'s public `.d.ts` surface, this rules out a `three` type
  * reaching an exported `Renderer`-facing signature through any *other* file.

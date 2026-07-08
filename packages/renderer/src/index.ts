@@ -92,6 +92,8 @@ export type { GltfAsset, LoadedGltf, LoadGltfDependencies, ParseGltf } from "./a
 export { createDefaultParseGltf, loadGltf } from "./assets/gltf-loader.js";
 export type { DecodeImage, LoadedImage, LoadImageDependencies } from "./assets/image-loader.js";
 export { loadImage } from "./assets/image-loader.js";
+export type { LoadedModel, ModelRegistry, MutableModelRegistry } from "./assets/model-registry.js";
+export { createDefaultModelRegistry, createInMemoryModelRegistry } from "./assets/model-registry.js";
 export { renderWhenAssetsReady } from "./assets/render-when-ready.js";
 export type { FetchBytes, LoadedAsset } from "./assets/types.js";
 export type {
