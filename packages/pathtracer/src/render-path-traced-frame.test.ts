@@ -23,7 +23,7 @@ function createFakePathTracer() {
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera();
 
-const config: ResolvedPathTracingConfig = { tier: "final", samples: 4, bounces: 3 };
+const config: ResolvedPathTracingConfig = { tier: "final", samples: 4, bounces: 3, denoise: false };
 
 describe("renderPathTracedFrame", () => {
   it("shares scene and camera directly with the path tracer via setSceneAsync", async () => {

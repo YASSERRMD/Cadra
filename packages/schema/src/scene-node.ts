@@ -226,6 +226,34 @@ export const meshMaterialConfigSchema = z.strictObject({
   clearcoatRoughness: propertySchema(z.number())
     .optional()
     .describe("The clearcoat layer's own roughness, independent of the base surface's roughness. Defaults to 0."),
+  transmission: propertySchema(z.number())
+    .optional()
+    .describe(
+      "How much light passes through the surface instead of reflecting (glass, water, thin plastic), 0 to 1. Defaults to 0.",
+    ),
+  ior: propertySchema(z.number())
+    .optional()
+    .describe(
+      "The index of refraction, controlling how sharply light bends passing through a transmission-ed surface. Defaults to 1.5 (window glass). Read only when transmission is non-zero.",
+    ),
+  thickness: propertySchema(z.number())
+    .optional()
+    .describe(
+      "The volume's thickness beneath the surface, in the mesh's own local units. Defaults to 0. Read only when transmission is non-zero.",
+    ),
+  sheen: propertySchema(z.number())
+    .optional()
+    .describe(
+      "A soft, fabric-like retroreflective sheen at grazing angles (velvet, felt, brushed textiles), 0 to 1. Defaults to 0.",
+    ),
+  sheenRoughness: propertySchema(z.number())
+    .optional()
+    .describe(
+      "The sheen layer's own roughness, independent of the base surface's roughness. Defaults to 1. Read only when sheen is non-zero.",
+    ),
+  sheenColor: propertySchema(colorRgbaSchema)
+    .optional()
+    .describe("The sheen layer's own tint. Defaults to black. Read only when sheen is non-zero."),
   opacity: propertySchema(z.number()).optional().describe("Overall opacity, 0 to 1. Defaults to 1."),
   normalMapRef: z
     .string()

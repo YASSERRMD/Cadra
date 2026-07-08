@@ -649,6 +649,12 @@ export const pathTracingConfigSchema = z.strictObject({
     .positive()
     .optional()
     .describe("Maximum light bounce depth. Higher resolves more indirect light and reflections at a higher cost. Defaults to 5."),
+  denoise: z
+    .boolean()
+    .optional()
+    .describe(
+      "Applies edge-aware denoising to the accumulated result once sampling finishes, trading a small amount of fine detail for a dramatically cleaner image at the same sample budget. Defaults to false.",
+    ),
 });
 
 type _CheckPathTracingConfig = AssertTrue<AssertEqual<z.infer<typeof pathTracingConfigSchema>, PathTracingConfig>>;

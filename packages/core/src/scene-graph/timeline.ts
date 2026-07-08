@@ -250,6 +250,8 @@ export interface PathTracingConfig {
   samples?: number;
   /** Maximum light bounce depth. Higher resolves more indirect light and reflections at a higher cost. Defaults to `5`. */
   bounces?: number;
+  /** Applies edge-aware denoising to the accumulated result once sampling finishes, trading a small amount of fine detail for a dramatically cleaner image at the same sample budget. A deterministic post-process (a fixed function of the accumulated pixels), not part of sampling itself - never affects `samples`'s own reproducibility. Defaults to `false`. */
+  denoise?: boolean;
 }
 
 /**

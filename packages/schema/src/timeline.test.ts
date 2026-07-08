@@ -696,6 +696,22 @@ describe("compositionSchema", () => {
       false,
     );
   });
+
+  it("accepts a pathTracing config with denoise enabled", () => {
+    const result = compositionSchema.safeParse({
+      ...validComposition(),
+      pathTracing: { denoise: true },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a non-boolean pathTracing.denoise", () => {
+    const result = compositionSchema.safeParse({
+      ...validComposition(),
+      pathTracing: { denoise: "yes" },
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 describe("projectSchema", () => {

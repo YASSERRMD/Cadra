@@ -949,6 +949,88 @@ describe("node-factory: PBR mesh materials (Phase 55)", () => {
   });
 });
 
+describe("node-factory: PBR advanced materials (Phase 64)", () => {
+  it("resolves transmission, ior, and thickness onto the constructed material (a glass scene)", () => {
+    const ctx = makeCtx();
+    const node = meshNodeWithMaterial({ transmission: 1, ior: 1.33, thickness: 0.6, roughness: 0.05 });
+    const built = createThreeObject(node, ctx);
+    const material = (built.object3D as THREE.Mesh).material as THREE.MeshPhysicalMaterial;
+
+    expect(material.transmission).toBe(1);
+    expect(material.ior).toBe(1.33);
+    expect(material.thickness).toBe(0.6);
+  });
+
+  it("resolves sheen, sheenRoughness, and sheenColor onto the constructed material", () => {
+    const ctx = makeCtx();
+    const node = meshNodeWithMaterial({
+      sheen: 1,
+      sheenRoughness: 0.3,
+      sheenColor: [0.9, 0.7, 0.75, 1],
+    });
+    const built = createThreeObject(node, ctx);
+    const material = (built.object3D as THREE.Mesh).material as THREE.MeshPhysicalMaterial;
+
+    expect(material.sheen).toBe(1);
+    expect(material.sheenRoughness).toBe(0.3);
+    expect([material.sheenColor.r, material.sheenColor.g, material.sheenColor.b]).toEqual([
+      0.7874122893910657, 0.4479884124320571, 0.5225215539594343,
+    ]);
+  });
+
+  it("defaults transmission, sheen, and their dependent fields to Three.js's own no-effect values", () => {
+    const ctx = makeCtx();
+    const node = meshNodeWithMaterial({});
+    const built = createThreeObject(node, ctx);
+    const material = (built.object3D as THREE.Mesh).material as THREE.MeshPhysicalMaterial;
+
+    expect(material.transmission).toBe(0);
+    expect(material.ior).toBe(1.5);
+    expect(material.thickness).toBe(0);
+    expect(material.sheen).toBe(0);
+    expect(material.sheenRoughness).toBe(1);
+    expect([material.sheenColor.r, material.sheenColor.g, material.sheenColor.b]).toEqual([0, 0, 0]);
+  });
+
+  it("re-resolves keyframed transmission and sheen per frame, mutating the same owned material instance in place", () => {
+    const ctx = makeCtx();
+    const node = meshNodeWithMaterial({
+      transmission: { type: "keyframeTrack", keyframes: [{ frame: 0, value: 0 }, { frame: 10, value: 1 }] },
+      sheen: { type: "keyframeTrack", keyframes: [{ frame: 0, value: 0 }, { frame: 10, value: 1 }] },
+    });
+    const built = createThreeObject(node, ctx);
+    const mesh = built.object3D as THREE.Mesh;
+    const materialBeforeUpdate = mesh.material;
+
+    applyNodeProperties(node, mesh, ctx, 0, built.owned);
+    expect((mesh.material as THREE.MeshPhysicalMaterial).transmission).toBe(0);
+    expect((mesh.material as THREE.MeshPhysicalMaterial).sheen).toBe(0);
+
+    applyNodeProperties(node, mesh, ctx, 10, built.owned);
+    expect((mesh.material as THREE.MeshPhysicalMaterial).transmission).toBe(1);
+    expect((mesh.material as THREE.MeshPhysicalMaterial).sheen).toBe(1);
+
+    expect(mesh.material).toBe(materialBeforeUpdate);
+  });
+
+  it("builds a metal material (Phase 55) and a glass material (Phase 64) as distinct, independently correct instances", () => {
+    const ctx = makeCtx();
+    const metal = createThreeObject(meshNodeWithMaterial({ metalness: 1, roughness: 0.35 }), ctx).object3D as THREE.Mesh;
+    const glass = createThreeObject(
+      meshNodeWithMaterial({ transmission: 1, ior: 1.5, roughness: 0.05 }),
+      ctx,
+    ).object3D as THREE.Mesh;
+
+    const metalMaterial = metal.material as THREE.MeshPhysicalMaterial;
+    const glassMaterial = glass.material as THREE.MeshPhysicalMaterial;
+
+    expect(metalMaterial.metalness).toBe(1);
+    expect(metalMaterial.transmission).toBe(0);
+    expect(glassMaterial.transmission).toBe(1);
+    expect(glassMaterial.metalness).toBe(0);
+  });
+});
+
 /** A light node of the given type, with optional Phase 55 shadow/falloff/area overrides. */
 function lightNodeWith(
   lightType: LightType,

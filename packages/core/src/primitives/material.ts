@@ -8,6 +8,9 @@ const DEFAULT_BASE_COLOR: ColorRGBA = [0.7, 0.7, 0.7, 1];
 /** Black: the default `emissive` (no self-illumination). */
 const NO_EMISSIVE: ColorRGBA = [0, 0, 0, 1];
 
+/** Black: the default `sheenColor` (a neutral highlight when `sheen` is non-zero, matching `MeshPhysicalMaterial`'s own default). */
+const NO_SHEEN_COLOR: ColorRGBA = [0, 0, 0, 1];
+
 /** A `MeshMaterialConfig`, fully resolved to plain values at a specific frame. */
 export interface ResolvedMeshMaterial {
   baseColor: ColorRGBA;
@@ -17,6 +20,12 @@ export interface ResolvedMeshMaterial {
   emissiveIntensity: number;
   clearcoat: number;
   clearcoatRoughness: number;
+  transmission: number;
+  ior: number;
+  thickness: number;
+  sheen: number;
+  sheenRoughness: number;
+  sheenColor: ColorRGBA;
   opacity: number;
   normalMapRef: string | undefined;
   aoMapRef: string | undefined;
@@ -36,6 +45,12 @@ export function resolveMeshMaterial(config: MeshMaterialConfig, frame: number): 
     emissiveIntensity: resolveNumberProperty(config.emissiveIntensity ?? 1, frame),
     clearcoat: resolveNumberProperty(config.clearcoat ?? 0, frame),
     clearcoatRoughness: resolveNumberProperty(config.clearcoatRoughness ?? 0, frame),
+    transmission: resolveNumberProperty(config.transmission ?? 0, frame),
+    ior: resolveNumberProperty(config.ior ?? 1.5, frame),
+    thickness: resolveNumberProperty(config.thickness ?? 0, frame),
+    sheen: resolveNumberProperty(config.sheen ?? 0, frame),
+    sheenRoughness: resolveNumberProperty(config.sheenRoughness ?? 1, frame),
+    sheenColor: resolveColorProperty(config.sheenColor ?? NO_SHEEN_COLOR, frame),
     opacity: resolveNumberProperty(config.opacity ?? 1, frame),
     normalMapRef: config.normalMapRef,
     aoMapRef: config.aoMapRef,
@@ -68,4 +83,28 @@ export const PBR_PRESETS: Record<string, MeshMaterialConfig> = {
     clearcoatRoughness: 0.05,
   },
   brushedSteel: { baseColor: [0.6, 0.62, 0.65, 1], metalness: 1, roughness: 0.45 },
+  clearGlass: {
+    baseColor: [1, 1, 1, 1],
+    metalness: 0,
+    roughness: 0.05,
+    transmission: 1,
+    ior: 1.5,
+    thickness: 0.5,
+  },
+  frostedGlass: {
+    baseColor: [1, 1, 1, 1],
+    metalness: 0,
+    roughness: 0.4,
+    transmission: 1,
+    ior: 1.5,
+    thickness: 0.5,
+  },
+  velvet: {
+    baseColor: [0.35, 0.05, 0.1, 1],
+    metalness: 0,
+    roughness: 0.8,
+    sheen: 1,
+    sheenRoughness: 0.3,
+    sheenColor: [0.9, 0.7, 0.75, 1],
+  },
 };
