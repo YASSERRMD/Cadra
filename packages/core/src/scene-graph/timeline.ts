@@ -484,6 +484,59 @@ export interface MotionBlurEffectConfig {
 }
 
 /**
+ * A three-way (lift/gamma/gain) color grading pass: the same primaries
+ * model every color-grading tool (DaVinci Resolve, Nuke, Blender) exposes as
+ * its baseline "shadows/midtones/highlights" corrector, plus saturation and
+ * contrast. Post-tonemap (see `PostEffectConfig`'s own doc): a grade is
+ * applied to the final display-referred image an audience actually sees,
+ * exactly like a real colorist's own grading suite operates on the already
+ * camera-rendered image, not the scene's own linear-light values (that is
+ * `CompositionColorGrading`'s own job - exposure and white balance, a
+ * camera-like pre-tonemap adjustment; this is the creative "look" applied
+ * after).
+ *
+ * Per-channel curves are deliberately not a separate authorable shape here:
+ * lift/gamma/gain together already define one full tone curve per channel
+ * (a shadow offset, a midtone power, and a highlight scale), the same
+ * "three-way corrector" real grading tools ship as their own baseline
+ * primaries control before an artist reaches for a full spline curve editor.
+ */
+export interface ColorGradeEffectConfig {
+  type: "colorGrade";
+  /** Shadow offset per channel, raising or lowering black level. `[0, 0, 0]` is a no-op. Defaults to `[0, 0, 0]`. */
+  lift?: [number, number, number];
+  /** Midtone power per channel. `[1, 1, 1]` is a no-op. Defaults to `[1, 1, 1]`. */
+  gamma?: [number, number, number];
+  /** Highlight multiplier per channel. `[1, 1, 1]` is a no-op. Defaults to `[1, 1, 1]`. */
+  gain?: [number, number, number];
+  /** Overall color intensity: `0` is grayscale, `1` is a no-op, above `1` oversaturates. Defaults to `1`. */
+  saturation?: number;
+  /** Contrast around the mid-gray pivot: `1` is a no-op. Defaults to `1`. */
+  contrast?: number;
+}
+
+/**
+ * A 3D lookup table (LUT) pass: remaps the final display-referred image
+ * through `lutRef`, resolved against a LUT registry (mirroring
+ * `CompositionEnvironment.envMapRef`'s own registry-resolution convention;
+ * see `LutRegistry`/`createDefaultLutRegistry` in `@cadra/renderer`, which
+ * ships `"warm"`, `"tealOrange"`, and `"filmStock"` built in with no
+ * registry setup at all). Post-tonemap, for the same reason
+ * `ColorGradeEffectConfig` is: a LUT is the final creative "look" a colorist
+ * applies to the already-graded image, not a scene-lighting adjustment.
+ * Real `.cube` files load through `parseCubeLut`/`loadLutFromCube` in
+ * `@cadra/renderer` into a custom `LutRegistry` a caller supplies; resolving
+ * one requires real file I/O, so it happens ahead of time, never inside a
+ * synchronous render call.
+ */
+export interface LutEffectConfig {
+  type: "lut";
+  lutRef: string;
+  /** Blends between the un-graded image (`0`) and the full LUT result (`1`). Defaults to `1`. */
+  intensity?: number;
+}
+
+/**
  * One configured entry in `CompositionPostProcessing.effects`. A
  * discriminated union on `type`, growing by one variant per effect Phase 59
  * onward adds. Which side of tone mapping a given `type` renders on (linear
@@ -492,8 +545,8 @@ export interface MotionBlurEffectConfig {
  * here: getting it wrong would silently clip or wash out the effect, so it is
  * not something a scene author or agent can misconfigure. `bloom`,
  * `depthOfField`, and `motionBlur` render pre-tonemap; `sharpen`,
- * `chromaticAberration`, `vignette`, `filmGrain`, and `lensDistortion` render
- * post-tonemap.
+ * `chromaticAberration`, `vignette`, `filmGrain`, `lensDistortion`,
+ * `colorGrade`, and `lut` render post-tonemap.
  */
 export type PostEffectConfig =
   | SharpenEffectConfig
@@ -503,7 +556,9 @@ export type PostEffectConfig =
   | VignetteEffectConfig
   | FilmGrainEffectConfig
   | LensDistortionEffectConfig
-  | MotionBlurEffectConfig;
+  | MotionBlurEffectConfig
+  | ColorGradeEffectConfig
+  | LutEffectConfig;
 
 /**
  * A whole-composition post-processing effect stack. See

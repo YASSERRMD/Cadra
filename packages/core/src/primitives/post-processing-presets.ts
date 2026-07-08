@@ -26,4 +26,15 @@ export const POST_PROCESSING_LOOK_PRESETS: Record<string, PostEffectConfig[]> = 
     { type: "chromaticAberration", intensity: 0.5 },
     { type: "lensDistortion", amount: -0.08 },
   ],
+  // The three "lutRef" values below resolve against @cadra/renderer's own
+  // createDefaultLutRegistry, which ships exactly these three ids built in
+  // (see that function's own doc) - no LUT registry setup needed to use
+  // these presets as authored.
+  warm: [{ type: "lut", lutRef: "warm", intensity: 0.8 }],
+  tealOrange: [{ type: "lut", lutRef: "tealOrange", intensity: 0.8 }],
+  filmStock: [
+    { type: "lut", lutRef: "filmStock", intensity: 0.75 },
+    { type: "filmGrain", intensity: 0.25 },
+    { type: "vignette", darkness: 0.4, offset: 1.2 },
+  ],
 };
