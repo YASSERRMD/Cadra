@@ -52,7 +52,9 @@ export type {
   AudioClip,
   AudioFadeEnvelope,
   AudioTrack,
+  BloomEffectConfig,
   CascadedShadowConfig,
+  ChromaticAberrationEffectConfig,
   Clip,
   Composition,
   CompositionColorGrading,
@@ -60,7 +62,10 @@ export type {
   CompositionPostProcessing,
   CompositionShadowQuality,
   ContactShadowConfig,
+  DepthOfFieldEffectConfig,
   EnvironmentGroundProjection,
+  FilmGrainEffectConfig,
+  LensDistortionEffectConfig,
   PostEffectConfig,
   Project,
   RenderQualityTier,
@@ -68,6 +73,7 @@ export type {
   SharpenEffectConfig,
   Track,
   Transition,
+  VignetteEffectConfig,
 } from "./timeline.js";
 export { SceneNodeNotFoundError } from "./tree-operations.js";
 export { addNode, findNode, removeNode, updateNode } from "./tree-operations.js";

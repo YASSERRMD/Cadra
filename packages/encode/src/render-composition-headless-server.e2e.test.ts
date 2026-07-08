@@ -142,6 +142,48 @@ function buildProject(): Project {
 }
 
 /**
+ * `buildProject`'s own scene, plus every Phase 58/59 post-processing effect
+ * (both pre-tonemap: `bloom`, `depthOfField`; and post-tonemap: `sharpen`,
+ * `chromaticAberration`, `vignette`, `filmGrain`, `lensDistortion`) and
+ * ambient occlusion together in one composition. This is real, non-mocked
+ * coverage that the whole unified pipeline (`buildWebGl2Pipeline` in
+ * `@cadra/renderer`, since this exact headless Chromium/SwiftShader
+ * environment resolves to the WebGL2 fallback backend, per `buildProject`'s
+ * own doc) actually runs end to end through a real browser without
+ * throwing, composes AO and post-processing correctly (see
+ * `RenderPassConfig`'s own doc in `@cadra/renderer` for why they must share
+ * one composer), and still produces real, non-blank pixel output - exactly
+ * the kind of coverage this improvement track's own working rules call for
+ * ("every new visual effect must be covered by a golden-frame test") ahead
+ * of Phase 71's own dedicated golden-frame harness.
+ */
+function buildProjectWithPostProcessing(): Project {
+  const project = buildProject();
+  const composition = project.compositions[0];
+  if (composition === undefined) {
+    throw new Error("buildProject() always returns a project with exactly one composition.");
+  }
+
+  const withPostProcessing: Composition = {
+    ...composition,
+    shadowQuality: { ambientOcclusion: { radius: 1, intensity: 0.5 } },
+    postProcessing: {
+      effects: [
+        { type: "bloom", threshold: 0.6, intensity: 0.8, radius: 0.4 },
+        { type: "depthOfField", focusDistance: 5, aperture: 0.05, maxBlur: 1 },
+        { type: "sharpen", amount: 0.4 },
+        { type: "chromaticAberration", intensity: 0.4 },
+        { type: "vignette", darkness: 0.5, offset: 1 },
+        { type: "filmGrain", intensity: 0.3 },
+        { type: "lensDistortion", amount: 0.05 },
+      ],
+    },
+  };
+
+  return { ...project, compositions: [withPostProcessing] };
+}
+
+/**
  * Whether real Chromium is available in this environment: checked
  * synchronously via Playwright's own `chromium.executablePath()` (the exact
  * path Playwright itself would try to launch) plus a filesystem existence
@@ -269,6 +311,59 @@ describe("renderCompositionHeadlessServer: real end-to-end browser render", () =
         // 64x64 video would ever total, while comfortably below what three
         // real frames of an actual lit box encode to.
         expect(bytes.byteLength).toBeGreaterThan(512);
+      } finally {
+        rmSync(outputPath, { force: true });
+      }
+    },
+    60_000,
+  );
+
+  it(
+    "renders a scene with every post-processing effect and ambient occlusion enabled together, via a real headless browser",
+    async () => {
+      if (!chromiumAvailable) {
+        console.log(
+          "renderCompositionHeadlessServer post-processing e2e test: skipping, real Chromium not found (no cached Playwright browser in this environment).",
+        );
+        return;
+      }
+
+      const project = buildProjectWithPostProcessing();
+      const outputPath = join(
+        tmpdir(),
+        `cadra-headless-e2e-postfx-${Date.now()}-${Math.random().toString(36).slice(2)}.mp4`,
+      );
+      const destination = createWriteStream(outputPath);
+
+      try {
+        await renderCompositionHeadlessServer({
+          project,
+          compositionId: "comp-1",
+          seed: "e2e-postfx-seed",
+          format: "mp4",
+          bitrate: 1_000_000,
+          destination,
+          entryFilePath: BROWSER_HEADLESS_RENDER_ENTRY_PATH,
+          onProgress: () => {},
+          timeoutMs: 45_000,
+          maxAttempts: 1,
+        });
+
+        // The whole point of this test: every effect's own pass/node
+        // construction, plus AO and post-processing sharing one composer
+        // (see buildProjectWithPostProcessing's own doc), ran through a
+        // real browser without throwing, and still produced a real,
+        // non-blank, validly muxed MP4 - not a golden-frame pixel match
+        // (that is Phase 71's own job), but real proof this phase's large
+        // amount of new pipeline-construction code actually executes.
+        const bytes = readFileSync(outputPath);
+        expect(bytes.byteLength).toBeGreaterThan(512);
+
+        const trackTimescale = readMp4TrackTimescale(bytes);
+        expect(trackTimescale).toBeGreaterThan(0);
+        const actualDurationTicks = readMp4FragmentedDurationTicks(bytes);
+        const expectedTicks = expectedMp4DurationTicks(DURATION_IN_FRAMES, FPS, trackTimescale);
+        expect(actualDurationTicks).toBe(expectedTicks);
       } finally {
         rmSync(outputPath, { force: true });
       }

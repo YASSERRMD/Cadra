@@ -32,6 +32,7 @@ import {
   type AmbientOcclusionRenderConfig,
   buildWebGl2Pipeline,
   buildWebGpuPipeline,
+  type BuiltPipeline,
   type RenderPassConfig,
   resolvePostProcessing,
 } from "./post-processing/post-processing-pipeline.js";
@@ -203,18 +204,23 @@ function withEnvironmentMapSupport(
 }
 
 /**
- * A cheap, exact cache key over a `RenderPassConfig`'s own content, used by
- * `withPostProcessingSupport`/`withWebGpuPostProcessingSupport` below to
- * decide whether their cached composer/pipeline needs rebuilding.
+ * A cheap, exact cache key over a `RenderPassConfig`'s own *structural*
+ * content, used by `withPostProcessingSupport`/`withWebGpuPostProcessingSupport`
+ * below to decide whether their cached `BuiltPipeline` needs rebuilding.
  * `ThreeRenderer.renderFrame` resolves a fresh `RenderPassConfig` object
  * every call (see `resolveAmbientOcclusion`/`resolvePostProcessing`), so a
  * reference-identity check would always miss; every field on
  * `AmbientOcclusionRenderConfig`/`PostProcessingRenderConfig` is a plain
  * number, string, or array of those, so `JSON.stringify` is an exact,
- * order-sensitive, cheap-for-these-small-configs equality check.
+ * order-sensitive, cheap-for-these-small-configs equality check. `frame` is
+ * deliberately excluded (see `RenderPassConfig`'s own doc for why): it
+ * changes every call by construction, and only ever drives a `BuiltPipeline`'s
+ * own `updateFrame`, never a rebuild.
  */
 function renderPassConfigKey(config: RenderPassConfig | undefined): string {
-  return JSON.stringify(config ?? null);
+  return JSON.stringify(
+    config === undefined ? null : { ambientOcclusion: config.ambientOcclusion, postProcessing: config.postProcessing },
+  );
 }
 
 /**
@@ -249,14 +255,14 @@ function withPostProcessingSupport(
   // `Maximum call stack size exceeded`).
   const originalRender = renderer.render.bind(renderer);
   const originalDispose = threeRendererLike.dispose.bind(threeRendererLike);
-  let composer: EffectComposer | undefined;
+  let built: BuiltPipeline<EffectComposer> | undefined;
   let cachedScene: THREE.Scene | undefined;
   let cachedCamera: THREE.Camera | undefined;
   let cachedKey: string | undefined;
 
   function disposeComposer(): void {
-    composer?.dispose();
-    composer = undefined;
+    built?.handle.dispose();
+    built = undefined;
   }
 
   return Object.assign(threeRendererLike, {
@@ -271,16 +277,17 @@ function withPostProcessingSupport(
       }
 
       const key = renderPassConfigKey(config);
-      if (composer === undefined || cachedScene !== scene || cachedCamera !== camera || cachedKey !== key) {
+      if (built === undefined || cachedScene !== scene || cachedCamera !== camera || cachedKey !== key) {
         disposeComposer();
         const size = renderer.getSize(new THREE.Vector2());
-        composer = buildWebGl2Pipeline(renderer, scene, camera, size.x, size.y, config);
+        built = buildWebGl2Pipeline(renderer, scene, camera, size.x, size.y, config);
         cachedScene = scene;
         cachedCamera = camera;
         cachedKey = key;
       }
 
-      composer.render();
+      built.updateFrame(config.frame);
+      built.handle.render();
     },
     dispose(): void {
       disposeComposer();
@@ -308,14 +315,14 @@ function withWebGpuPostProcessingSupport(
   // them, or the wrapped methods recurse into themselves.
   const originalRender = renderer.render.bind(renderer);
   const originalDispose = threeRendererLike.dispose.bind(threeRendererLike);
-  let renderPipeline: RenderPipeline | undefined;
+  let built: BuiltPipeline<RenderPipeline> | undefined;
   let cachedScene: THREE.Scene | undefined;
   let cachedCamera: THREE.Camera | undefined;
   let cachedKey: string | undefined;
 
   function disposePipeline(): void {
-    renderPipeline?.dispose();
-    renderPipeline = undefined;
+    built?.handle.dispose();
+    built = undefined;
   }
 
   return Object.assign(threeRendererLike, {
@@ -330,15 +337,16 @@ function withWebGpuPostProcessingSupport(
       }
 
       const key = renderPassConfigKey(config);
-      if (renderPipeline === undefined || cachedScene !== scene || cachedCamera !== camera || cachedKey !== key) {
+      if (built === undefined || cachedScene !== scene || cachedCamera !== camera || cachedKey !== key) {
         disposePipeline();
-        renderPipeline = buildWebGpuPipeline(renderer, scene, camera, config);
+        built = buildWebGpuPipeline(renderer, scene, camera, config);
         cachedScene = scene;
         cachedCamera = camera;
         cachedKey = key;
       }
 
-      renderPipeline.render();
+      built.updateFrame(config.frame);
+      built.handle.render();
     },
     dispose(): void {
       disposePipeline();
@@ -638,6 +646,7 @@ export class ThreeRenderer implements Renderer {
     renderer.render(this.scene, camera, {
       ambientOcclusion: this.resolveAmbientOcclusion(sceneState.shadowQuality),
       postProcessing: resolvePostProcessing(sceneState.postProcessing),
+      frame: frameContext.frame,
     });
   }
 

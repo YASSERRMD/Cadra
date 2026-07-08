@@ -4,7 +4,9 @@ import type {
   AudioClip,
   AudioFadeEnvelope,
   AudioTrack,
+  BloomEffectConfig,
   CascadedShadowConfig,
+  ChromaticAberrationEffectConfig,
   Clip,
   Composition,
   CompositionColorGrading,
@@ -12,7 +14,10 @@ import type {
   CompositionPostProcessing,
   CompositionShadowQuality,
   ContactShadowConfig,
+  DepthOfFieldEffectConfig,
   EnvironmentGroundProjection,
+  FilmGrainEffectConfig,
+  LensDistortionEffectConfig,
   PostEffectConfig,
   Project,
   RenderQualityTier,
@@ -20,6 +25,7 @@ import type {
   SharpenEffectConfig,
   Track,
   Transition,
+  VignetteEffectConfig,
 } from "@cadra/core";
 import { z } from "zod";
 
@@ -436,13 +442,110 @@ type _CheckSharpenEffectConfig = AssertTrue<
   AssertEqual<z.infer<typeof sharpenEffectConfigSchema>, SharpenEffectConfig>
 >;
 
+/** A bloom pass, mirroring `BloomEffectConfig`. */
+export const bloomEffectConfigSchema = z.strictObject({
+  type: z.literal("bloom"),
+  threshold: z
+    .number()
+    .optional()
+    .describe("Luminance level above which a pixel starts contributing to the glow, in linear scene-referred HDR. Defaults to 0.85."),
+  intensity: z
+    .number()
+    .optional()
+    .describe("Multiplies the glow's own brightness once added back over the scene. Defaults to 1."),
+  radius: z
+    .number()
+    .optional()
+    .describe("How far the glow spreads from a bright pixel, roughly in screen-relative units. Defaults to 0.4."),
+});
+
+type _CheckBloomEffectConfig = AssertTrue<AssertEqual<z.infer<typeof bloomEffectConfigSchema>, BloomEffectConfig>>;
+
+/** A depth of field pass, mirroring `DepthOfFieldEffectConfig`. */
+export const depthOfFieldEffectConfigSchema = z.strictObject({
+  type: z.literal("depthOfField"),
+  focusDistance: z
+    .number()
+    .optional()
+    .describe("Distance from the camera, in scene units, that stays in sharp focus. Defaults to 10."),
+  aperture: z
+    .number()
+    .optional()
+    .describe("How wide the lens opening is: larger values blur out-of-focus regions more strongly. Defaults to 0.025."),
+  maxBlur: z
+    .number()
+    .optional()
+    .describe("Caps how far the blur can spread, independent of aperture. Defaults to 1."),
+});
+
+type _CheckDepthOfFieldEffectConfig = AssertTrue<
+  AssertEqual<z.infer<typeof depthOfFieldEffectConfigSchema>, DepthOfFieldEffectConfig>
+>;
+
+/** A chromatic aberration pass, mirroring `ChromaticAberrationEffectConfig`. */
+export const chromaticAberrationEffectConfigSchema = z.strictObject({
+  type: z.literal("chromaticAberration"),
+  intensity: z.number().optional().describe("Strength of the channel shift. 0 is a no-op. Defaults to 0.5."),
+});
+
+type _CheckChromaticAberrationEffectConfig = AssertTrue<
+  AssertEqual<z.infer<typeof chromaticAberrationEffectConfigSchema>, ChromaticAberrationEffectConfig>
+>;
+
+/** A vignette pass, mirroring `VignetteEffectConfig`. */
+export const vignetteEffectConfigSchema = z.strictObject({
+  type: z.literal("vignette"),
+  darkness: z
+    .number()
+    .optional()
+    .describe("How dark the corners get, 0 (no darkening) to 1 (fully black). Defaults to 1."),
+  offset: z
+    .number()
+    .optional()
+    .describe("How far the darkening reaches in from the corners toward the center; larger values reach further. Defaults to 1."),
+});
+
+type _CheckVignetteEffectConfig = AssertTrue<
+  AssertEqual<z.infer<typeof vignetteEffectConfigSchema>, VignetteEffectConfig>
+>;
+
+/** A film grain pass, mirroring `FilmGrainEffectConfig`. */
+export const filmGrainEffectConfigSchema = z.strictObject({
+  type: z.literal("filmGrain"),
+  intensity: z.number().optional().describe("Strength of the noise. 0 is a no-op. Defaults to 0.35."),
+});
+
+type _CheckFilmGrainEffectConfig = AssertTrue<
+  AssertEqual<z.infer<typeof filmGrainEffectConfigSchema>, FilmGrainEffectConfig>
+>;
+
+/** A lens distortion pass, mirroring `LensDistortionEffectConfig`. */
+export const lensDistortionEffectConfigSchema = z.strictObject({
+  type: z.literal("lensDistortion"),
+  amount: z
+    .number()
+    .optional()
+    .describe("Distortion strength: positive bulges outward (barrel), negative pinches inward (pincushion), 0 is a no-op. Defaults to 0."),
+});
+
+type _CheckLensDistortionEffectConfig = AssertTrue<
+  AssertEqual<z.infer<typeof lensDistortionEffectConfigSchema>, LensDistortionEffectConfig>
+>;
+
 /**
  * One configured entry in `compositionPostProcessingSchema.effects`, mirroring
- * `PostEffectConfig`. A discriminated union on `type` with exactly one
- * variant today (`sharpenEffectConfigSchema`); Phase 59 onward appends one
- * more variant per new cinematic effect.
+ * `PostEffectConfig`. A discriminated union on `type`, growing by one variant
+ * per effect Phase 59 onward adds.
  */
-export const postEffectConfigSchema = z.discriminatedUnion("type", [sharpenEffectConfigSchema]);
+export const postEffectConfigSchema = z.discriminatedUnion("type", [
+  sharpenEffectConfigSchema,
+  bloomEffectConfigSchema,
+  depthOfFieldEffectConfigSchema,
+  chromaticAberrationEffectConfigSchema,
+  vignetteEffectConfigSchema,
+  filmGrainEffectConfigSchema,
+  lensDistortionEffectConfigSchema,
+]);
 
 type _CheckPostEffectConfig = AssertTrue<AssertEqual<z.infer<typeof postEffectConfigSchema>, PostEffectConfig>>;
 
