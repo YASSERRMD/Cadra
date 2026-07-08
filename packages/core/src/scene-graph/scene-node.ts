@@ -13,7 +13,16 @@ import type { AnimatableTransform, ColorRGBA, Vector3 } from "./primitives.js";
  * resolved tree in at this point.
  */
 export type SceneNodeKind =
-  "group" | "mesh" | "camera" | "light" | "text" | "image" | "video" | "compositionRef" | "satori";
+  | "group"
+  | "mesh"
+  | "camera"
+  | "light"
+  | "text"
+  | "image"
+  | "video"
+  | "compositionRef"
+  | "satori"
+  | "particles";
 
 /**
  * Fields shared by every scene node, regardless of kind.
@@ -831,6 +840,124 @@ export interface SatoriNode extends SceneNodeBase<"satori"> {
 }
 
 /**
+ * Where new particles are spawned, in the `ParticleSystemNode`'s own local
+ * space (before its `transform` is applied). Mirrors `ColliderConfig`'s own
+ * "simple analytic shape" precedent: exact, cheap to sample on a GPU or on
+ * the CPU fallback, not derived from any authored render geometry.
+ */
+export type ParticleEmitterShape =
+  | { type: "point" }
+  | { type: "box"; halfExtents: Vector3 }
+  | { type: "sphere"; radius: number }
+  | { type: "cone"; radius: number; angle: number };
+
+/**
+ * A continuous force applied to every live particle each simulated step, in
+ * world space. `curlNoise` and `vortex` add swirling, turbulent motion
+ * without needing per-particle authored paths; `drag` opposes a particle's
+ * own velocity, proportional to its own speed.
+ */
+export type ParticleForceConfig =
+  | { type: "gravity"; acceleration: Vector3 }
+  | { type: "drag"; coefficient: number }
+  | { type: "curlNoise"; strength: number; frequency: number; speed?: number }
+  | { type: "vortex"; origin: Vector3; axis: Vector3; strength: number };
+
+/**
+ * A simple analytic collision surface live particles bounce or slide off.
+ * Mirrors `ColliderConfig`'s own precedent exactly: an exact simple shape the
+ * particle simulation tests against directly, not derived from any mesh's
+ * render geometry.
+ */
+export type ParticleColliderConfig =
+  | { type: "groundPlane"; y: number; bounce?: number }
+  | { type: "sphere"; center: Vector3; radius: number; bounce?: number };
+
+/** One stop in a `ParticleSystemNode.colorOverLife` gradient. */
+export interface ParticleColorStop {
+  /** Position within the particle's own lifetime, `0` (birth) to `1` (death). */
+  time: number;
+  color: ColorRGBA;
+}
+
+/** One stop in a `ParticleSystemNode.sizeOverLife` curve. */
+export interface ParticleSizeStop {
+  /** Position within the particle's own lifetime, `0` (birth) to `1` (death). */
+  time: number;
+  /** Size multiplier at this point in the particle's lifetime, applied on top of `startSize`/`sizeVariance`. */
+  size: number;
+}
+
+/**
+ * How a particle's own pixels combine with whatever is already composited
+ * beneath it. `'additive'` suits sparks, fire, and other light-emitting
+ * particles (overlapping particles brighten rather than occlude each other);
+ * `'normal'` suits opaque dust, smoke, or debris.
+ */
+export type ParticleBlendMode = "normal" | "additive";
+
+/**
+ * A GPU-simulated particle emitter (Phase 67), driven by `@cadra/particles`
+ * on a WebGPU-compute path (large counts, GPU-resident state) or a CPU
+ * simulation of the identical rules on the WebGL2 fallback (see
+ * `@cadra/particles`'s own doc for why the two are separate implementations
+ * rather than one shared code path, mirroring `MotionBlurEffectConfig`'s own
+ * "WebGPU-only technique, no hand-rollable classic-WebGLRenderer equivalent"
+ * precedent for *how* the fallback differs, while still deterministically
+ * simulating the same authored rules).
+ *
+ * Every particle spawned by one `ParticleSystemNode` shares this single
+ * config; a scene with visually distinct particle populations (e.g. sparks
+ * and smoke together) uses one `ParticleSystemNode` per population, exactly
+ * like a scene with differently lit objects uses one `LightNode` per light.
+ *
+ * All stochastic behavior (spawn position/velocity jitter within `shape`,
+ * `lifetimeVarianceSeconds`, `sizeVariance`) is seeded deterministically from
+ * the composition's own frame seed (base Phase 3), this node's own `id` and
+ * `seed`, and each particle's own slot index - so the exact same particle
+ * state results for a given frame no matter how many times, or in what
+ * order, it is evaluated.
+ */
+export interface ParticleSystemNode extends SceneNodeBase<"particles"> {
+  /** Fixed size of this emitter's particle pool. Bounds both the GPU storage-buffer size and the WebGL2 fallback's typed-array size; never exceeded regardless of `emissionRate`. */
+  maxParticles: number;
+  /** Average number of particles spawned per second, while this node is visible. */
+  emissionRate: number;
+  /** Where within this node's own local space newly spawned particles appear. */
+  shape: ParticleEmitterShape;
+  /** How long a particle lives after spawning, in seconds, before it is recycled. */
+  lifetimeSeconds: number;
+  /** Randomizes `lifetimeSeconds` by up to this many seconds, applied symmetrically. Defaults to `0` (every particle lives exactly `lifetimeSeconds`). */
+  lifetimeVarianceSeconds?: number;
+  /** Speed newly spawned particles move at, in scene units per second, along `direction` (jittered by `spreadAngle`). */
+  initialSpeed: number;
+  /** Randomizes `initialSpeed` by up to this fraction (`0` to `1`) of its own value. Defaults to `0` (every particle spawns at exactly `initialSpeed`). */
+  initialSpeedVariance?: number;
+  /** The nominal direction newly spawned particles move in, in this node's own local space. Need not be a unit vector; only its direction is used. */
+  direction: Vector3;
+  /** Half-angle, in radians, of the cone around `direction` a spawned particle's initial velocity is randomized within. Defaults to `0` (every particle spawns moving exactly along `direction`). */
+  spreadAngle?: number;
+  /** Sprite size a particle spawns at, in scene units, before `sizeOverLife` is applied. */
+  startSize: number;
+  /** Randomizes `startSize` by up to this fraction (`0` to `1`) of its own value. Defaults to `0`. */
+  sizeVariance?: number;
+  /** Forces applied to every live particle each simulated step. Defaults to no forces (particles travel in a straight line at their own spawn velocity). */
+  forces?: readonly ParticleForceConfig[];
+  /** Simple analytic colliders live particles test against each simulated step. Defaults to none. */
+  colliders?: readonly ParticleColliderConfig[];
+  /** Color across a particle's own lifetime, interpolated linearly between stops sorted by `time`. Defaults to opaque white for the whole lifetime. */
+  colorOverLife?: readonly ParticleColorStop[];
+  /** Size multiplier across a particle's own lifetime, interpolated linearly between stops sorted by `time`. Defaults to a constant `1` for the whole lifetime. */
+  sizeOverLife?: readonly ParticleSizeStop[];
+  /** Id of a texture asset resolved against a texture registry by the renderer, mapped onto each particle's own sprite quad. Omitted means a plain soft circular sprite. */
+  textureRef?: string;
+  /** Defaults to `'normal'`. */
+  blendMode?: ParticleBlendMode;
+  /** Combined with the composition's own frame seed and this node's own `id` to derive this emitter's deterministic stochastic stream. Only needed to decorrelate two emitters that would otherwise share every other seed input; defaults to `0`. */
+  seed?: number;
+}
+
+/**
  * A node in the scene graph, discriminated on `kind`. Every variant is a
  * strict, closed shape: none of them carry a catch-all index signature, so
  * accessing a field not declared for the current `kind` is a compile error
@@ -845,4 +972,5 @@ export type SceneNode =
   | ImageNode
   | VideoNode
   | CompositionRefNode
-  | SatoriNode;
+  | SatoriNode
+  | ParticleSystemNode;

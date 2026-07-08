@@ -2,6 +2,7 @@ export {
   CAMERA_ANIMATABLE_PROPERTIES,
   IMAGE_ANIMATABLE_PROPERTIES,
   LIGHT_ANIMATABLE_PROPERTIES,
+  PARTICLES_ANIMATABLE_PROPERTIES,
   SATORI_ANIMATABLE_PROPERTIES,
   SHAPE_ANIMATABLE_PROPERTIES,
   TEXT_ANIMATABLE_PROPERTIES,
@@ -17,6 +18,8 @@ export type { LightProps } from "./light.js";
 export { Light } from "./light.js";
 export type { ResolvedMeshMaterial } from "./material.js";
 export { PBR_PRESETS, resolveMeshMaterial } from "./material.js";
+export type { ParticlesProps } from "./particles.js";
+export { Particles } from "./particles.js";
 export { POST_PROCESSING_LOOK_PRESETS } from "./post-processing-presets.js";
 export type { SatoriProps } from "./satori.js";
 export { Satori } from "./satori.js";
