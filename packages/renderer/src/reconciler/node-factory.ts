@@ -534,6 +534,22 @@ function applyPbrMaterial(
   material.clearcoat = resolved.clearcoat;
   material.clearcoatRoughness = resolved.clearcoatRoughness;
 
+  // transmission/sheen need no needsUpdate dance, exactly like clearcoat
+  // above: Three.js's own MeshPhysicalMaterial setters bump the material's
+  // version when either crosses the zero threshold, and WebGLRenderer's
+  // getProgram() recomputes its shader-variant cache key from live material
+  // state on every render call (verified against this project's installed
+  // three@0.185.1 source, MeshPhysicalMaterial.js and WebGLPrograms.js) -
+  // the same live-detection path already relied on for clearcoat.
+  material.transmission = resolved.transmission;
+  material.ior = resolved.ior;
+  material.thickness = resolved.thickness;
+
+  material.sheen = resolved.sheen;
+  material.sheenRoughness = resolved.sheenRoughness;
+  const [shr, shg, shb] = resolveSceneColor(resolved.sheenColor, ctx.whiteBalanceGain);
+  material.sheenColor.setRGB(shr, shg, shb);
+
   const normalMap =
     resolved.normalMapRef !== undefined ? (ctx.textureRegistry?.resolve(resolved.normalMapRef) ?? null) : null;
   const aoMap = resolved.aoMapRef !== undefined ? (ctx.textureRegistry?.resolve(resolved.aoMapRef) ?? null) : null;
