@@ -8,11 +8,13 @@ import {
   type SceneNode,
   type TextPhysicsConfig,
   type TextStaggerConfig,
+  type VolumeNode,
 } from "@cadra/core";
 import type { PhysicsTransform } from "@cadra/physics";
 import type { RasterizedSvg } from "@cadra/svg-raster";
 import type { TextRenderData } from "@cadra/text";
 import * as THREE from "three";
+import { VolumeNodeMaterial } from "three/webgpu";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -1030,6 +1032,112 @@ describe("node-factory: PBR advanced materials (Phase 64)", () => {
     expect(metalMaterial.transmission).toBe(0);
     expect(glassMaterial.transmission).toBe(1);
     expect(glassMaterial.metalness).toBe(0);
+  });
+});
+
+/** A minimal, valid `VolumeNode`, with any given field overridden. */
+function volumeNode(overrides: Partial<VolumeNode> = {}): VolumeNode {
+  return {
+    id: "volume-1",
+    kind: "volume",
+    transform: createIdentityTransform(),
+    visible: true,
+    children: [],
+    shape: { type: "sphere", radius: 1 },
+    color: [1, 1, 1, 1],
+    density: 1,
+    ...overrides,
+  };
+}
+
+/** Mirrors `VolumeUniforms` (private to node-factory.ts): the shape stashed on `VolumeNodeMaterial.userData.volumeUniforms`, read back here only to assert `applyVolumeProperties` mutated the right values. */
+interface TestVolumeUniforms {
+  colorR: { value: number };
+  colorG: { value: number };
+  colorB: { value: number };
+  densityMultiplier: { value: number };
+  drift: { value: number };
+}
+
+describe("node-factory: volumetric smoke (Phase 68)", () => {
+  it("renders an empty group with no owned resources on the WebGL2 backend (silent no-op)", () => {
+    const ctx: NodeFactoryContext = { ...makeCtx(), backend: "webgl2" };
+    const built = createThreeObject(volumeNode(), ctx);
+    expect(built.object3D).toBeInstanceOf(THREE.Group);
+    expect((built.object3D as THREE.Group).children.length).toBe(0);
+    expect(built.owned).toBeUndefined();
+  });
+
+  it("also renders an empty group when the backend is not yet known (undefined, before init() resolves)", () => {
+    const ctx = makeCtx();
+    const built = createThreeObject(volumeNode(), ctx);
+    expect(built.object3D).toBeInstanceOf(THREE.Group);
+    expect(built.owned).toBeUndefined();
+  });
+
+  it("builds a real raymarched mesh with a box geometry sized from halfExtents, on the WebGPU backend", () => {
+    const ctx: NodeFactoryContext = { ...makeCtx(), backend: "webgpu" };
+    const node = volumeNode({ shape: { type: "box", halfExtents: [2, 3, 4] } });
+    const built = createThreeObject(node, ctx);
+
+    expect(built.object3D).toBeInstanceOf(THREE.Mesh);
+    const mesh = built.object3D as THREE.Mesh;
+    expect(mesh.material).toBeInstanceOf(VolumeNodeMaterial);
+    const geometry = mesh.geometry as THREE.BoxGeometry;
+    expect(geometry.parameters.width).toBe(4);
+    expect(geometry.parameters.height).toBe(6);
+    expect(geometry.parameters.depth).toBe(8);
+    expect(built.owned?.volume?.geometry).toBe(mesh.geometry);
+    expect(built.owned?.volume?.material).toBe(mesh.material);
+  });
+
+  it("builds a sphere geometry sized from radius, for a sphere shape", () => {
+    const ctx: NodeFactoryContext = { ...makeCtx(), backend: "webgpu" };
+    const node = volumeNode({ shape: { type: "sphere", radius: 2.5 } });
+    const built = createThreeObject(node, ctx);
+    const geometry = (built.object3D as THREE.Mesh).geometry as THREE.SphereGeometry;
+    expect(geometry.parameters.radius).toBe(2.5);
+  });
+
+  it("defaults raymarchSteps to 25 and applies an explicit value onto the material", () => {
+    const ctx: NodeFactoryContext = { ...makeCtx(), backend: "webgpu" };
+    const defaultMesh = createThreeObject(volumeNode(), ctx).object3D as THREE.Mesh;
+    expect((defaultMesh.material as VolumeNodeMaterial).steps).toBe(25);
+
+    const customMesh = createThreeObject(volumeNode({ raymarchSteps: 40 }), ctx).object3D as THREE.Mesh;
+    expect((customMesh.material as VolumeNodeMaterial).steps).toBe(40);
+  });
+
+  it("resolves color and density (scaled by the color's own alpha) onto the material's mutable uniforms", () => {
+    const ctx: NodeFactoryContext = { ...makeCtx(), backend: "webgpu", fps: 30 };
+    const node = volumeNode({ color: [1, 1, 1, 0.5], density: 2 });
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+
+    const uniforms = built.owned?.volume?.material.userData.volumeUniforms as TestVolumeUniforms;
+    expect(uniforms.colorR.value).toBeCloseTo(1);
+    expect(uniforms.colorG.value).toBeCloseTo(1);
+    expect(uniforms.colorB.value).toBeCloseTo(1);
+    // density(2) * the color's own alpha(0.5)
+    expect(uniforms.densityMultiplier.value).toBeCloseTo(1);
+  });
+
+  it("advances the drift uniform from driftSpeed (authored in units per second) and the composition's own fps", () => {
+    const ctx: NodeFactoryContext = { ...makeCtx(), backend: "webgpu", fps: 20 };
+    const node = volumeNode({ driftSpeed: 4 });
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 40, built.owned);
+
+    const uniforms = built.owned?.volume?.material.userData.volumeUniforms as TestVolumeUniforms;
+    // 4 units/sec * (40 frames / 20 fps) = 8
+    expect(uniforms.drift.value).toBeCloseTo(8);
+  });
+
+  it("does not throw applying properties against the WebGL2 fallback's empty group (no owned.volume at all)", () => {
+    const ctx: NodeFactoryContext = { ...makeCtx(), backend: "webgl2" };
+    const node = volumeNode();
+    const built = createThreeObject(node, ctx);
+    expect(() => applyNodeProperties(node, built.object3D, ctx, 5, built.owned)).not.toThrow();
   });
 });
 
