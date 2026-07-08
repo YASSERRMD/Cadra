@@ -693,6 +693,41 @@
                   "effects"
                 ],
                 "additionalProperties": false
+              },
+              "renderMode": {
+                "description": "Optional render mode override. Defaults to 'raster'.",
+                "type": "string",
+                "enum": [
+                  "raster",
+                  "pathTraced"
+                ]
+              },
+              "pathTracing": {
+                "description": "Optional path-traced render tuning, read only when renderMode is 'pathTraced'.",
+                "type": "object",
+                "properties": {
+                  "tier": {
+                    "description": "Trades render cost against fidelity for samples's own default. Defaults to 'final'.",
+                    "type": "string",
+                    "enum": [
+                      "preview",
+                      "final"
+                    ]
+                  },
+                  "samples": {
+                    "description": "Samples accumulated per output frame. Higher is cleaner and slower. Tier-dependent default when omitted.",
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "bounces": {
+                    "description": "Maximum light bounce depth. Higher resolves more indirect light and reflections at a higher cost. Defaults to 5.",
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "additionalProperties": false
               }
             },
             "required": [

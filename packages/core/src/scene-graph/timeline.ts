@@ -204,6 +204,52 @@ export interface Composition {
    * renderer draws exactly as it did before Phase 58, byte for byte.
    */
   postProcessing?: CompositionPostProcessing;
+  /**
+   * Selects the render mode for this composition's own final output:
+   * `"raster"` (the default, and always what preview uses regardless of
+   * this field - see `CompositionRenderMode`'s own doc) or `"pathTraced"`
+   * (real path-traced global illumination, soft shadows, and reflections,
+   * via `@cadra/pathtracer`, sharing this exact same scene graph -
+   * materials, lights, and `environment` - unchanged). Fixed for the
+   * composition's entire length, exactly like `colorGrading` (see that
+   * field's own doc for why). Omitted means `"raster"`.
+   */
+  renderMode?: CompositionRenderMode;
+  /**
+   * Path-traced render tuning, read only when `renderMode` is
+   * `"pathTraced"`. Fixed for the composition's entire length, exactly like
+   * `colorGrading`. Omitted means every field's own default (see
+   * `PathTracingConfig`'s own doc).
+   */
+  pathTracing?: PathTracingConfig;
+}
+
+/**
+ * Which renderer produces a composition's own final output.
+ * `"raster"` is the fast rasterizer this whole engine already uses (and
+ * always what preview uses, regardless of a composition's own
+ * `renderMode` - path tracing is comfortably too slow for interactive
+ * scrubbing). `"pathTraced"` is `@cadra/pathtracer`'s own offline,
+ * sample-accumulating renderer, sharing the identical scene graph -
+ * geometry, PBR materials (`MeshMaterialConfig`), lights, and
+ * `CompositionEnvironment` - so a path-traced final looks like a
+ * physically-correct upgrade of the same raster preview, not a
+ * different scene.
+ */
+export type CompositionRenderMode = "raster" | "pathTraced";
+
+/**
+ * Path-traced render tuning for `Composition.pathTracing`, read only when
+ * `Composition.renderMode` is `"pathTraced"`. See `CompositionColorGrading`'s
+ * own doc for why this is a fixed, non-`Property<T>` setting.
+ */
+export interface PathTracingConfig {
+  /** Trades render cost against fidelity for `samples`'s own default (see `resolveSampleBudgetForTier` in `@cadra/pathtracer`). Defaults to `"final"`. */
+  tier?: RenderQualityTier;
+  /** Samples accumulated per output frame. Higher is cleaner and slower. Tier-dependent default (see `resolveSampleBudgetForTier`) when omitted. */
+  samples?: number;
+  /** Maximum light bounce depth. Higher resolves more indirect light and reflections at a higher cost. Defaults to `5`. */
+  bounces?: number;
 }
 
 /**

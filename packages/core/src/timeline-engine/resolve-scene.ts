@@ -117,6 +117,8 @@ function resolveComposition(
     ...(composition.environment !== undefined && { environment: composition.environment }),
     ...(composition.shadowQuality !== undefined && { shadowQuality: composition.shadowQuality }),
     ...(composition.postProcessing !== undefined && { postProcessing: composition.postProcessing }),
+    ...(composition.renderMode !== undefined && { renderMode: composition.renderMode }),
+    ...(composition.pathTracing !== undefined && { pathTracing: composition.pathTracing }),
   };
 }
 

@@ -40,7 +40,7 @@ describe("createComposition", () => {
     expect(composition.tracks).toEqual(tracks);
   });
 
-  it("omits activeCameraTrack, audioTracks, colorGrading, environment, shadowQuality, and postProcessing entirely when not provided", () => {
+  it("omits activeCameraTrack, audioTracks, colorGrading, environment, shadowQuality, postProcessing, renderMode, and pathTracing entirely when not provided", () => {
     const composition = createComposition({
       id: "comp-1",
       name: "Main",
@@ -56,6 +56,8 @@ describe("createComposition", () => {
     expect("environment" in composition).toBe(false);
     expect("shadowQuality" in composition).toBe(false);
     expect("postProcessing" in composition).toBe(false);
+    expect("renderMode" in composition).toBe(false);
+    expect("pathTracing" in composition).toBe(false);
   });
 
   it("preserves activeCameraTrack when provided", () => {
@@ -157,5 +159,23 @@ describe("createComposition", () => {
     });
 
     expect(composition.postProcessing).toEqual(postProcessing);
+  });
+
+  it("preserves renderMode and pathTracing when provided", () => {
+    const pathTracing = { tier: "final" as const, samples: 256, bounces: 6 };
+
+    const composition = createComposition({
+      id: "comp-1",
+      name: "Main",
+      fps: 30,
+      durationInFrames: 300,
+      width: 1920,
+      height: 1080,
+      renderMode: "pathTraced",
+      pathTracing,
+    });
+
+    expect(composition.renderMode).toBe("pathTraced");
+    expect(composition.pathTracing).toEqual(pathTracing);
   });
 });
