@@ -88,8 +88,8 @@ export type { LoadAudioDependencies, LoadedAudio } from "./assets/audio-loader.j
 export { loadAudio } from "./assets/audio-loader.js";
 export type { LoadedFont, LoadFontDependencies } from "./assets/font-loader.js";
 export { loadFont } from "./assets/font-loader.js";
-export type { GltfAsset, LoadedGltf, LoadGltfDependencies } from "./assets/gltf-loader.js";
-export { loadGltf } from "./assets/gltf-loader.js";
+export type { GltfAsset, LoadedGltf, LoadGltfDependencies, ParseGltf } from "./assets/gltf-loader.js";
+export { createDefaultParseGltf, loadGltf } from "./assets/gltf-loader.js";
 export type { DecodeImage, LoadedImage, LoadImageDependencies } from "./assets/image-loader.js";
 export { loadImage } from "./assets/image-loader.js";
 export { renderWhenAssetsReady } from "./assets/render-when-ready.js";

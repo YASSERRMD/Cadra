@@ -25,10 +25,12 @@ export type { LoadAudioDependencies, LoadedAudio } from "./audio-loader.js";
 export { loadAudio } from "./audio-loader.js";
 export type { LoadedFont, LoadFontDependencies } from "./font-loader.js";
 export { loadFont } from "./font-loader.js";
-export type { GltfAsset, LoadedGltf, LoadGltfDependencies } from "./gltf-loader.js";
-export { loadGltf } from "./gltf-loader.js";
+export type { GltfAsset, LoadedGltf, LoadGltfDependencies, ParseGltf } from "./gltf-loader.js";
+export { createDefaultParseGltf, loadGltf } from "./gltf-loader.js";
 export type { DecodeImage, LoadedImage, LoadImageDependencies } from "./image-loader.js";
 export { loadImage } from "./image-loader.js";
+export type { LoadedModel, ModelRegistry, MutableModelRegistry } from "./model-registry.js";
+export { createDefaultModelRegistry, createInMemoryModelRegistry } from "./model-registry.js";
 export { renderWhenAssetsReady } from "./render-when-ready.js";
 export type { FetchBytes, LoadedAsset } from "./types.js";
 export type {
