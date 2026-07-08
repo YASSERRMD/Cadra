@@ -593,6 +593,12 @@
                       ]
                     },
                     "description": "The effect stack, applied in array order within each effect's own fixed pre/post-tonemap stage. An empty array is a no-op."
+                  },
+                  "sampleCount": {
+                    "description": "Sub-pixel-jittered camera samples accumulated into each output frame, rounded up to the nearest power of two, one to 32. Omitted or 1 means no accumulation.",
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   }
                 },
                 "required": [

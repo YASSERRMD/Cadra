@@ -571,6 +571,14 @@ export const compositionPostProcessingSchema = z.strictObject({
   effects: z
     .array(postEffectConfigSchema)
     .describe("The effect stack, applied in array order within each effect's own fixed pre/post-tonemap stage. An empty array is a no-op."),
+  sampleCount: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      "Sub-pixel-jittered camera samples accumulated into each output frame, rounded up to the nearest power of two, one to 32. Omitted or 1 means no accumulation.",
+    ),
 });
 
 type _CheckCompositionPostProcessing = AssertTrue<
