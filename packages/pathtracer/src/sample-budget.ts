@@ -33,6 +33,7 @@ export interface ResolvedPathTracingConfig {
   tier: RenderQualityTier;
   samples: number;
   bounces: number;
+  denoise: boolean;
 }
 
 /**
@@ -48,5 +49,6 @@ export function resolvePathTracingConfig(config: PathTracingConfig | undefined):
     tier,
     samples: resolveSampleBudgetForTier(tier, config?.samples),
     bounces: config?.bounces ?? DEFAULT_BOUNCES,
+    denoise: config?.denoise ?? false,
   };
 }

@@ -27,6 +27,7 @@ describe("resolvePathTracingConfig", () => {
       tier: "final",
       samples: 256,
       bounces: 5,
+      denoise: false,
     });
   });
 
@@ -35,6 +36,7 @@ describe("resolvePathTracingConfig", () => {
       tier: "final",
       samples: 256,
       bounces: 5,
+      denoise: false,
     });
   });
 
@@ -43,14 +45,16 @@ describe("resolvePathTracingConfig", () => {
       tier: "preview",
       samples: 16,
       bounces: 5,
+      denoise: false,
     });
   });
 
   it("preserves fully authored values unchanged", () => {
-    expect(resolvePathTracingConfig({ tier: "preview", samples: 8, bounces: 3 })).toEqual({
+    expect(resolvePathTracingConfig({ tier: "preview", samples: 8, bounces: 3, denoise: true })).toEqual({
       tier: "preview",
       samples: 8,
       bounces: 3,
+      denoise: true,
     });
   });
 });
