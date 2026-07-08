@@ -14,31 +14,43 @@ const TARGET_FRAME = 1;
  * A box sweeping across five frames, staying on-screen for the whole sweep,
  * with `motionBlur` configured at a high shutter angle.
  *
- * **Known gap, not yet fixed (tracked separately, out of this phase's own
- * scope):** verified directly while building this harness, with a real
- * pixel-level A/B comparison (this same scene rendered with `motionBlur`
- * left in vs. stripped out) via *both* `createNativeGpuHeadlessRenderer`
- * and a real headless-Chromium page, that `motionBlur` currently produces
- * *zero* pixel difference either way. The wiring this scene exercises
- * (`isPreTonemapEffect`/`buildWebGpuPipeline`'s velocity-MRT setup in
- * `@cadra/renderer`, `computeMotionBlurVelocityScale`) all checks out
- * structurally; no existing test anywhere in this codebase (including
- * `buildProjectWithMotionBlur` in `@cadra/encode`'s own e2e suite) actually
- * asserts a visible blur streak - every one only asserts the render
- * completes and produces validly-shaped output, which is exactly why this
- * gap went unnoticed until this harness's own rigorous same-scene
- * with/without comparison. Root-causing this needs deeper runtime
- * instrumentation of Three.js's own WebGPU node-update scheduling
- * (`VelocityNode`'s `update`/`updateAfter` hooks), out of scope for this
- * harness itself to fix.
+ * **Root-caused and fixed.** An earlier version of this doc reported that a
+ * real pixel-level A/B comparison (this same scene rendered with
+ * `motionBlur` left in vs. stripped out) showed *zero* difference through
+ * both this harness's drivers. That comparison was re-run with more direct
+ * instrumentation (visualizing the raw velocity MRT buffer, then a
+ * hardcoded, non-velocity UV offset on an unrelated effect as a control) and
+ * the "through both drivers" half of that claim does not hold:
  *
- * This scene is kept in the curated set anyway (as `driver:
- * "nativeGpuHeadless"`, the simpler/faster of the two drivers, since
- * neither shows the effect): it still renders a real, deterministic frame
- * worth protecting from *further* regression (a crash, a blank frame, or
- * `postProcessing` silently getting dropped entirely), and its own
- * reference will need to be regenerated the moment this known gap is
- * actually fixed.
+ * - The velocity MRT buffer itself is genuinely non-zero for this scene's
+ *   moving box (`VelocityNode`'s per-object previous/current world-matrix
+ *   tracking works correctly): confirmed by rendering `scaledVelocity`
+ *   directly as the pipeline's own output.
+ * - Through `driver: "browser"` (a real headless-Chromium page), the exact
+ *   same unmodified `@cadra/renderer` pipeline code produces a real,
+ *   substantial difference between this scene rendered with `motionBlur`
+ *   left in vs. stripped out - a genuine blur streak, not a rounding-level
+ *   difference. `motionBlur` was never broken in `@cadra/renderer` itself.
+ * - Through `driver: "nativeGpuHeadless"` (`createNativeGpuHeadlessRenderer`,
+ *   an experimental, opt-in, no-browser research spike - see that
+ *   function's own doc in `@cadra/headless`), a `.sample()` call at *any*
+ *   arbitrary UV offset - not just a velocity-derived one; a hardcoded,
+ *   effect-unrelated offset on `sharpen`'s own sampling reproduces it
+ *   identically - silently samples as if no offset were given at all. This
+ *   is a limitation of that experimental renderer (or the native `webgpu`
+ *   package's Dawn binding underneath it), not of this scene, `motionBlur`,
+ *   or any other effect's own TSL logic.
+ *
+ * This scene now uses `driver: "browser"` (see `GoldenSceneDriver`'s own
+ * doc), the driver proven to actually exercise `motionBlur` correctly; its
+ * real-render coverage and blur-streak verification live in
+ * `render-browser-scene.e2e.test.ts` alongside the path-traced scene's own.
+ * The deeper `nativeGpuHeadless` arbitrary-UV-sampling limitation is tracked
+ * separately (it may silently affect how much `post-processing-scene.ts`'s
+ * own `nativeGpuHeadless`-driven effects are really proven to do, beyond
+ * "renders something non-blank") - not blocking this fix, since that scene
+ * was never relied on as its effects' own correctness proof in the first
+ * place (see its own doc comment).
  */
 function buildProject() {
   const camera = Camera({
@@ -95,7 +107,7 @@ function buildProject() {
 
 export const motionBlurScene: GoldenScene = {
   name: "motion-blur",
-  driver: "nativeGpuHeadless",
+  driver: "browser",
   buildProject,
   compositionId: "comp-motion-blur",
   frame: TARGET_FRAME,

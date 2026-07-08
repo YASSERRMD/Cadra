@@ -5,7 +5,6 @@ import { renderRasterGoldenScene } from "./render-raster-scene.js";
 import {
   lightingScene,
   materialsScene,
-  motionBlurScene,
   postProcessingScene,
   textFontkitScene,
   textOpentypeScene,
@@ -32,13 +31,12 @@ function countNonBlankPixels(data: Uint8ClampedArray): number {
  * "renders a real scene" coverage, just driven through this harness's own
  * curated scene registry instead of a one-off inline scene.
  *
- * `pathTracedScene` is deliberately not covered here: it is `driver:
- * "browser"` (see `GoldenSceneDriver`'s own doc for why - path tracing has
- * no native-GPU-headless path at all), so its real-render coverage lives in
- * `render-browser-scene.e2e.test.ts` instead. `motionBlurScene` *is*
- * covered here like any other `nativeGpuHeadless` scene (it renders
- * successfully and deterministically; see that scene's own doc for the
- * separately-tracked, currently-invisible `motionBlur` effect itself).
+ * `pathTracedScene` and `motionBlurScene` are deliberately not covered here:
+ * both are `driver: "browser"` (see `GoldenSceneDriver`'s own doc - path
+ * tracing has no native-GPU-headless path at all, and `motionBlurScene`
+ * needs a real browser for its own `.sample()`-at-an-offset post-processing
+ * to actually take effect; see that scene's own doc), so their real-render
+ * coverage lives in `render-browser-scene.e2e.test.ts` instead.
  *
  * Every test below skips cleanly (an early `return` inside a passing test,
  * not `it.skip`) when no real native WebGPU device can be acquired at all,
@@ -53,7 +51,6 @@ describe("renderRasterGoldenScene: real native GPU renders (no browser)", () => 
     ["materials", materialsScene],
     ["lighting", lightingScene],
     ["post-processing", postProcessingScene],
-    ["motion-blur", motionBlurScene],
   ] as const)("renders %s to a non-blank PixelBuffer at the scene's own size", async (_label, scene) => {
     if (!(await nativeGpuAvailable)) {
       return;
