@@ -307,6 +307,9 @@ importers:
       '@cadra/core':
         specifier: workspace:*
         version: link:../core
+      '@cadra/pathtracer':
+        specifier: workspace:*
+        version: link:../pathtracer
       '@cadra/satori-layer':
         specifier: workspace:*
         version: link:../satori-layer

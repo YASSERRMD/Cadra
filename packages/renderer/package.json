@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@cadra/core": "workspace:*",
+    "@cadra/pathtracer": "workspace:*",
     "@cadra/satori-layer": "workspace:*",
     "@cadra/svg-raster": "workspace:*",
     "@cadra/text": "workspace:*",

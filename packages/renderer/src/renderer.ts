@@ -67,8 +67,15 @@ export interface Renderer {
    * output from `@cadra/core`) as evaluated at `frameContext`. Pure with
    * respect to its arguments: no hidden state influences the result, and
    * this method never advances any clock of its own.
+   *
+   * Returns `void` for every ordinary (raster) implementation, exactly as
+   * before. `Promise<void>` is a legal return too - mirroring `init`'s own
+   * `Promise<void> | void` - for an implementation whose `sceneState.renderMode`
+   * requires awaiting real GPU work (`PixelReadableRenderer`'s own
+   * `renderFrame`, when path tracing); every caller awaits the result
+   * defensively, which is a no-op for a `void`-returning implementation.
    */
-  renderFrame(sceneState: SceneState, frameContext: FrameContext): void;
+  renderFrame(sceneState: SceneState, frameContext: FrameContext): Promise<void> | void;
   /** Resizes the render target. Safe to call any number of times after `init`. */
   resize(size: RenderSize): void;
   /** Releases GPU resources held by this renderer. Not safe to use afterward. */

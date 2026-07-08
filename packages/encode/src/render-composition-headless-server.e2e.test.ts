@@ -267,6 +267,53 @@ function buildProjectWithAccumulation(): Project {
 }
 
 /**
+ * `buildProject`'s own scene, rendered path-traced instead of raster (Phase
+ * 65): same composition id, same duration/fps/size, same tracks - only
+ * `renderMode`/`pathTracing` differ from `buildProject()`'s own output. This
+ * is exactly the "identical scene graph, different render mode" claim
+ * `CompositionRenderMode`'s own doc (`@cadra/core`) makes, and what this
+ * test compares against a raster render of the same `buildProject()` scene.
+ *
+ * `samples: 2, bounces: 1` (well below `resolveSampleBudgetForTier`'s own
+ * 256-sample "final" default in `@cadra/pathtracer`): this test only needs
+ * to prove the path-traced pipeline runs end to end and produces a
+ * container with matching timing, not a converged, noise-free image -
+ * keeping a real headless-browser path-traced render (BVH build, shader
+ * compilation, actual sampling) fast enough for this suite.
+ */
+function buildProjectWithPathTracing(): Project {
+  const project = buildProject();
+  const composition = project.compositions[0];
+  if (composition === undefined) {
+    throw new Error("buildProject() always returns a project with exactly one composition.");
+  }
+
+  const withPathTracing: Composition = {
+    ...composition,
+    renderMode: "pathTraced",
+    pathTracing: { samples: 2, bounces: 1 },
+  };
+
+  return { ...project, compositions: [withPathTracing] };
+}
+
+/** `buildProjectWithPathTracing`'s own scene, with denoising (Phase 64) also enabled - exercises `DenoiseMaterial`'s own shader (a distinct GPU code path from the plain path-traced output) end to end in a real browser. */
+function buildProjectWithPathTracingAndDenoise(): Project {
+  const project = buildProjectWithPathTracing();
+  const composition = project.compositions[0];
+  if (composition === undefined) {
+    throw new Error("buildProjectWithPathTracing() always returns a project with exactly one composition.");
+  }
+
+  const withDenoise: Composition = {
+    ...composition,
+    pathTracing: { ...composition.pathTracing, denoise: true },
+  };
+
+  return { ...project, compositions: [withDenoise] };
+}
+
+/**
  * Whether real Chromium is available in this environment: checked
  * synchronously via Playwright's own `chromium.executablePath()` (the exact
  * path Playwright itself would try to launch) plus a filesystem existence
@@ -578,6 +625,131 @@ describe("renderCompositionHeadlessServer: real end-to-end browser render", () =
         for (const outputPath of outputPaths) {
           rmSync(outputPath, { force: true });
         }
+      }
+    },
+    120_000,
+  );
+
+  it(
+    "renders a composition path-traced with matching container timing to the same composition rendered raster (Phase 65)",
+    async () => {
+      if (!chromiumAvailable) {
+        console.log(
+          "renderCompositionHeadlessServer path-traced e2e test: skipping, real Chromium not found (no cached Playwright browser in this environment).",
+        );
+        return;
+      }
+
+      const rasterProject = buildProject();
+      const pathTracedProject = buildProjectWithPathTracing();
+      const outputPaths = {
+        raster: join(tmpdir(), `cadra-headless-e2e-raster-${Date.now()}-${Math.random().toString(36).slice(2)}.mp4`),
+        pathTraced: join(
+          tmpdir(),
+          `cadra-headless-e2e-pathtraced-${Date.now()}-${Math.random().toString(36).slice(2)}.mp4`,
+        ),
+      };
+
+      try {
+        await renderCompositionHeadlessServer({
+          project: rasterProject,
+          compositionId: "comp-1",
+          seed: "e2e-hybrid-seed",
+          format: "mp4",
+          bitrate: 1_000_000,
+          destination: createWriteStream(outputPaths.raster),
+          entryFilePath: BROWSER_HEADLESS_RENDER_ENTRY_PATH,
+          onProgress: () => {},
+          timeoutMs: 45_000,
+          maxAttempts: 1,
+        });
+
+        await renderCompositionHeadlessServer({
+          project: pathTracedProject,
+          compositionId: "comp-1",
+          seed: "e2e-hybrid-seed",
+          format: "mp4",
+          bitrate: 1_000_000,
+          destination: createWriteStream(outputPaths.pathTraced),
+          entryFilePath: BROWSER_HEADLESS_RENDER_ENTRY_PATH,
+          onProgress: () => {},
+          // Real BVH construction, shader compilation, and sampling on top
+          // of the base render this suite's other tests already budget 45s
+          // for - generous, but still a real timeout rather than a hang if
+          // path tracing genuinely cannot complete in this environment.
+          timeoutMs: 90_000,
+          maxAttempts: 1,
+        });
+
+        const rasterBytes = readFileSync(outputPaths.raster);
+        const pathTracedBytes = readFileSync(outputPaths.pathTraced);
+        expect(rasterBytes.byteLength).toBeGreaterThan(0);
+        expect(pathTracedBytes.byteLength).toBeGreaterThan(0);
+
+        // This phase's own acceptance criterion: the identical composition
+        // (same duration/fps, same tracks) previews in raster and exports
+        // path-traced with matching timing - container-level duration/frame
+        // count must agree between the two render modes, exactly like
+        // `expectedMp4DurationTicks` already validates against a single
+        // render's own composition elsewhere in this file.
+        const rasterTimescale = readMp4TrackTimescale(rasterBytes);
+        const pathTracedTimescale = readMp4TrackTimescale(pathTracedBytes);
+        expect(rasterTimescale).toBeGreaterThan(0);
+        expect(pathTracedTimescale).toBeGreaterThan(0);
+        expect(readMp4FragmentedDurationTicks(rasterBytes)).toBe(
+          expectedMp4DurationTicks(DURATION_IN_FRAMES, FPS, rasterTimescale),
+        );
+        expect(readMp4FragmentedDurationTicks(pathTracedBytes)).toBe(
+          expectedMp4DurationTicks(DURATION_IN_FRAMES, FPS, pathTracedTimescale),
+        );
+      } finally {
+        rmSync(outputPaths.raster, { force: true });
+        rmSync(outputPaths.pathTraced, { force: true });
+      }
+    },
+    150_000,
+  );
+
+  it(
+    "renders a path-traced composition with denoising enabled, via a real headless browser",
+    async () => {
+      if (!chromiumAvailable) {
+        console.log(
+          "renderCompositionHeadlessServer path-traced denoise e2e test: skipping, real Chromium not found (no cached Playwright browser in this environment).",
+        );
+        return;
+      }
+
+      const project = buildProjectWithPathTracingAndDenoise();
+      const outputPath = join(
+        tmpdir(),
+        `cadra-headless-e2e-pathtraced-denoise-${Date.now()}-${Math.random().toString(36).slice(2)}.mp4`,
+      );
+
+      try {
+        await renderCompositionHeadlessServer({
+          project,
+          compositionId: "comp-1",
+          seed: "e2e-denoise-seed",
+          format: "mp4",
+          bitrate: 1_000_000,
+          destination: createWriteStream(outputPath),
+          entryFilePath: BROWSER_HEADLESS_RENDER_ENTRY_PATH,
+          onProgress: () => {},
+          timeoutMs: 90_000,
+          maxAttempts: 1,
+        });
+
+        const bytes = readFileSync(outputPath);
+        expect(bytes.byteLength).toBeGreaterThan(0);
+
+        const trackTimescale = readMp4TrackTimescale(bytes);
+        expect(trackTimescale).toBeGreaterThan(0);
+        expect(readMp4FragmentedDurationTicks(bytes)).toBe(
+          expectedMp4DurationTicks(DURATION_IN_FRAMES, FPS, trackTimescale),
+        );
+      } finally {
+        rmSync(outputPath, { force: true });
       }
     },
     120_000,
