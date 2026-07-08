@@ -3,7 +3,9 @@ import type {
   CompositionColorGrading,
   CompositionEnvironment,
   CompositionPostProcessing,
+  CompositionRenderMode,
   CompositionShadowQuality,
+  PathTracingConfig,
 } from "../scene-graph/timeline.js";
 
 /**
@@ -91,4 +93,8 @@ export interface SceneState {
   shadowQuality?: CompositionShadowQuality;
   /** This composition's own `Composition.postProcessing`, unchanged. `undefined` when the composition has none, i.e. no post-processing pipeline at all. */
   postProcessing?: CompositionPostProcessing;
+  /** This composition's own `Composition.renderMode`, unchanged. `undefined` means `"raster"`, the pre-Phase-63 default. */
+  renderMode?: CompositionRenderMode;
+  /** This composition's own `Composition.pathTracing`, unchanged. `undefined` when the composition has none, i.e. every path-tracing field's own default. */
+  pathTracing?: PathTracingConfig;
 }

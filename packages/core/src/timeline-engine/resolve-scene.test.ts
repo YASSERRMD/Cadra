@@ -988,3 +988,54 @@ describe("resolveSceneAtFrame: postProcessing passthrough", () => {
     expect(state.postProcessing).toBeUndefined();
   });
 });
+
+describe("resolveSceneAtFrame: renderMode and pathTracing passthrough", () => {
+  it("carries the composition's own renderMode and pathTracing through unchanged", () => {
+    const shape = Shape({ id: "path-traced-shape" });
+    const pathTracing = { tier: "final" as const, samples: 256, bounces: 6 };
+    const composition = createComposition({
+      id: "comp-path-traced",
+      name: "Path Traced",
+      fps: 30,
+      durationInFrames: 30,
+      width: 100,
+      height: 100,
+      tracks: [
+        {
+          id: "track-content",
+          clips: [Sequence({ id: "clip-content", from: 0, durationInFrames: 30, content: shape })],
+        },
+      ],
+      renderMode: "pathTraced",
+      pathTracing,
+    });
+    const project = createProject({ id: "p-path-traced", name: "Project", compositions: [composition] });
+
+    const state = resolveSceneAtFrame(project, "comp-path-traced", 5);
+    expect(state.renderMode).toBe("pathTraced");
+    expect(state.pathTracing).toEqual(pathTracing);
+  });
+
+  it("leaves renderMode and pathTracing undefined when the composition has neither", () => {
+    const shape = Shape({ id: "raster-shape" });
+    const composition = createComposition({
+      id: "comp-raster",
+      name: "Raster",
+      fps: 30,
+      durationInFrames: 30,
+      width: 100,
+      height: 100,
+      tracks: [
+        {
+          id: "track-content",
+          clips: [Sequence({ id: "clip-content", from: 0, durationInFrames: 30, content: shape })],
+        },
+      ],
+    });
+    const project = createProject({ id: "p-raster", name: "Project", compositions: [composition] });
+
+    const state = resolveSceneAtFrame(project, "comp-raster", 5);
+    expect(state.renderMode).toBeUndefined();
+    expect(state.pathTracing).toBeUndefined();
+  });
+});

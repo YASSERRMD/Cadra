@@ -5,7 +5,9 @@ import type {
   CompositionColorGrading,
   CompositionEnvironment,
   CompositionPostProcessing,
+  CompositionRenderMode,
   CompositionShadowQuality,
+  PathTracingConfig,
   Track,
 } from "../scene-graph/timeline.js";
 
@@ -18,13 +20,14 @@ import type {
  * type has been part of the public API since Phase 2.
  *
  * `tracks` defaults to an empty array if omitted. `activeCameraTrack`,
- * `audioTracks`, `colorGrading`, `environment`, `shadowQuality`, and
- * `postProcessing` are all omitted (not defaulted to an empty array/object)
- * unless explicitly supplied, mirroring `Composition`'s own "omitted means
- * this composition has no active-camera concept/audio/color grade/
- * environment/shadow tuning/post-processing at all" convention (see
- * `../scene-graph/timeline.ts`) rather than every composition gaining an
- * empty-but-present lane it never asked for.
+ * `audioTracks`, `colorGrading`, `environment`, `shadowQuality`,
+ * `postProcessing`, `renderMode`, and `pathTracing` are all omitted (not
+ * defaulted to an empty array/object) unless explicitly supplied, mirroring
+ * `Composition`'s own "omitted means this composition has no active-camera
+ * concept/audio/color grade/environment/shadow tuning/post-processing/
+ * non-default render mode at all" convention (see `../scene-graph/timeline.ts`)
+ * rather than every composition gaining an empty-but-present lane it never
+ * asked for.
  */
 export interface CompositionProps {
   id: string;
@@ -40,6 +43,8 @@ export interface CompositionProps {
   environment?: CompositionEnvironment;
   shadowQuality?: CompositionShadowQuality;
   postProcessing?: CompositionPostProcessing;
+  renderMode?: CompositionRenderMode;
+  pathTracing?: PathTracingConfig;
 }
 
 /**
@@ -47,10 +52,11 @@ export interface CompositionProps {
  * size, and the tracks of clips that populate it.
  *
  * Defaults: `tracks: []`. `activeCameraTrack`/`audioTracks`/`colorGrading`/
- * `environment`/`shadowQuality`/`postProcessing` are passed through only when
- * provided, left `undefined` (not defaulted to `[]`) otherwise. Every other
- * field is required, since there is no sensible default frame rate,
- * duration, or output size for arbitrary authored content.
+ * `environment`/`shadowQuality`/`postProcessing`/`renderMode`/`pathTracing`
+ * are passed through only when provided, left `undefined` (not defaulted to
+ * `[]`) otherwise. Every other field is required, since there is no sensible
+ * default frame rate, duration, or output size for arbitrary authored
+ * content.
  */
 export function createComposition(props: CompositionProps): CompositionData {
   return {
@@ -67,5 +73,7 @@ export function createComposition(props: CompositionProps): CompositionData {
     ...(props.environment !== undefined && { environment: props.environment }),
     ...(props.shadowQuality !== undefined && { shadowQuality: props.shadowQuality }),
     ...(props.postProcessing !== undefined && { postProcessing: props.postProcessing }),
+    ...(props.renderMode !== undefined && { renderMode: props.renderMode }),
+    ...(props.pathTracing !== undefined && { pathTracing: props.pathTracing }),
   };
 }
