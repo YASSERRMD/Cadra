@@ -494,6 +494,96 @@ describe("parseScene: diagnostics carry a stable code and JSON-serializable rece
     const result = parseScene(document);
     expect(result.success).toBe(true);
   });
+
+  /**
+   * Phase 72 audit: `normalMapRef`/`aoMapRef` (`MeshMaterialConfig`, Phase
+   * 55), `envMapRef` (`CompositionEnvironment`, Phase 56), `textureRef`
+   * (`ParticleSystemNode`, Phase 67), and `lutRef` (`LutEffectConfig`, Phase
+   * 59) are the exact same class of registry-resolved ref string as
+   * `assetRef`/`geometryRef`/`materialRef`/`fontRef`, but were missing from
+   * `ASSET_REF_FIELD_NAMES` until now - each of these five tests would have
+   * failed (a blank ref silently passing validation) before that fix.
+   */
+  it("tags a blank normalMapRef/aoMapRef (nested in a mesh node's own material) as INVALID_ASSET_REF", () => {
+    const document = minimalValidDocument();
+    const clip = document.project.compositions[0]?.tracks[0]?.clips[0] as { node: unknown };
+    clip.node = {
+      id: "mesh-1",
+      kind: "mesh",
+      transform: createIdentityTransform(),
+      visible: true,
+      geometryRef: "geo-1",
+      materialRef: "mat-1",
+      material: { normalMapRef: "  ", aoMapRef: " ao-1 " },
+      children: [],
+    };
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const codes = result.diagnostics
+      .filter((entry) => entry.path.endsWith("normalMapRef") || entry.path.endsWith("aoMapRef"))
+      .map((entry) => entry.code);
+    expect(codes).toEqual([DIAGNOSTIC_CODES.INVALID_ASSET_REF, DIAGNOSTIC_CODES.INVALID_ASSET_REF]);
+  });
+
+  it("tags a blank envMapRef (on a composition's own environment) as INVALID_ASSET_REF", () => {
+    const document = minimalValidDocument();
+    const composition = document.project.compositions[0] as { environment?: unknown };
+    composition.environment = { envMapRef: "" };
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const diagnostic = result.diagnostics.find((entry) => entry.path.endsWith("envMapRef"));
+    expect(diagnostic?.code).toBe(DIAGNOSTIC_CODES.INVALID_ASSET_REF);
+  });
+
+  it("tags a blank textureRef (on a particles node) as INVALID_ASSET_REF", () => {
+    const document = minimalValidDocument();
+    const clip = document.project.compositions[0]?.tracks[0]?.clips[0] as { node: unknown };
+    clip.node = {
+      id: "particles-1",
+      kind: "particles",
+      transform: createIdentityTransform(),
+      visible: true,
+      maxParticles: 100,
+      emissionRate: 10,
+      shape: { type: "point" },
+      lifetimeSeconds: 1,
+      initialSpeed: 1,
+      direction: [0, 1, 0],
+      startSize: 1,
+      textureRef: "   ",
+      children: [],
+    };
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const diagnostic = result.diagnostics.find((entry) => entry.path.endsWith("textureRef"));
+    expect(diagnostic?.code).toBe(DIAGNOSTIC_CODES.INVALID_ASSET_REF);
+  });
+
+  it("tags a blank lutRef (nested in a composition's own postProcessing effects) as INVALID_ASSET_REF", () => {
+    const document = minimalValidDocument();
+    const composition = document.project.compositions[0] as { postProcessing?: unknown };
+    composition.postProcessing = { effects: [{ type: "lut", lutRef: "" }] };
+
+    const result = parseScene(document);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    const diagnostic = result.diagnostics.find((entry) => entry.path.endsWith("lutRef"));
+    expect(diagnostic?.code).toBe(DIAGNOSTIC_CODES.INVALID_ASSET_REF);
+  });
 });
 
 /**

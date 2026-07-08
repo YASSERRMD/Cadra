@@ -45,16 +45,10 @@
  * carries the same validation guarantee, and avoids growing the
  * general-purpose patch-operation surface for a single-caller need.
  */
-import type { Clip, Project, Track } from "@cadra/core";
+import type { Clip } from "@cadra/core";
 import { Video } from "@cadra/core";
 import type { GenerationStore } from "@cadra/providers";
-import {
-  DIAGNOSTIC_CODES,
-  parseScene,
-  type SceneDocument,
-  type SceneParseDiagnostic,
-  transitionSchema,
-} from "@cadra/schema";
+import { parseScene, type SceneDocument, type SceneParseDiagnostic, transitionSchema } from "@cadra/schema";
 import type { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
@@ -63,6 +57,12 @@ import { buildGenerationRef } from "./generation-asset-binding.js";
 import type { Logger } from "./logger.js";
 import { projectContainsNodeId } from "./scene-patch.js";
 import { readSceneFile, sanitizeSceneId, writeSceneDocument } from "./scene-store.js";
+import {
+  insertClipOntoTrack,
+  resolveTrackSelector,
+  singleDiagnosticFailure,
+  trackSelectorShape,
+} from "./track-insertion.js";
 
 /** Registered tool name for the one-step generate-and-insert-clip tool. */
 export const ADD_GENERATED_CLIP_TOOL_NAME = "add_generated_clip";
@@ -107,19 +107,6 @@ interface AddGeneratedClipSuccessPayload {
   document: SceneDocument;
 }
 
-/** Builds a single-diagnostic failure payload for an error that is not itself a schema-validation failure, matching `scene-tools.ts`'s own `singleDiagnosticFailure` helper (re-declared here rather than imported, since that helper is not exported from `scene-tools.ts`). */
-function singleDiagnosticFailure(
-  path: string,
-  message: string,
-  code: string,
-  suggestedFix?: string,
-): AddGeneratedClipFailurePayload {
-  return {
-    success: false,
-    diagnostics: [{ path, message, code, ...(suggestedFix !== undefined ? { suggestedFix } : {}) }],
-  };
-}
-
 /** Zod shape for the generation request `add_generated_clip` accepts, mirroring `@cadra/providers`' own `VideoGenerationRequest` field-for-field. */
 const generationRequestShape = {
   prompt: z.string().describe("The text prompt describing the desired video."),
@@ -162,122 +149,6 @@ const videoLayerOptionsShape = {
       "Optional reference to a mask asset restricting which pixels of the new video layer are visible.",
     ),
 };
-
-/** Zod shape for the target-track selector: an existing track by id, or a brand-new one to create. */
-const trackSelectorShape = {
-  existingTrackId: z
-    .string()
-    .optional()
-    .describe(
-      "Id of an existing track (within the named composition) to append the new clip onto.",
-    ),
-  newTrackId: z
-    .string()
-    .optional()
-    .describe(
-      "Id for a brand-new track to create (and append the new clip onto). Must not already exist.",
-    ),
-  newTrackName: z
-    .string()
-    .optional()
-    .describe(
-      "Optional human-readable name for the new track. Only used together with newTrackId.",
-    ),
-};
-
-/** Resolves `input`'s track selector against `composition`'s existing tracks: returns the resolved track id plus whether it needs to be freshly created, or a ready-to-return failure payload. `newTrackName` (if a new track is being created) is applied later by `insertClipOntoTrack`, not by this purely-resolving function. */
-function resolveTrackSelector(
-  composition: { id: string; tracks: readonly Track[] },
-  existingTrackId: string | undefined,
-  newTrackId: string | undefined,
-):
-  | { ok: true; trackId: string; createNew: boolean }
-  | { ok: false; failure: AddGeneratedClipFailurePayload } {
-  if ((existingTrackId === undefined) === (newTrackId === undefined)) {
-    return {
-      ok: false,
-      failure: singleDiagnosticFailure(
-        "track",
-        "add_generated_clip requires exactly one of existingTrackId or newTrackId, not both or neither.",
-        DIAGNOSTIC_CODES.MISSING_REQUIRED_FIELD,
-      ),
-    };
-  }
-
-  if (existingTrackId !== undefined) {
-    const found = composition.tracks.find((track) => track.id === existingTrackId);
-    if (found === undefined) {
-      const availableIds = composition.tracks.map((track) => track.id);
-      return {
-        ok: false,
-        failure: singleDiagnosticFailure(
-          "existingTrackId",
-          `Composition "${composition.id}" has no track with id "${existingTrackId}". Available track ` +
-            `ids: ${availableIds.length > 0 ? availableIds.join(", ") : "(none)"}.`,
-          "TRACK_NOT_FOUND",
-        ),
-      };
-    }
-    return { ok: true, trackId: existingTrackId, createNew: false };
-  }
-
-  const collision = composition.tracks.find((track) => track.id === newTrackId);
-  if (collision !== undefined) {
-    return {
-      ok: false,
-      failure: singleDiagnosticFailure(
-        "newTrackId",
-        `Composition "${composition.id}" already has a track with id "${newTrackId}". Choose a ` +
-          "different id, or pass it as existingTrackId instead.",
-        "DUPLICATE_TRACK_ID",
-      ),
-    };
-  }
-
-  return { ok: true, trackId: newTrackId!, createNew: true };
-}
-
-/**
- * Inserts `clip` onto the track named `trackId` within `compositionId` of
- * `project`, creating that track fresh (named `newTrackName`, if given) if
- * `createNew` is `true`, or appending onto its existing `clips` array
- * otherwise. Returns a new `Project`, structurally sharing every
- * composition/track this call did not touch (mirroring `scene-patch.ts`'s
- * own `applyNodeOperationToProject` sharing discipline).
- */
-function insertClipOntoTrack(
-  project: Project,
-  compositionId: string,
-  trackId: string,
-  createNew: boolean,
-  newTrackName: string | undefined,
-  clip: Clip,
-): Project {
-  return {
-    ...project,
-    compositions: project.compositions.map((composition) => {
-      if (composition.id !== compositionId) {
-        return composition;
-      }
-
-      if (createNew) {
-        const newTrack: Track = {
-          id: trackId,
-          ...(newTrackName !== undefined ? { name: newTrackName } : {}),
-          clips: [clip],
-        };
-        return { ...composition, tracks: [...composition.tracks, newTrack] };
-      }
-
-      return {
-        ...composition,
-        tracks: composition.tracks.map((track) =>
-          track.id === trackId ? { ...track, clips: [...track.clips, clip] } : track,
-        ),
-      };
-    }),
-  };
-}
 
 /**
  * Registers `add_generated_clip` on `server`. Submits into

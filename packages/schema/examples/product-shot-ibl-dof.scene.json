@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "id": "project-product-shot-ibl-dof",
+    "name": "Product Shot (IBL and Depth of Field) Example",
+    "compositions": [
+      {
+        "id": "comp-product-shot-ibl-dof",
+        "name": "Main",
+        "fps": 30,
+        "durationInFrames": 90,
+        "width": 1920,
+        "height": 1080,
+        "environment": {
+          "envMapRef": "studio",
+          "intensity": 1,
+          "showBackground": false
+        },
+        "postProcessing": {
+          "effects": [
+            { "type": "depthOfField", "focusDistance": 6, "aperture": 0.03, "maxBlur": 1 },
+            { "type": "sharpen", "amount": 0.3 }
+          ]
+        },
+        "tracks": [
+          {
+            "id": "track-product-camera",
+            "name": "Camera",
+            "clips": [
+              {
+                "id": "clip-product-camera",
+                "startFrame": 0,
+                "durationInFrames": 90,
+                "node": {
+                  "id": "product-camera",
+                  "kind": "camera",
+                  "name": "Camera",
+                  "transform": {
+                    "position": [0, 1.5, 6],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1]
+                  },
+                  "visible": true,
+                  "fov": 40,
+                  "near": 0.1,
+                  "far": 1000,
+                  "target": [0, 0, 0],
+                  "children": []
+                }
+              }
+            ]
+          },
+          {
+            "id": "track-product-shape",
+            "name": "Product",
+            "clips": [
+              {
+                "id": "clip-product-shape",
+                "startFrame": 0,
+                "durationInFrames": 90,
+                "node": {
+                  "id": "product-shape",
+                  "kind": "mesh",
+                  "name": "Product",
+                  "transform": {
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0.4, 0],
+                    "scale": [1, 1, 1]
+                  },
+                  "visible": true,
+                  "geometryRef": "geometry-sphere",
+                  "materialRef": "material-product-fallback",
+                  "material": {
+                    "baseColor": [1, 0.766, 0.336, 1],
+                    "metalness": 1,
+                    "roughness": 0.12
+                  },
+                  "castShadow": true,
+                  "receiveShadow": true,
+                  "children": []
+                }
+              }
+            ]
+          },
+          {
+            "id": "track-product-light",
+            "name": "Key Light",
+            "clips": [
+              {
+                "id": "clip-product-light",
+                "startFrame": 0,
+                "durationInFrames": 90,
+                "node": {
+                  "id": "product-key-light",
+                  "kind": "light",
+                  "name": "Key Light",
+                  "transform": {
+                    "position": [3, 4, 5],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1]
+                  },
+                  "visible": true,
+                  "lightType": "directional",
+                  "color": [1, 1, 1, 1],
+                  "intensity": 1.8,
+                  "castShadow": true,
+                  "children": []
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

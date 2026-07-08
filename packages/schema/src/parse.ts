@@ -595,22 +595,37 @@ function readSchemaVersion(input: unknown): number | undefined {
 
 /**
  * Field names, on any scene-node-like object, that hold an id resolved
- * against an external asset/geometry/material/font registry. Checked by
- * {@link checkAssetRefs} against the already-schema-valid parsed document (so
- * this runs only once the document is known to at least be shaped
- * correctly): a blank (empty or whitespace-only) ref string cannot possibly
- * resolve to anything, so it is flagged as `INVALID_ASSET_REF` even though
- * a bare `z.string()` field accepts it.
+ * against an external asset/geometry/material/font/environment/LUT registry.
+ * Checked by {@link checkAssetRefs} against the already-schema-valid parsed
+ * document (so this runs only once the document is known to at least be
+ * shaped correctly): a blank (empty or whitespace-only) ref string cannot
+ * possibly resolve to anything, so it is flagged as `INVALID_ASSET_REF` even
+ * though a bare `z.string()` field accepts it.
  *
  * Kept as a fixed field-name allow-list, not a schema-driven walk: the
  * schema itself has no marker distinguishing "this string field is a
  * resolved-elsewhere ref" from "this string field is free-form text" (e.g.
  * `TextNode.content`), so the allow-list is the simplest correct source of
  * truth, matching exactly the fields `docs/agent-authoring-guide.md`
- * documents as ref fields (`geometryRef`, `materialRef`, `assetRef`,
- * `fontRef`).
+ * documents as ref fields. `normalMapRef`/`aoMapRef` (`MeshMaterialConfig`,
+ * Phase 55), `envMapRef` (`CompositionEnvironment`, Phase 56), `textureRef`
+ * (`ParticleSystemNode`, Phase 67), and `lutRef` (`LutEffectConfig`, Phase
+ * 59) are the exact same class of registry-resolved ref string as the
+ * original four (Phase 72 audit: none of these five were in this set
+ * despite existing since their own phase, so a blank/padded value in any of
+ * them silently passed validation until now).
  */
-const ASSET_REF_FIELD_NAMES = new Set(["assetRef", "geometryRef", "materialRef", "fontRef"]);
+const ASSET_REF_FIELD_NAMES = new Set([
+  "assetRef",
+  "geometryRef",
+  "materialRef",
+  "fontRef",
+  "normalMapRef",
+  "aoMapRef",
+  "envMapRef",
+  "textureRef",
+  "lutRef",
+]);
 
 /**
  * Walks `value` (the already schema-valid, parsed document) looking for any
