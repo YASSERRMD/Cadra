@@ -9,11 +9,15 @@ import type {
   Composition,
   CompositionColorGrading,
   CompositionEnvironment,
+  CompositionPostProcessing,
   CompositionShadowQuality,
   ContactShadowConfig,
   EnvironmentGroundProjection,
+  PostEffectConfig,
   Project,
+  RenderQualityTier,
   ShadowQualityTier,
+  SharpenEffectConfig,
   Track,
   Transition,
 } from "@cadra/core";
@@ -415,6 +419,45 @@ type _CheckCompositionShadowQuality = AssertTrue<
   AssertEqual<z.infer<typeof compositionShadowQualitySchema>, CompositionShadowQuality>
 >;
 
+/** A quality tier trading render cost against fidelity, mirroring `RenderQualityTier`. See that type's own doc for why this is a separate schema from `shadowQualityTierSchema`. */
+export const renderQualityTierSchema = z
+  .enum(["preview", "final"])
+  .describe("Trades render cost against fidelity for whichever post-processing effect has an expensive quality knob of its own.");
+
+type _CheckRenderQualityTier = AssertTrue<AssertEqual<z.infer<typeof renderQualityTierSchema>, RenderQualityTier>>;
+
+/** A local-contrast sharpening pass, mirroring `SharpenEffectConfig`. */
+export const sharpenEffectConfigSchema = z.strictObject({
+  type: z.literal("sharpen"),
+  amount: z.number().optional().describe("Strength of the sharpening effect. 0 is a no-op. Defaults to 0.5."),
+});
+
+type _CheckSharpenEffectConfig = AssertTrue<
+  AssertEqual<z.infer<typeof sharpenEffectConfigSchema>, SharpenEffectConfig>
+>;
+
+/**
+ * One configured entry in `compositionPostProcessingSchema.effects`, mirroring
+ * `PostEffectConfig`. A discriminated union on `type` with exactly one
+ * variant today (`sharpenEffectConfigSchema`); Phase 59 onward appends one
+ * more variant per new cinematic effect.
+ */
+export const postEffectConfigSchema = z.discriminatedUnion("type", [sharpenEffectConfigSchema]);
+
+type _CheckPostEffectConfig = AssertTrue<AssertEqual<z.infer<typeof postEffectConfigSchema>, PostEffectConfig>>;
+
+/** A whole-composition post-processing effect stack, mirroring `CompositionPostProcessing`. */
+export const compositionPostProcessingSchema = z.strictObject({
+  tier: renderQualityTierSchema.optional().describe("Trades render cost against fidelity. Defaults to 'final'."),
+  effects: z
+    .array(postEffectConfigSchema)
+    .describe("The effect stack, applied in array order within each effect's own fixed pre/post-tonemap stage. An empty array is a no-op."),
+});
+
+type _CheckCompositionPostProcessing = AssertTrue<
+  AssertEqual<z.infer<typeof compositionPostProcessingSchema>, CompositionPostProcessing>
+>;
+
 /**
  * A single renderable timeline: a fixed frame rate, a fixed integer duration,
  * a fixed output size, and the tracks of clips that populate it.
@@ -448,6 +491,9 @@ export const compositionSchema = z.strictObject({
   shadowQuality: compositionShadowQualitySchema
     .optional()
     .describe("Optional whole-composition shadow and ambient-occlusion tuning."),
+  postProcessing: compositionPostProcessingSchema
+    .optional()
+    .describe("Optional whole-composition post-processing effect stack."),
 });
 
 type _CheckComposition = AssertTrue<AssertEqual<z.infer<typeof compositionSchema>, Composition>>;

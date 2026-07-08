@@ -14,16 +14,11 @@ import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
 import { RectAreaLightTexturesLib } from "three/addons/lights/RectAreaLightTexturesLib.js";
 import { RectAreaLightUniformsLib } from "three/addons/lights/RectAreaLightUniformsLib.js";
 import { GroundedSkybox } from "three/addons/objects/GroundedSkybox.js";
-import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
-import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
-import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
-import { ao as createGtaoNode } from "three/addons/tsl/display/GTAONode.js";
-import { mrt, normalView, output, pass, vec3, vec4 } from "three/tsl";
+import type { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import * as ThreeWebGPUInternals from "three/webgpu";
 import {
   PMREMGenerator as WebGPUPMREMGenerator,
-  RenderPipeline,
+  type RenderPipeline,
   WebGPURenderer,
   type WebGPURendererParameters,
 } from "three/webgpu";
@@ -33,6 +28,13 @@ import {
   createDefaultEnvironmentRegistry,
   type EnvironmentRegistry,
 } from "./environment/environment-registry.js";
+import {
+  type AmbientOcclusionRenderConfig,
+  buildWebGl2Pipeline,
+  buildWebGpuPipeline,
+  type RenderPassConfig,
+  resolvePostProcessing,
+} from "./post-processing/post-processing-pipeline.js";
 import { createReconciler, type Reconciler } from "./reconciler/reconciler.js";
 import type {
   Renderer,
@@ -58,14 +60,16 @@ interface ThreeRendererLike {
   init?: () => Promise<unknown>;
   setSize: (width: number, height: number, updateStyle?: boolean) => void;
   /**
-   * Draws `scene` through `camera`. `ambientOcclusion`, when present,
-   * routes the draw through this backend's own post-processing pipeline
-   * (`EffectComposer`+`GTAOPass` for WebGL2, a TSL `RenderPipeline`+`GTAONode`
-   * for WebGPU - see `withAmbientOcclusionSupport`'s own two implementations)
-   * instead of a bare `renderer.render(scene, camera)` call; omitted, this
-   * renders exactly as it did before Phase 57.
+   * Draws `scene` through `camera`. `config`, when it carries an
+   * `ambientOcclusion` and/or a non-empty `postProcessing`, routes the draw
+   * through this backend's own unified post-processing pipeline
+   * (`EffectComposer` for WebGL2, a TSL `RenderPipeline` for WebGPU - see
+   * `withPostProcessingSupport`'s own two implementations, `./post-processing/
+   * post-processing-pipeline.ts`'s `buildWebGl2Pipeline`/`buildWebGpuPipeline`)
+   * instead of a bare `renderer.render(scene, camera)` call; omitted (or
+   * carrying neither), this renders exactly as it did before Phase 57.
    */
-  render: (scene: THREE.Scene, camera: THREE.Camera, ambientOcclusion?: AmbientOcclusionRenderConfig) => void;
+  render: (scene: THREE.Scene, camera: THREE.Camera, config?: RenderPassConfig) => void;
   dispose: () => void;
   capabilities?: { maxTextureSize?: number };
   /** Set fresh every `renderFrame` call, from the composition's own resolved `colorGrading.exposureStops` - see `resolveExposureMultiplier`. */
@@ -83,24 +87,6 @@ interface ThreeRendererLike {
    * `renderer instanceof WebGPURenderer` check at every call site.
    */
   createEnvironmentMap: (equirectangular: THREE.Texture) => THREE.Texture;
-}
-
-/**
- * Ambient occlusion tuning resolved from `AmbientOcclusionConfig` plus the
- * composition's own quality tier, passed to `ThreeRendererLike.render`.
- * `resolutionScale`/`samples` are each meaningful to only one backend's own
- * natural quality knob (see `withAmbientOcclusionSupport`'s two
- * implementations for why they differ), so both are always resolved
- * regardless of which backend is actually active - the inactive one's own
- * field is simply unused.
- */
-interface AmbientOcclusionRenderConfig {
-  radius: number;
-  intensity: number;
-  /** WebGL2 `GTAOPass` only: scales its own internal render-target resolution, independent of the main scene's resolution. Lower at the `"preview"` quality tier for speed. */
-  resolutionScale: number;
-  /** WebGPU `GTAONode` only: sample count per pixel. Lower at the `"preview"` quality tier for speed. */
-  samples: number;
 }
 
 /** Constructs the underlying Three.js renderer for a given backend and target. */
@@ -217,62 +203,38 @@ function withEnvironmentMapSupport(
 }
 
 /**
- * A deterministic replacement for `GTAOPass`'s own `pdNoiseTexture` (its
- * secondary Poisson-denoise stage's decorrelation texture): the pass's own
- * `_generateNoise()` seeds a `SimplexNoise` instance with no explicit
- * random-number source, which reads `Math.random()` 256 times inside
- * `SimplexNoise`'s own constructor to build its permutation table (verified
- * directly against this project's installed `three@0.185.1` source) - so a
- * fresh `GTAOPass` gets a different, unseeded texture every process run,
- * violating this codebase's own frame-determinism requirement. `GTAOPass`'s
- * *primary* AO sampling (`gtaoNoiseTexture`, a magic-square pattern) is
- * already fully deterministic and untouched by this function; only the
- * secondary denoise stage needs a fix. This mirrors
- * `environment-registry.ts`'s own "pure function of pixel index, no
- * `Math.random()`" texture-generation pattern, matching `_generateNoise()`'s
- * own exact 64x64 RGBA8 `RepeatWrapping` format so it drops in as a direct
- * replacement.
+ * A cheap, exact cache key over a `RenderPassConfig`'s own content, used by
+ * `withPostProcessingSupport`/`withWebGpuPostProcessingSupport` below to
+ * decide whether their cached composer/pipeline needs rebuilding.
+ * `ThreeRenderer.renderFrame` resolves a fresh `RenderPassConfig` object
+ * every call (see `resolveAmbientOcclusion`/`resolvePostProcessing`), so a
+ * reference-identity check would always miss; every field on
+ * `AmbientOcclusionRenderConfig`/`PostProcessingRenderConfig` is a plain
+ * number, string, or array of those, so `JSON.stringify` is an exact,
+ * order-sensitive, cheap-for-these-small-configs equality check.
  */
-function createDeterministicGtaoDenoiseTexture(): THREE.DataTexture {
-  const size = 64;
-  const data = new Uint8Array(size * size * 4);
-  for (let i = 0; i < size; i += 1) {
-    for (let j = 0; j < size; j += 1) {
-      const index = (i * size + j) * 4;
-      data[index] = hashToByte(i, j, 0);
-      data[index + 1] = hashToByte(i + size, j, 1);
-      data[index + 2] = hashToByte(i, j + size, 2);
-      data[index + 3] = hashToByte(i + size, j + size, 3);
-    }
-  }
-  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat, THREE.UnsignedByteType);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.needsUpdate = true;
-  return texture;
-}
-
-/** A pure, deterministic pseudo-random byte in `[0, 255]` from integer coordinates, the standard shader "hash from sine" trick - decorrelated enough for denoise sampling, with no external RNG or `Math.random()` at all. */
-function hashToByte(x: number, y: number, channel: number): number {
-  const value = Math.sin(x * 12.9898 + y * 78.233 + channel * 37.719) * 43758.5453;
-  return Math.round((value - Math.floor(value)) * 255);
+function renderPassConfigKey(config: RenderPassConfig | undefined): string {
+  return JSON.stringify(config ?? null);
 }
 
 /**
  * Wraps `threeRendererLike`'s own `render` to route through a cached
- * `EffectComposer` (`RenderPass` -> `GTAOPass` -> `OutputPass`) whenever
- * `ambientOcclusion` is present, rebuilt only when the scene, camera, or
- * `resolutionScale` actually changes across calls - mirroring
- * `ThreeRenderer`'s own `cachedEnvironment` cache-on-identity-change
- * pattern. `OutputPass` is required, not optional: any offscreen
- * `WebGLRenderTarget` (which `EffectComposer`'s own intermediate buffers
- * are) makes `WebGLRenderer` silently skip both tone mapping and output
- * color-space conversion (verified directly against this project's
- * installed `three@0.185.1` source, `WebGLPrograms.js`/`WebGLRenderer.js`),
- * which would otherwise silently undo `applyColorWorkflowDefaults`'s own
- * ACES/sRGB output the moment AO is enabled.
+ * `EffectComposer` (built by `buildWebGl2Pipeline`, `./post-processing/
+ * post-processing-pipeline.ts`) whenever `config` carries an
+ * `ambientOcclusion` and/or a non-empty `postProcessing`, rebuilt only when
+ * the scene, camera, or resolved config actually changes across calls -
+ * mirroring `ThreeRenderer`'s own `cachedEnvironment` cache-on-identity-change
+ * pattern. Both concerns share the one composer (see `RenderPassConfig`'s
+ * own doc for why): `buildWebGl2Pipeline`'s own `OutputPass` is required,
+ * not optional, for either - any offscreen `WebGLRenderTarget` (which
+ * `EffectComposer`'s own intermediate buffers are) makes `WebGLRenderer`
+ * silently skip both tone mapping and output color-space conversion
+ * (verified directly against this project's installed `three@0.185.1`
+ * source, `WebGLPrograms.js`/`WebGLRenderer.js`), which would otherwise
+ * silently undo `applyColorWorkflowDefaults`'s own ACES/sRGB output the
+ * moment either is enabled.
  */
-function withAmbientOcclusionSupport(
+function withPostProcessingSupport(
   renderer: THREE.WebGLRenderer,
   threeRendererLike: ThreeRendererLike,
 ): ThreeRendererLike {
@@ -288,53 +250,36 @@ function withAmbientOcclusionSupport(
   const originalRender = renderer.render.bind(renderer);
   const originalDispose = threeRendererLike.dispose.bind(threeRendererLike);
   let composer: EffectComposer | undefined;
-  let gtaoPass: GTAOPass | undefined;
   let cachedScene: THREE.Scene | undefined;
   let cachedCamera: THREE.Camera | undefined;
-  let cachedResolutionScale: number | undefined;
+  let cachedKey: string | undefined;
 
   function disposeComposer(): void {
     composer?.dispose();
     composer = undefined;
-    gtaoPass = undefined;
   }
 
   return Object.assign(threeRendererLike, {
-    render(scene: THREE.Scene, camera: THREE.Camera, ambientOcclusion?: AmbientOcclusionRenderConfig): void {
-      if (ambientOcclusion === undefined) {
+    render(scene: THREE.Scene, camera: THREE.Camera, config?: RenderPassConfig): void {
+      if (
+        config === undefined ||
+        (config.ambientOcclusion === undefined && config.postProcessing === undefined)
+      ) {
         disposeComposer();
         originalRender(scene, camera);
         return;
       }
 
-      if (
-        composer === undefined ||
-        cachedScene !== scene ||
-        cachedCamera !== camera ||
-        cachedResolutionScale !== ambientOcclusion.resolutionScale
-      ) {
+      const key = renderPassConfigKey(config);
+      if (composer === undefined || cachedScene !== scene || cachedCamera !== camera || cachedKey !== key) {
         disposeComposer();
         const size = renderer.getSize(new THREE.Vector2());
-        const width = Math.max(1, Math.round(size.x * ambientOcclusion.resolutionScale));
-        const height = Math.max(1, Math.round(size.y * ambientOcclusion.resolutionScale));
-        const newComposer = new EffectComposer(renderer);
-        newComposer.addPass(new RenderPass(scene, camera));
-        const newGtaoPass = new GTAOPass(scene, camera, width, height);
-        newGtaoPass.pdNoiseTexture.dispose();
-        newGtaoPass.pdNoiseTexture = createDeterministicGtaoDenoiseTexture();
-        const pdMaterial = (newGtaoPass as unknown as { pdMaterial: { uniforms: { tNoise: { value: THREE.Texture } } } })
-          .pdMaterial;
-        pdMaterial.uniforms.tNoise.value = newGtaoPass.pdNoiseTexture;
-        newComposer.addPass(newGtaoPass);
-        newComposer.addPass(new OutputPass());
-        composer = newComposer;
-        gtaoPass = newGtaoPass;
+        composer = buildWebGl2Pipeline(renderer, scene, camera, size.x, size.y, config);
         cachedScene = scene;
         cachedCamera = camera;
-        cachedResolutionScale = ambientOcclusion.resolutionScale;
+        cachedKey = key;
       }
 
-      gtaoPass?.updateGtaoMaterial({ radius: ambientOcclusion.radius, scale: ambientOcclusion.intensity });
       composer.render();
     },
     dispose(): void {
@@ -345,71 +290,55 @@ function withAmbientOcclusionSupport(
 }
 
 /**
- * The WebGPU-backend equivalent of `withAmbientOcclusionSupport` above,
- * mirroring its own doc for why AO routes through a cached, rebuilt-on-change
- * pipeline. Uses a TSL `RenderPipeline` (the current, non-deprecated name for
- * what `three/webgpu` briefly called `PostProcessing` before r183; using
- * `PostProcessing` here would fire a runtime `console.warn` on every
- * construction, verified directly against this project's installed
- * `three@0.185.1` source) plus `GTAONode`, per that node's own documented
- * usage pattern: a single MRT `pass(scene, camera)` producing color/normal/
- * depth texture nodes, fed into `ao(...)`, composited back over the scene
- * color. `RenderPipeline.outputColorTransform` defaults to `true`, which
- * already applies tone mapping/color-space conversion automatically (unlike
- * the WebGL2/`EffectComposer` path above, this backend needs no `OutputPass`
- * equivalent at all).
+ * The WebGPU-backend equivalent of `withPostProcessingSupport` above,
+ * mirroring its own doc for why AO and post-processing share one
+ * cached-and-rebuilt-on-change pipeline (built by `buildWebGpuPipeline`,
+ * `./post-processing/post-processing-pipeline.ts`). Uses a TSL
+ * `RenderPipeline` (the current, non-deprecated name for what `three/webgpu`
+ * briefly called `PostProcessing` before r183; using `PostProcessing` here
+ * would fire a runtime `console.warn` on every construction, verified
+ * directly against this project's installed `three@0.185.1` source).
  */
-function withWebGpuAmbientOcclusionSupport(
+function withWebGpuPostProcessingSupport(
   renderer: WebGPURenderer,
   threeRendererLike: ThreeRendererLike,
 ): ThreeRendererLike {
-  // See `withAmbientOcclusionSupport`'s own identical comment: must capture
+  // See `withPostProcessingSupport`'s own identical comment: must capture
   // the original `render`/`dispose` before `Object.assign` below reassigns
   // them, or the wrapped methods recurse into themselves.
   const originalRender = renderer.render.bind(renderer);
   const originalDispose = threeRendererLike.dispose.bind(threeRendererLike);
   let renderPipeline: RenderPipeline | undefined;
-  let aoNode: ReturnType<typeof createGtaoNode> | undefined;
   let cachedScene: THREE.Scene | undefined;
   let cachedCamera: THREE.Camera | undefined;
+  let cachedKey: string | undefined;
 
   function disposePipeline(): void {
     renderPipeline?.dispose();
     renderPipeline = undefined;
-    aoNode = undefined;
   }
 
   return Object.assign(threeRendererLike, {
-    render(scene: THREE.Scene, camera: THREE.Camera, ambientOcclusion?: AmbientOcclusionRenderConfig): void {
-      if (ambientOcclusion === undefined) {
+    render(scene: THREE.Scene, camera: THREE.Camera, config?: RenderPassConfig): void {
+      if (
+        config === undefined ||
+        (config.ambientOcclusion === undefined && config.postProcessing === undefined)
+      ) {
         disposePipeline();
         originalRender(scene, camera);
         return;
       }
 
-      if (renderPipeline === undefined || cachedScene !== scene || cachedCamera !== camera) {
+      const key = renderPassConfigKey(config);
+      if (renderPipeline === undefined || cachedScene !== scene || cachedCamera !== camera || cachedKey !== key) {
         disposePipeline();
-        const scenePass = pass(scene, camera);
-        scenePass.setMRT(mrt({ output, normal: normalView }));
-        const scenePassColor = scenePass.getTextureNode("output");
-        const scenePassNormal = scenePass.getTextureNode("normal");
-        const scenePassDepth = scenePass.getTextureNode("depth");
-        const newAoNode = createGtaoNode(scenePassDepth, scenePassNormal, camera);
-        const aoOutput = newAoNode.getTextureNode();
-        const newPipeline = new RenderPipeline(renderer);
-        newPipeline.outputNode = scenePassColor.mul(vec4(vec3(aoOutput.r), 1));
-        renderPipeline = newPipeline;
-        aoNode = newAoNode;
+        renderPipeline = buildWebGpuPipeline(renderer, scene, camera, config);
         cachedScene = scene;
         cachedCamera = camera;
+        cachedKey = key;
       }
 
-      if (aoNode !== undefined) {
-        aoNode.radius.value = ambientOcclusion.radius;
-        aoNode.scale.value = ambientOcclusion.intensity;
-        aoNode.samples.value = ambientOcclusion.samples;
-      }
-      renderPipeline?.render();
+      renderPipeline.render();
     },
     dispose(): void {
       disposePipeline();
@@ -425,7 +354,7 @@ function createRealWebGpuRenderer(target: RenderTarget, _size: RenderSize): Thre
   const renderer = new WebGPURenderer(parameters);
   applyColorWorkflowDefaults(renderer);
   const withEnvironment = withEnvironmentMapSupport(renderer, new WebGPUPMREMGenerator(renderer));
-  return withWebGpuAmbientOcclusionSupport(renderer, withEnvironment);
+  return withWebGpuPostProcessingSupport(renderer, withEnvironment);
 }
 
 /** The real WebGL2 fallback path: the classic `THREE.WebGLRenderer`, also driven off `canvas`. */
@@ -434,7 +363,7 @@ function createRealWebGl2Renderer(target: RenderTarget, _size: RenderSize): Thre
   const renderer = new THREE.WebGLRenderer({ canvas: target });
   applyColorWorkflowDefaults(renderer);
   const withEnvironment = withEnvironmentMapSupport(renderer, new THREE.PMREMGenerator(renderer));
-  return withAmbientOcclusionSupport(renderer, withEnvironment);
+  return withPostProcessingSupport(renderer, withEnvironment);
 }
 
 /** The dependency set a `Renderer` uses when no overrides are supplied, i.e. real Three.js. */
@@ -706,7 +635,10 @@ export class ThreeRenderer implements Renderer {
     const camera =
       findActiveCamera(reconciled, sceneState.activeCameraNodeId) ?? this.defaultCamera;
     this.lastUsedCamera = camera;
-    renderer.render(this.scene, camera, this.resolveAmbientOcclusion(sceneState.shadowQuality));
+    renderer.render(this.scene, camera, {
+      ambientOcclusion: this.resolveAmbientOcclusion(sceneState.shadowQuality),
+      postProcessing: resolvePostProcessing(sceneState.postProcessing),
+    });
   }
 
   /**

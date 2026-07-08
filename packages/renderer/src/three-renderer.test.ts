@@ -1214,8 +1214,12 @@ describe("ThreeRenderer.renderFrame: ambient occlusion (Phase 57)", () => {
 
     renderer.renderFrame(makeSceneState(), makeFrameContext());
 
-    const [, , ambientOcclusion] = webGpuRenderer.render.mock.calls[0] as [THREE.Scene, THREE.Camera, unknown];
-    expect(ambientOcclusion).toBeUndefined();
+    const [, , config] = webGpuRenderer.render.mock.calls[0] as [
+      THREE.Scene,
+      THREE.Camera,
+      { ambientOcclusion: unknown },
+    ];
+    expect(config.ambientOcclusion).toBeUndefined();
   });
 
   it("passes a resolved ambient occlusion config to render() when ambientOcclusion is set", async () => {
@@ -1228,13 +1232,13 @@ describe("ThreeRenderer.renderFrame: ambient occlusion (Phase 57)", () => {
       makeFrameContext(),
     );
 
-    const [, , ambientOcclusion] = webGpuRenderer.render.mock.calls[0] as [
+    const [, , config] = webGpuRenderer.render.mock.calls[0] as [
       THREE.Scene,
       THREE.Camera,
-      { radius: number; intensity: number; resolutionScale: number; samples: number },
+      { ambientOcclusion: { radius: number; intensity: number; resolutionScale: number; samples: number } },
     ];
-    expect(ambientOcclusion.radius).toBe(2);
-    expect(ambientOcclusion.intensity).toBe(0.7);
+    expect(config.ambientOcclusion.radius).toBe(2);
+    expect(config.ambientOcclusion.intensity).toBe(0.7);
   });
 
   it("defaults radius and intensity to 1 when omitted", async () => {
@@ -1244,13 +1248,13 @@ describe("ThreeRenderer.renderFrame: ambient occlusion (Phase 57)", () => {
 
     renderer.renderFrame(makeSceneState({ shadowQuality: { ambientOcclusion: {} } }), makeFrameContext());
 
-    const [, , ambientOcclusion] = webGpuRenderer.render.mock.calls[0] as [
+    const [, , config] = webGpuRenderer.render.mock.calls[0] as [
       THREE.Scene,
       THREE.Camera,
-      { radius: number; intensity: number },
+      { ambientOcclusion: { radius: number; intensity: number } },
     ];
-    expect(ambientOcclusion.radius).toBe(1);
-    expect(ambientOcclusion.intensity).toBe(1);
+    expect(config.ambientOcclusion.radius).toBe(1);
+    expect(config.ambientOcclusion.intensity).toBe(1);
   });
 
   it("resolves lower resolutionScale/samples at the 'preview' quality tier than at 'final'", async () => {
@@ -1262,24 +1266,24 @@ describe("ThreeRenderer.renderFrame: ambient occlusion (Phase 57)", () => {
       makeSceneState({ shadowQuality: { tier: "preview", ambientOcclusion: {} } }),
       makeFrameContext(1),
     );
-    const [, , previewAo] = webGpuRenderer.render.mock.calls[0] as [
+    const [, , previewConfig] = webGpuRenderer.render.mock.calls[0] as [
       THREE.Scene,
       THREE.Camera,
-      { resolutionScale: number; samples: number },
+      { ambientOcclusion: { resolutionScale: number; samples: number } },
     ];
 
     renderer.renderFrame(
       makeSceneState({ shadowQuality: { tier: "final", ambientOcclusion: {} } }),
       makeFrameContext(2),
     );
-    const [, , finalAo] = webGpuRenderer.render.mock.calls[1] as [
+    const [, , finalConfig] = webGpuRenderer.render.mock.calls[1] as [
       THREE.Scene,
       THREE.Camera,
-      { resolutionScale: number; samples: number },
+      { ambientOcclusion: { resolutionScale: number; samples: number } },
     ];
 
-    expect(previewAo.resolutionScale).toBeLessThan(finalAo.resolutionScale);
-    expect(previewAo.samples).toBeLessThan(finalAo.samples);
+    expect(previewConfig.ambientOcclusion.resolutionScale).toBeLessThan(finalConfig.ambientOcclusion.resolutionScale);
+    expect(previewConfig.ambientOcclusion.samples).toBeLessThan(finalConfig.ambientOcclusion.samples);
   });
 
   it("defaults to the 'final' tier's own resolutionScale/samples when tier is omitted", async () => {
@@ -1291,20 +1295,20 @@ describe("ThreeRenderer.renderFrame: ambient occlusion (Phase 57)", () => {
       makeSceneState({ shadowQuality: { tier: "final", ambientOcclusion: {} } }),
       makeFrameContext(1),
     );
-    const [, , finalAo] = webGpuRenderer.render.mock.calls[0] as [
+    const [, , finalConfig] = webGpuRenderer.render.mock.calls[0] as [
       THREE.Scene,
       THREE.Camera,
-      { resolutionScale: number; samples: number },
+      { ambientOcclusion: { resolutionScale: number; samples: number } },
     ];
 
     renderer.renderFrame(makeSceneState({ shadowQuality: { ambientOcclusion: {} } }), makeFrameContext(2));
-    const [, , omittedTierAo] = webGpuRenderer.render.mock.calls[1] as [
+    const [, , omittedTierConfig] = webGpuRenderer.render.mock.calls[1] as [
       THREE.Scene,
       THREE.Camera,
-      { resolutionScale: number; samples: number },
+      { ambientOcclusion: { resolutionScale: number; samples: number } },
     ];
 
-    expect(omittedTierAo).toEqual(finalAo);
+    expect(omittedTierConfig.ambientOcclusion).toEqual(finalConfig.ambientOcclusion);
   });
 
   it("is deterministic: identical shadowQuality resolves to an identical AO config across repeated calls", async () => {
@@ -1314,6 +1318,72 @@ describe("ThreeRenderer.renderFrame: ambient occlusion (Phase 57)", () => {
     const sceneState = makeSceneState({
       shadowQuality: { tier: "preview", ambientOcclusion: { radius: 1.5, intensity: 0.6 } },
     });
+
+    renderer.renderFrame(sceneState, makeFrameContext(1));
+    const [, , first] = webGpuRenderer.render.mock.calls[0] as [THREE.Scene, THREE.Camera, unknown];
+
+    renderer.renderFrame(sceneState, makeFrameContext(2));
+    const [, , second] = webGpuRenderer.render.mock.calls[1] as [THREE.Scene, THREE.Camera, unknown];
+
+    expect(second).toEqual(first);
+  });
+});
+
+describe("ThreeRenderer.renderFrame: post-processing (Phase 58)", () => {
+  it("passes undefined postProcessing to render() when the composition has none", async () => {
+    const { deps, webGpuRenderer } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(makeSceneState(), makeFrameContext());
+
+    const [, , config] = webGpuRenderer.render.mock.calls[0] as [
+      THREE.Scene,
+      THREE.Camera,
+      { postProcessing: unknown },
+    ];
+    expect(config.postProcessing).toBeUndefined();
+  });
+
+  it("passes undefined postProcessing to render() when effects is an empty array (a no-op stack)", async () => {
+    const { deps, webGpuRenderer } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(makeSceneState({ postProcessing: { effects: [] } }), makeFrameContext());
+
+    const [, , config] = webGpuRenderer.render.mock.calls[0] as [
+      THREE.Scene,
+      THREE.Camera,
+      { postProcessing: unknown },
+    ];
+    expect(config.postProcessing).toBeUndefined();
+  });
+
+  it("passes a resolved postProcessing config to render() when effects is non-empty", async () => {
+    const { deps, webGpuRenderer } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({ postProcessing: { tier: "preview", effects: [{ type: "sharpen", amount: 0.6 }] } }),
+      makeFrameContext(),
+    );
+
+    const [, , config] = webGpuRenderer.render.mock.calls[0] as [
+      THREE.Scene,
+      THREE.Camera,
+      { postProcessing: { tier: string; effects: unknown[] } },
+    ];
+    expect(config.postProcessing.tier).toBe("preview");
+    expect(config.postProcessing.effects).toEqual([{ type: "sharpen", amount: 0.6 }]);
+  });
+
+  it("is deterministic: identical postProcessing resolves to an identical config across repeated calls", async () => {
+    const { deps, webGpuRenderer } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+    const sceneState = makeSceneState({ postProcessing: { effects: [{ type: "sharpen", amount: 0.4 }] } });
 
     renderer.renderFrame(sceneState, makeFrameContext(1));
     const [, , first] = webGpuRenderer.render.mock.calls[0] as [THREE.Scene, THREE.Camera, unknown];
