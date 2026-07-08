@@ -17,6 +17,8 @@ export type {
   LightType,
   MeshMaterialConfig,
   MeshNode,
+  ModelClipConfig,
+  ModelNode,
   ParticleBlendMode,
   ParticleColliderConfig,
   ParticleColorStop,

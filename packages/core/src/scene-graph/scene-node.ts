@@ -23,7 +23,8 @@ export type SceneNodeKind =
   | "compositionRef"
   | "satori"
   | "particles"
-  | "volume";
+  | "volume"
+  | "model";
 
 /**
  * Fields shared by every scene node, regardless of kind.
@@ -1016,6 +1017,65 @@ export interface VolumeNode extends SceneNodeBase<"volume"> {
 }
 
 /**
+ * One GLTF animation clip playing on a `ModelNode`, by the clip's own
+ * authored name (`THREE.AnimationClip.name`, exactly as exported from the
+ * source GLTF/GLB). Any number of clips may be simultaneously present with
+ * nonzero `weight`; Three.js's own animation mixer blends them (a weighted
+ * average per bone/morph target), so blending, crossfades, and single-clip
+ * playback are all just this one mechanism authored differently: a single
+ * clip's own `weight` staying at `1`, or two clips' `weight` keyframe tracks
+ * ramping in opposite directions over a shared window for a crossfade.
+ *
+ * There is no separate `startFrame`: this clip's own local time `0` always
+ * corresponds to this node's own local frame `0` (i.e. wherever its
+ * enclosing `Sequence` places it on the timeline, base Phase 3's existing
+ * mechanism), exactly like every other `Property<T>` this node carries -
+ * introducing a second, parallel "when does this start" concept here would
+ * only duplicate what placing/trimming the clip on a track already does.
+ */
+export interface ModelClipConfig {
+  /** The GLTF clip's own name, matched exactly against `ModelNode.assetRef`'s loaded animation clips. A name with no matching clip is a silent no-op (see `ModelNode`'s own doc). */
+  name: string;
+  /** This clip's own contribution weight. A plain number or a keyframe track; `0` mutes it without removing it from `clips`. */
+  weight: Property<number>;
+  /** Playback speed multiplier: `1` is the clip's own authored speed, negative reverses it. Defaults to `1`. */
+  timeScale?: number;
+  /** Whether local time wraps back to the clip's start once past its own duration (`"repeat"`), or holds on the last frame (`"clamp"`). Defaults to `"repeat"`. */
+  loop?: "repeat" | "clamp";
+}
+
+/**
+ * A loaded GLTF/GLB model (Phase 69): a skinned mesh, static mesh, or
+ * arbitrary node hierarchy, referencing the asset loaded from `assetRef` (the
+ * same kind of registry-resolved reference `ImageNode`/`VideoNode.assetRef`
+ * already use). `clips`/`morphTargets` drive whichever of the asset's own
+ * `THREE.AnimationClip`s and named morph targets exist; a `name` with no
+ * match in the loaded asset (a typo, or a clip/morph this particular GLTF
+ * simply does not have) is a silent no-op for that entry alone, mirroring
+ * this project's established "referencing something that does not resolve
+ * degrades gracefully, never throws" convention (e.g. `GodRaysEffectConfig.lightNodeId`).
+ *
+ * Every clip/morph weight is resolved fresh from this node's own local frame
+ * on every `renderFrame` call, independent of any previous frame (see
+ * `@cadra/renderer`'s own wiring): unlike `@cadra/physics`/`@cadra/particles`,
+ * which need incremental re-simulation because collision/emission state is
+ * genuinely path-dependent, sampling a GLTF animation clip or a morph
+ * weight at a given time is a pure function of that time alone, so frame N
+ * resolves identically whether every prior frame was ever rendered or not.
+ */
+export interface ModelNode extends SceneNodeBase<"model"> {
+  assetRef: string;
+  /** Whether this model casts a shadow onto other shadow-receiving surfaces. Defaults to `false`. */
+  castShadow?: boolean;
+  /** Whether this model receives shadows cast by shadow-casting lights. Defaults to `false`. */
+  receiveShadow?: boolean;
+  /** Which of the asset's own animation clips play, and how they blend. Omitted or empty means the asset's own bind pose, unanimated. */
+  clips?: ModelClipConfig[];
+  /** Named morph-target (blend-shape) weights, by the asset's own morph target name. Omitted means every morph target stays at the asset's own authored default influence. */
+  morphTargets?: Record<string, Property<number>>;
+}
+
+/**
  * A node in the scene graph, discriminated on `kind`. Every variant is a
  * strict, closed shape: none of them carry a catch-all index signature, so
  * accessing a field not declared for the current `kind` is a compile error
@@ -1032,4 +1092,5 @@ export type SceneNode =
   | CompositionRefNode
   | SatoriNode
   | ParticleSystemNode
-  | VolumeNode;
+  | VolumeNode
+  | ModelNode;
