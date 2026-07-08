@@ -162,11 +162,40 @@ describe("postEffectConfigSchema", () => {
     expect(postEffectConfigSchema.safeParse({ type: "motionBlur" }).success).toBe(true);
   });
 
+  it("accepts a colorGrade effect with all fields, and with none", () => {
+    expect(
+      postEffectConfigSchema.safeParse({
+        type: "colorGrade",
+        lift: [0.02, 0, -0.01],
+        gamma: [1, 1.1, 0.95],
+        gain: [1.05, 1, 0.98],
+        saturation: 1.1,
+        contrast: 1.05,
+      }).success,
+    ).toBe(true);
+    expect(postEffectConfigSchema.safeParse({ type: "colorGrade" }).success).toBe(true);
+  });
+
+  it("rejects a colorGrade effect whose lift/gamma/gain is not a 3-tuple", () => {
+    expect(postEffectConfigSchema.safeParse({ type: "colorGrade", lift: [0, 0] }).success).toBe(false);
+    expect(postEffectConfigSchema.safeParse({ type: "colorGrade", gain: [0, 0, 0, 0] }).success).toBe(false);
+  });
+
+  it("accepts a lut effect with lutRef, and rejects one missing lutRef", () => {
+    expect(postEffectConfigSchema.safeParse({ type: "lut", lutRef: "warm", intensity: 0.6 }).success).toBe(true);
+    expect(postEffectConfigSchema.safeParse({ type: "lut", lutRef: "warm" }).success).toBe(true);
+    expect(postEffectConfigSchema.safeParse({ type: "lut" }).success).toBe(false);
+  });
+
   it("rejects each new effect type with an extra, unrecognized field", () => {
     expect(postEffectConfigSchema.safeParse({ type: "bloom", glow: true }).success).toBe(false);
     expect(postEffectConfigSchema.safeParse({ type: "depthOfField", blurriness: 1 }).success).toBe(false);
     expect(postEffectConfigSchema.safeParse({ type: "vignette", radius: 1 }).success).toBe(false);
     expect(postEffectConfigSchema.safeParse({ type: "motionBlur", exposure: 1 }).success).toBe(false);
+    expect(postEffectConfigSchema.safeParse({ type: "colorGrade", curve: [] }).success).toBe(false);
+    expect(postEffectConfigSchema.safeParse({ type: "lut", lutRef: "warm", path: "/tmp/x.cube" }).success).toBe(
+      false,
+    );
   });
 });
 
