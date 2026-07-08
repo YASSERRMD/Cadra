@@ -391,7 +391,9 @@ describe("createWorkerRenderer", () => {
       const directCalls: Array<{ sceneState: SceneState; frameContext: typeof frameContext }> = [];
       const directRenderer: Renderer = {
         init: async () => undefined,
-        renderFrame: (sceneState, ctx) => directCalls.push({ sceneState, frameContext: ctx }),
+        renderFrame: (sceneState, ctx) => {
+          directCalls.push({ sceneState, frameContext: ctx });
+        },
         resize: () => undefined,
         dispose: () => undefined,
         backend: "webgpu",
