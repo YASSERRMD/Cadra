@@ -149,6 +149,15 @@ export type {
   RenderSize,
   RenderTarget,
 } from "./renderer.js";
+export type {
+  MutableTextRenderRegistry,
+  TextRenderEntry,
+  TextRenderRegistry,
+} from "./text/text-render-registry.js";
+export {
+  computeTextNodeRenderKey,
+  createInMemoryTextRenderRegistry,
+} from "./text/text-render-registry.js";
 export type { ThreeRendererDependencies, ThreeRendererFactory } from "./three-renderer.js";
 export {
   defaultThreeRendererDependencies,

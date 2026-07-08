@@ -3,6 +3,7 @@ import type {
   PixelReadableRenderer,
   RenderSize,
   RenderTarget,
+  TextRenderRegistry,
   ThreeRendererDependencies,
 } from "@cadra/renderer";
 import { createDefaultModelRegistry, defaultThreeRendererDependencies, ThreeRenderer } from "@cadra/renderer";
@@ -400,6 +401,15 @@ export interface CreateNativeGpuHeadlessRendererOptions {
    * instance before rendering.
    */
   modelRegistry?: ModelRegistry;
+  /**
+   * Resolves a `"text"` scene node's own shaped/atlas-generated render data
+   * (Phase 71). Defaults to `undefined`, mirroring `ThreeRenderer`'s own
+   * constructor default - every `"text"` node then renders as an empty
+   * placeholder until a caller supplies a real registry populated ahead of
+   * time (shaping and MSDF atlas generation are both async; see
+   * `TextRenderRegistry`'s own doc in `@cadra/renderer`).
+   */
+  textRenderRegistry?: TextRenderRegistry;
 }
 
 /**
@@ -448,6 +458,7 @@ export function createNativeGpuHeadlessRenderer(
 
   const createDevice = options.createDevice ?? (() => createNativeGpuDevice());
   const modelRegistry = options.modelRegistry ?? createDefaultModelRegistry();
+  const textRenderRegistry = options.textRenderRegistry;
 
   let headlessTarget: ReturnType<typeof createHeadlessGpuCanvasTarget> | undefined;
   let device: GPUDevice | undefined;
@@ -494,7 +505,7 @@ export function createNativeGpuHeadlessRenderer(
     createParticleRuntime: defaultThreeRendererDependencies.createParticleRuntime,
   };
 
-  const inner = new ThreeRenderer(deps, undefined, undefined, modelRegistry);
+  const inner = new ThreeRenderer(deps, undefined, undefined, modelRegistry, textRenderRegistry);
 
   return {
     async init(_target: RenderTarget, size: RenderSize): Promise<void> {

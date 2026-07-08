@@ -61,6 +61,8 @@ import type {
   RenderTarget,
 } from "./renderer.js";
 import { createContactShadowMesh } from "./shadows/contact-shadow.js";
+import type { SatoriLayerRenderRegistry } from "./svg-layer/satori-layer-render-registry.js";
+import type { TextRenderRegistry } from "./text/text-render-registry.js";
 
 /**
  * The subset of `THREE.WebGPURenderer` / `THREE.WebGLRenderer` this module
@@ -569,6 +571,8 @@ export class ThreeRenderer implements Renderer {
   private readonly environmentRegistry: EnvironmentRegistry;
   private readonly lutRegistry: LutRegistry;
   private readonly modelRegistry: ModelRegistry;
+  private readonly textRenderRegistry: TextRenderRegistry | undefined;
+  private readonly satoriLayerRenderRegistry: SatoriLayerRenderRegistry | undefined;
   private threeRenderer: ThreeRendererLike | undefined;
   private resolvedBackend: RendererBackend | undefined;
   private wasFallback = false;
@@ -677,12 +681,20 @@ export class ThreeRenderer implements Renderer {
     environmentRegistry: EnvironmentRegistry = createDefaultEnvironmentRegistry(),
     lutRegistry: LutRegistry = createDefaultLutRegistry(),
     modelRegistry: ModelRegistry = createDefaultModelRegistry(),
+    textRenderRegistry?: TextRenderRegistry,
+    satoriLayerRenderRegistry?: SatoriLayerRenderRegistry,
   ) {
     this.deps = deps;
     this.environmentRegistry = environmentRegistry;
     this.lutRegistry = lutRegistry;
     this.modelRegistry = modelRegistry;
-    this.reconciler = createReconciler({ modelRegistry });
+    this.textRenderRegistry = textRenderRegistry;
+    this.satoriLayerRenderRegistry = satoriLayerRenderRegistry;
+    this.reconciler = createReconciler({
+      modelRegistry,
+      ...(textRenderRegistry !== undefined && { textRenderRegistry }),
+      ...(satoriLayerRenderRegistry !== undefined && { satoriLayerRenderRegistry }),
+    });
     this.defaultCamera.position.set(0, 0, 5);
   }
 

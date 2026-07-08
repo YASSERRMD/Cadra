@@ -37,3 +37,53 @@ jobs:
 
       - name: Build
         run: pnpm run build
+
+  golden-frames:
+    name: Golden-frame visual regression (non-blocking)
+    runs-on: ubuntu-latest
+    # Deliberately non-blocking (Phase 71 task 3): a golden-frame diff often
+    # means a deliberate visual change whose reference has not been updated
+    # yet, not a broken build, and this job's own native-GPU render path is
+    # experimental (createNativeGpuHeadlessRenderer, @cadra/headless) with
+    # no guarantee of a usable GPU/software-Vulkan device on every runner.
+    # See packages/golden-frames/src/compare-references.e2e.test.ts's own
+    # doc for the full rationale and how a real failure here should be
+    # resolved.
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install headless Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: packages/golden-frames
+
+      - name: Install software Vulkan (best-effort GPU fallback)
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers libgl1-mesa-dri
+        continue-on-error: true
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Compare golden frames against checked-in references
+        run: pnpm --filter @cadra/golden-frames run compare-references
+
+      - name: Upload diff artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-frame-diffs
+          path: packages/golden-frames/diff-output/
+          if-no-files-found: ignore

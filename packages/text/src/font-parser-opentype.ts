@@ -5,6 +5,42 @@ import type { FontMetrics } from "./font-metrics.js";
 import type { ParsedFont } from "./parsed-font.js";
 
 /**
+ * Picks out the real, callable `opentype.js` module object from whatever
+ * `import * as opentype from "opentype.js"` actually bound at runtime.
+ * `@types/opentype.js` (see this module's own doc below) declares every
+ * export as if `opentype.js` were a genuine ES module (`export function
+ * parse`, `export as namespace opentype`), which is also what that
+ * namespace import is for: every type reference in this file
+ * (`opentype.Font`, `opentype.LocalizedName`) resolves correctly against
+ * it. The *installed* `opentype.js@2.0.0` package, though, actually ships
+ * as a CJS UMD bundle with no statically analyzable named exports, so plain
+ * Node's own ESM/CJS interop for `import * as` yields an object with only a
+ * synthetic `default` property holding the real module (verified directly:
+ * `Object.keys(opentype)` is exactly `["default", "module.exports"]` when
+ * this file's own compiled output runs under plain `node`, even though a
+ * dev-server bundler's own more permissive interop can paper over this and
+ * let `opentype.parse` resolve directly there too - which is why this gap
+ * went unnoticed until real compiled output was actually executed outside
+ * of a bundler, in this codebase's own golden-frame harness, Phase 71).
+ * This picks whichever shape actually carries the real exports at runtime,
+ * so `parseFontWithOpentype` below works identically under a bundler and
+ * under plain Node.
+ *
+ * Exported as a plain, dependency-free function (rather than inlined at
+ * module scope) so a test can exercise both real shapes directly without
+ * needing to fake how `opentype.js` itself resolves, matching this
+ * codebase's own preference for pure-function/injected-fake tests over
+ * module mocking.
+ */
+export function resolveOpentypeModuleExports(namespaceImport: typeof opentype): typeof opentype {
+  return typeof (namespaceImport as { parse?: unknown }).parse === "function"
+    ? namespaceImport
+    : (namespaceImport as unknown as { default: typeof opentype }).default;
+}
+
+const opentypeModule: typeof opentype = resolveOpentypeModuleExports(opentype);
+
+/**
  * `opentype.js` is the universal parsing backend: pure JS/ArrayBuffer based,
  * so unlike `fontkit` (Node's `Buffer`-only) it also runs inside a
  * browser-bundled render page. It does not do variable-font `gvar`
@@ -116,7 +152,7 @@ export function parseFontWithOpentype(bytes: Uint8Array): ParsedFont {
     bytes.byteOffset,
     bytes.byteOffset + bytes.byteLength,
   ) as ArrayBuffer;
-  const font = opentype.parse(arrayBuffer);
+  const font = opentypeModule.parse(arrayBuffer);
   const names = font.names as unknown as OpenTypeNamesByPlatform;
 
   return {

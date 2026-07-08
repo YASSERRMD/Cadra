@@ -10,8 +10,10 @@ import {
   type PhysicsConstraintConfig,
   type SceneNode,
   type SceneState,
+  type TextNode,
 } from "@cadra/core";
 import type { PhysicsTransform } from "@cadra/physics";
+import type { TextRenderData } from "@cadra/text";
 import * as THREE from "three";
 import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
 import { GroundedSkybox } from "three/addons/objects/GroundedSkybox.js";
@@ -21,6 +23,7 @@ import type { LoadedModel } from "./assets/model-registry.js";
 import { createInMemoryModelRegistry } from "./assets/model-registry.js";
 import type { EnvironmentRegistry } from "./environment/environment-registry.js";
 import type { RenderSize, RenderTarget } from "./renderer.js";
+import { computeTextNodeRenderKey, createInMemoryTextRenderRegistry } from "./text/text-render-registry.js";
 import type { ThreeRendererDependencies, ThreeRendererFactory } from "./three-renderer.js";
 import { ThreeRenderer } from "./three-renderer.js";
 
@@ -123,6 +126,39 @@ function fakeLoadedModel(name: string): LoadedModel {
   scene.add(mesh);
   return { scene, animations: [] };
 }
+
+/** A single `text` `SceneNode` with the given `content`. */
+function textNode(id: string, content: string): TextNode {
+  return {
+    id,
+    kind: "text",
+    transform: createIdentityTransform(),
+    visible: true,
+    children: [],
+    content,
+    fontSize: 1,
+    color: [1, 1, 1, 1],
+  };
+}
+
+/** A minimal, structurally-valid `TextRenderData` (one glyph, one atlas page): mirrors `node-factory.test.ts`'s own `FAKE_TEXT_RENDER_DATA`. */
+const FAKE_TEXT_RENDER_DATA: TextRenderData = {
+  lineCount: 1,
+  atlasPages: [{ width: 4, height: 4, pixels: new Uint8Array(4 * 4 * 4).fill(255), png: new Uint8Array() }],
+  glyphs: [
+    {
+      glyphId: 1,
+      cluster: 0,
+      lineIndex: 0,
+      wordIndex: 0,
+      origin: { x: 0, y: 0 },
+      quad: { left: 0, right: 1, bottom: 0, top: 1 },
+      page: 0,
+      uv: { u0: 0, v0: 0, u1: 1, v1: 1 },
+      range: 0.1,
+    },
+  ],
+};
 
 /** A single white point-light `SceneNode`, for asserting resolved color under a color grade. */
 function lightNode(id: string, overrides: Partial<LightNode> = {}): LightNode {
@@ -1205,6 +1241,69 @@ describe("ThreeRenderer: GLTF models (Phase 69)", () => {
 
     expect(rendererA.getObject3DByNodeId("model-1")?.getObjectByName("Body")).toBeInstanceOf(THREE.Mesh);
     expect(rendererB.getObject3DByNodeId("model-1")?.children.length).toBe(0);
+  });
+});
+
+describe("ThreeRenderer: text/satori render registries (Phase 71)", () => {
+  it("threads a textRenderRegistry passed to the constructor all the way through to a real renderFrame call", async () => {
+    const { deps } = createFakeDeps();
+    const textRenderRegistry = createInMemoryTextRenderRegistry();
+    textRenderRegistry.register(computeTextNodeRenderKey({ content: "Hi" }, 0), {
+      data: FAKE_TEXT_RENDER_DATA,
+      fontBytes: new Uint8Array(),
+      fontContentHash: "fake-font",
+    });
+    const renderer = new ThreeRenderer(deps, undefined, undefined, undefined, textRenderRegistry);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({
+        layers: [
+          {
+            compositionId: "comp-1",
+            trackId: "track-1",
+            clipId: "clip-1",
+            node: textNode("text-1", "Hi"),
+            zIndex: 0,
+            localFrame: 0,
+            opacity: 1,
+          },
+        ],
+      }),
+      makeFrameContext(0),
+    );
+
+    // Without a registered TextRenderEntry, a "text" node renders as an
+    // empty group (see node-factory.ts's own buildTextObject doc) - real,
+    // non-empty children here prove the constructor's own textRenderRegistry
+    // genuinely reached the reconciler, not just that renderFrame ran.
+    const object3D = renderer.getObject3DByNodeId("text-1");
+    expect(object3D?.children.length).toBeGreaterThan(0);
+  });
+
+  it("renders an empty placeholder for a text node when no textRenderRegistry was ever given", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({
+        layers: [
+          {
+            compositionId: "comp-1",
+            trackId: "track-1",
+            clipId: "clip-1",
+            node: textNode("text-1", "Hi"),
+            zIndex: 0,
+            localFrame: 0,
+            opacity: 1,
+          },
+        ],
+      }),
+      makeFrameContext(0),
+    );
+
+    expect(renderer.getObject3DByNodeId("text-1")?.children.length).toBe(0);
   });
 });
 
