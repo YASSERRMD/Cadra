@@ -511,10 +511,32 @@ export type PostEffectConfig =
  * non-`Property<T>` setting.
  */
 export interface CompositionPostProcessing {
-  /** Trades render cost against fidelity for whichever effect in `effects` has an expensive quality knob of its own. Defaults to `"final"`. */
+  /** Trades render cost against fidelity for whichever effect in `effects` has an expensive quality knob of its own, and for `sampleCount`'s own default. Defaults to `"final"`. */
   tier?: RenderQualityTier;
   /** The effect stack, applied in array order within each effect's own fixed pre/post-tonemap stage. An empty array is a no-op, identical to omitting `postProcessing` entirely. */
   effects: PostEffectConfig[];
+  /**
+   * The number of sub-pixel-jittered camera samples accumulated (averaged)
+   * into each output frame: real supersampling, not a post-process blur,
+   * cleaning up geometry edges and softening any bokeh/motion-blur artifact
+   * in the composited result along with them. Each sample re-renders the
+   * scene through a camera offset by a fixed, deterministic jitter pattern
+   * (`@cadra/renderer`'s own `resolveSampleLevel`, driven by Three.js's own
+   * static jitter table - never `Math.random()` or a per-frame seed, so
+   * every frame at a given `sampleCount` jitters identically), so a fixed
+   * `sampleCount` is byte-reproducible. Rounds up to the nearest power of
+   * two, one to 32. Omitted or `1` means no accumulation at all (a single
+   * sample, the pre-Phase-61 default).
+   *
+   * Deliberately spatial-only, not temporal: every sample renders the exact
+   * same resolved scene state (the same integer frame), only the camera's
+   * own sub-pixel view offset varies between samples. A moving object is
+   * therefore always sampled at its one correct position for the frame,
+   * never partially smeared across samples the way true sub-frame time
+   * sampling would - motion blur itself stays `MotionBlurEffectConfig`'s
+   * own job, not this field's.
+   */
+  sampleCount?: number;
 }
 
 /** The top-level authoring unit: a named collection of compositions. */
