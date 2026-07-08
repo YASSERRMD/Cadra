@@ -66,6 +66,7 @@ export type {
   EnvironmentGroundProjection,
   FilmGrainEffectConfig,
   LensDistortionEffectConfig,
+  MotionBlurEffectConfig,
   PostEffectConfig,
   Project,
   RenderQualityTier,

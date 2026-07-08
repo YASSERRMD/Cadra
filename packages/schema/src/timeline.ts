@@ -18,6 +18,7 @@ import type {
   EnvironmentGroundProjection,
   FilmGrainEffectConfig,
   LensDistortionEffectConfig,
+  MotionBlurEffectConfig,
   PostEffectConfig,
   Project,
   RenderQualityTier,
@@ -532,6 +533,20 @@ type _CheckLensDistortionEffectConfig = AssertTrue<
   AssertEqual<z.infer<typeof lensDistortionEffectConfigSchema>, LensDistortionEffectConfig>
 >;
 
+/** A true velocity-buffer motion blur pass, mirroring `MotionBlurEffectConfig`. WebGPU-backend only; see that type's own doc. */
+export const motionBlurEffectConfigSchema = z.strictObject({
+  type: z.literal("motionBlur"),
+  shutterAngle: z.number().optional().describe("Shutter angle in degrees, 0 to 360. Defaults to 180."),
+  samples: z
+    .number()
+    .optional()
+    .describe("Samples taken along each pixel's own velocity vector. Higher is smoother and more expensive. Defaults to 16."),
+});
+
+type _CheckMotionBlurEffectConfig = AssertTrue<
+  AssertEqual<z.infer<typeof motionBlurEffectConfigSchema>, MotionBlurEffectConfig>
+>;
+
 /**
  * One configured entry in `compositionPostProcessingSchema.effects`, mirroring
  * `PostEffectConfig`. A discriminated union on `type`, growing by one variant
@@ -545,6 +560,7 @@ export const postEffectConfigSchema = z.discriminatedUnion("type", [
   vignetteEffectConfigSchema,
   filmGrainEffectConfigSchema,
   lensDistortionEffectConfigSchema,
+  motionBlurEffectConfigSchema,
 ]);
 
 type _CheckPostEffectConfig = AssertTrue<AssertEqual<z.infer<typeof postEffectConfigSchema>, PostEffectConfig>>;

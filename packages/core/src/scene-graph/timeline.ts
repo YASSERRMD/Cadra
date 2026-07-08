@@ -450,15 +450,50 @@ export interface LensDistortionEffectConfig {
 }
 
 /**
+ * A true velocity-buffer motion blur pass: smears each pixel along its own
+ * per-object screen-space motion (current frame's transform versus the
+ * previous frame's, for both the camera and every mesh, rotation included),
+ * scaled by a real cine camera's own shutter-angle convention (`0` is no
+ * blur, `180` the standard cinematic default exposing half the frame
+ * interval, `360` the maximum, exposing the whole interval). Pre-tonemap
+ * (see `PostEffectConfig`'s own doc): blurring the scene's own linear HDR
+ * data, before bloom, is what lets a blurred bright highlight still bloom
+ * correctly.
+ *
+ * WebGPU-backend only, and silently skipped (a no-op, not an error) on the
+ * WebGL2 fallback: Three.js's own per-object velocity tracking
+ * (`VelocityNode`, see `@cadra/renderer`) is TSL-node infrastructure with no
+ * classic-material equivalent, the same class of backend asymmetry
+ * `CompositionShadowQuality.cascadedShadows` already documents for the exact
+ * same underlying reason (a WebGPU-only Three.js technique with no
+ * hand-rollable WebGL2 counterpart worth the cost of building one from
+ * scratch). Determinism depends on frames being rendered in strictly
+ * increasing order with no skipped or repeated frame (each frame's own
+ * velocity is computed from the immediately preceding rendered frame's own
+ * transforms, not derived from the frame index alone) - true of this
+ * project's own sequential final-render path, but not of arbitrary preview
+ * scrubbing/seeking, where a blurred frame reached by a jump may show
+ * incorrect blur once, self-correcting the next sequential frame after it.
+ */
+export interface MotionBlurEffectConfig {
+  type: "motionBlur";
+  /** Shutter angle in degrees, `0` to `360`. Defaults to `180`. */
+  shutterAngle?: number;
+  /** Samples taken along each pixel's own velocity vector. Higher is smoother and more expensive. Defaults to `16`. */
+  samples?: number;
+}
+
+/**
  * One configured entry in `CompositionPostProcessing.effects`. A
  * discriminated union on `type`, growing by one variant per effect Phase 59
  * onward adds. Which side of tone mapping a given `type` renders on (linear
  * scene-referred HDR versus the final display-referred image) is an inherent
  * property of that effect, decided by the renderer, not an authorable field
  * here: getting it wrong would silently clip or wash out the effect, so it is
- * not something a scene author or agent can misconfigure. `bloom` and
- * `depthOfField` render pre-tonemap; `sharpen`, `chromaticAberration`,
- * `vignette`, `filmGrain`, and `lensDistortion` render post-tonemap.
+ * not something a scene author or agent can misconfigure. `bloom`,
+ * `depthOfField`, and `motionBlur` render pre-tonemap; `sharpen`,
+ * `chromaticAberration`, `vignette`, `filmGrain`, and `lensDistortion` render
+ * post-tonemap.
  */
 export type PostEffectConfig =
   | SharpenEffectConfig
@@ -467,7 +502,8 @@ export type PostEffectConfig =
   | ChromaticAberrationEffectConfig
   | VignetteEffectConfig
   | FilmGrainEffectConfig
-  | LensDistortionEffectConfig;
+  | LensDistortionEffectConfig
+  | MotionBlurEffectConfig;
 
 /**
  * A whole-composition post-processing effect stack. See

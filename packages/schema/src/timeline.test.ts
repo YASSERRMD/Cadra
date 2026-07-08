@@ -155,10 +155,18 @@ describe("postEffectConfigSchema", () => {
     expect(postEffectConfigSchema.safeParse({ type: "lensDistortion" }).success).toBe(true);
   });
 
+  it("accepts a motionBlur effect with shutterAngle and samples, and with neither", () => {
+    expect(postEffectConfigSchema.safeParse({ type: "motionBlur", shutterAngle: 270, samples: 24 }).success).toBe(
+      true,
+    );
+    expect(postEffectConfigSchema.safeParse({ type: "motionBlur" }).success).toBe(true);
+  });
+
   it("rejects each new effect type with an extra, unrecognized field", () => {
     expect(postEffectConfigSchema.safeParse({ type: "bloom", glow: true }).success).toBe(false);
     expect(postEffectConfigSchema.safeParse({ type: "depthOfField", blurriness: 1 }).success).toBe(false);
     expect(postEffectConfigSchema.safeParse({ type: "vignette", radius: 1 }).success).toBe(false);
+    expect(postEffectConfigSchema.safeParse({ type: "motionBlur", exposure: 1 }).success).toBe(false);
   });
 });
 

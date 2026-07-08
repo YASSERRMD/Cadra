@@ -184,6 +184,59 @@ function buildProjectWithPostProcessing(): Project {
 }
 
 /**
+ * A scene built specifically to exercise Phase 60's own velocity-buffer
+ * motion blur: the same lit-box scene as `buildProject`, except the box's
+ * own `transform.position` is a `keyframeTrack` moving it a large distance
+ * (20 scene units, comfortably more than the box's own size) across the
+ * three-frame composition, with `motionBlur` (a high shutter angle, to make
+ * any wiring bug maximally visible) as the only configured effect. This is
+ * real, non-mocked coverage that `VelocityNode`'s own per-object motion
+ * tracking (see `applyWebGpuEffect` in `@cadra/renderer`) actually executes
+ * end to end through a real browser without throwing - ahead of Phase 71's
+ * own dedicated golden-frame harness, which is the right place for a pixel-
+ * level check of the blur's own direction and magnitude.
+ */
+function buildProjectWithMotionBlur(): Project {
+  const project = buildProject();
+  const composition = project.compositions[0];
+  if (composition === undefined) {
+    throw new Error("buildProject() always returns a project with exactly one composition.");
+  }
+
+  const movingShape = Shape({
+    id: "shape-1",
+    transform: {
+      position: {
+        type: "keyframeTrack",
+        keyframes: [
+          { frame: 0, value: [-10, 0, 0] },
+          { frame: DURATION_IN_FRAMES - 1, value: [10, 0, 0] },
+        ],
+      },
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+    },
+  });
+
+  const withMovingShape: Composition = {
+    ...composition,
+    tracks: composition.tracks.map((track) =>
+      track.id === "track-shape"
+        ? {
+            ...track,
+            clips: track.clips.map((clip) => ({ ...clip, node: movingShape })),
+          }
+        : track,
+    ),
+    postProcessing: {
+      effects: [{ type: "motionBlur", shutterAngle: 360, samples: 8 }],
+    },
+  };
+
+  return { ...project, compositions: [withMovingShape] };
+}
+
+/**
  * Whether real Chromium is available in this environment: checked
  * synchronously via Playwright's own `chromium.executablePath()` (the exact
  * path Playwright itself would try to launch) plus a filesystem existence
@@ -356,6 +409,56 @@ describe("renderCompositionHeadlessServer: real end-to-end browser render", () =
         // non-blank, validly muxed MP4 - not a golden-frame pixel match
         // (that is Phase 71's own job), but real proof this phase's large
         // amount of new pipeline-construction code actually executes.
+        const bytes = readFileSync(outputPath);
+        expect(bytes.byteLength).toBeGreaterThan(512);
+
+        const trackTimescale = readMp4TrackTimescale(bytes);
+        expect(trackTimescale).toBeGreaterThan(0);
+        const actualDurationTicks = readMp4FragmentedDurationTicks(bytes);
+        const expectedTicks = expectedMp4DurationTicks(DURATION_IN_FRAMES, FPS, trackTimescale);
+        expect(actualDurationTicks).toBe(expectedTicks);
+      } finally {
+        rmSync(outputPath, { force: true });
+      }
+    },
+    60_000,
+  );
+
+  it(
+    "renders a fast-moving object with velocity-buffer motion blur enabled, via a real headless browser",
+    async () => {
+      if (!chromiumAvailable) {
+        console.log(
+          "renderCompositionHeadlessServer motion blur e2e test: skipping, real Chromium not found (no cached Playwright browser in this environment).",
+        );
+        return;
+      }
+
+      const project = buildProjectWithMotionBlur();
+      const outputPath = join(
+        tmpdir(),
+        `cadra-headless-e2e-motionblur-${Date.now()}-${Math.random().toString(36).slice(2)}.mp4`,
+      );
+      const destination = createWriteStream(outputPath);
+
+      try {
+        await renderCompositionHeadlessServer({
+          project,
+          compositionId: "comp-1",
+          seed: "e2e-motionblur-seed",
+          format: "mp4",
+          bitrate: 1_000_000,
+          destination,
+          entryFilePath: BROWSER_HEADLESS_RENDER_ENTRY_PATH,
+          onProgress: () => {},
+          timeoutMs: 45_000,
+          maxAttempts: 1,
+        });
+
+        // Real proof VelocityNode's own per-object motion tracking
+        // (previous vs current matrixWorld, including this scene's own
+        // real inter-frame motion) executes end to end without throwing,
+        // and still produces a real, non-blank, validly muxed MP4.
         const bytes = readFileSync(outputPath);
         expect(bytes.byteLength).toBeGreaterThan(512);
 
