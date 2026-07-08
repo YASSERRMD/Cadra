@@ -8,6 +8,7 @@ import {
   audioTrackSchema,
   clipSchema,
   compositionSchema,
+  postEffectConfigSchema,
   projectSchema,
   trackSchema,
   transitionSchema,
@@ -87,6 +88,28 @@ describe("transitionSchema", () => {
 
   it("rejects an unrecognized transition type", () => {
     const result = transitionSchema.safeParse({ type: "sparkle", durationInFrames: 10 });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("postEffectConfigSchema", () => {
+  it("accepts a sharpen effect with an amount", () => {
+    const result = postEffectConfigSchema.safeParse({ type: "sharpen", amount: 0.75 });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a sharpen effect with no amount (defaults elsewhere)", () => {
+    const result = postEffectConfigSchema.safeParse({ type: "sharpen" });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects an unrecognized effect type", () => {
+    const result = postEffectConfigSchema.safeParse({ type: "sparkle", amount: 0.5 });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a sharpen effect with an extra, unrecognized field", () => {
+    const result = postEffectConfigSchema.safeParse({ type: "sharpen", amount: 0.5, radius: 3 });
     expect(result.success).toBe(false);
   });
 });
@@ -508,6 +531,30 @@ describe("compositionSchema", () => {
           clips: [{ id: "clip-1", startFrame: 0, durationInFrames: 90, assetRef: "m.mp3", gain: -1 }],
         },
       ],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts a composition with a postProcessing effect stack", () => {
+    const result = compositionSchema.safeParse({
+      ...validComposition(),
+      postProcessing: { tier: "preview", effects: [{ type: "sharpen", amount: 0.6 }] },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a composition with an empty postProcessing.effects array (a no-op)", () => {
+    const result = compositionSchema.safeParse({
+      ...validComposition(),
+      postProcessing: { effects: [] },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a composition whose postProcessing.effects contains an invalid entry", () => {
+    const result = compositionSchema.safeParse({
+      ...validComposition(),
+      postProcessing: { effects: [{ type: "sparkle" }] },
     });
     expect(result.success).toBe(false);
   });

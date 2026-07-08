@@ -413,6 +413,49 @@
                   }
                 },
                 "additionalProperties": false
+              },
+              "postProcessing": {
+                "description": "Optional whole-composition post-processing effect stack.",
+                "type": "object",
+                "properties": {
+                  "tier": {
+                    "description": "Trades render cost against fidelity. Defaults to 'final'.",
+                    "type": "string",
+                    "enum": [
+                      "preview",
+                      "final"
+                    ]
+                  },
+                  "effects": {
+                    "type": "array",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "sharpen"
+                            },
+                            "amount": {
+                              "description": "Strength of the sharpening effect. 0 is a no-op. Defaults to 0.5.",
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "description": "The effect stack, applied in array order within each effect's own fixed pre/post-tonemap stage. An empty array is a no-op."
+                  }
+                },
+                "required": [
+                  "effects"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
