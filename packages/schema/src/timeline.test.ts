@@ -614,6 +614,29 @@ describe("compositionSchema", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("accepts a composition with a postProcessing.sampleCount", () => {
+    const result = compositionSchema.safeParse({
+      ...validComposition(),
+      postProcessing: { effects: [], sampleCount: 16 },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a non-integer or non-positive postProcessing.sampleCount", () => {
+    expect(
+      compositionSchema.safeParse({ ...validComposition(), postProcessing: { effects: [], sampleCount: 4.5 } })
+        .success,
+    ).toBe(false);
+    expect(
+      compositionSchema.safeParse({ ...validComposition(), postProcessing: { effects: [], sampleCount: 0 } })
+        .success,
+    ).toBe(false);
+    expect(
+      compositionSchema.safeParse({ ...validComposition(), postProcessing: { effects: [], sampleCount: -4 } })
+        .success,
+    ).toBe(false);
+  });
 });
 
 describe("projectSchema", () => {

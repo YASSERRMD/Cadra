@@ -34,4 +34,27 @@ describe("resolvePostProcessing", () => {
     const postProcessing = { tier: "preview" as const, effects: [{ type: "sharpen" as const, amount: 0.8 }] };
     expect(resolvePostProcessing(postProcessing)).toEqual(resolvePostProcessing({ ...postProcessing }));
   });
+
+  it("is not a no-op with an empty effects array when sampleCount calls for accumulation", () => {
+    const resolved = resolvePostProcessing({ effects: [], sampleCount: 8 });
+    expect(resolved).not.toBeUndefined();
+    expect(resolved?.sampleCount).toBe(8);
+  });
+
+  it("omits sampleCount from the resolved config when omitted or 1", () => {
+    expect(resolvePostProcessing({ effects: [{ type: "sharpen", amount: 0.5 }] })?.sampleCount).toBeUndefined();
+    expect(
+      resolvePostProcessing({ effects: [{ type: "sharpen", amount: 0.5 }], sampleCount: 1 })?.sampleCount,
+    ).toBeUndefined();
+  });
+
+  it("uses the full authored sampleCount at the 'final' tier", () => {
+    const resolved = resolvePostProcessing({ tier: "final", effects: [], sampleCount: 32 });
+    expect(resolved?.sampleCount).toBe(32);
+  });
+
+  it("caps sampleCount at the 'preview' tier", () => {
+    const resolved = resolvePostProcessing({ tier: "preview", effects: [], sampleCount: 32 });
+    expect(resolved?.sampleCount).toBe(4);
+  });
 });
