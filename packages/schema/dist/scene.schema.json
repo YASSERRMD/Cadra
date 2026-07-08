@@ -732,6 +732,130 @@
                   }
                 },
                 "additionalProperties": false
+              },
+              "physics": {
+                "description": "Optional whole-composition physics world tuning.",
+                "type": "object",
+                "properties": {
+                  "gravity": {
+                    "description": "Acceleration applied to every dynamic rigid body. Defaults to [0, -9.81, 0].",
+                    "type": "array",
+                    "prefixItems": [
+                      {
+                        "type": "number",
+                        "description": "The x component of the vector."
+                      },
+                      {
+                        "type": "number",
+                        "description": "The y component of the vector."
+                      },
+                      {
+                        "type": "number",
+                        "description": "The z component of the vector."
+                      }
+                    ]
+                  },
+                  "substeps": {
+                    "description": "Physics sub-steps per rendered frame, trading cost for stability. Defaults to 1.",
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "additionalProperties": false
+              },
+              "physicsConstraints": {
+                "description": "Optional joints constraining pairs of this composition's own rigid bodies.",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Unique identifier for this constraint within the composition."
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "fixed",
+                        "spherical",
+                        "revolute",
+                        "prismatic"
+                      ]
+                    },
+                    "bodyA": {
+                      "type": "string",
+                      "description": "Id of the MeshNode (with a rigidBody set) this constraint's first body attaches to."
+                    },
+                    "bodyB": {
+                      "type": "string",
+                      "description": "Id of the MeshNode (with a rigidBody set) this constraint's second body attaches to."
+                    },
+                    "anchorA": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "bodyA's own local-space attachment point."
+                    },
+                    "anchorB": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "bodyB's own local-space attachment point."
+                    },
+                    "axis": {
+                      "description": "The hinge (revolute) or sliding (prismatic) axis. Ignored for fixed and spherical.",
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "type",
+                    "bodyA",
+                    "bodyB",
+                    "anchorA",
+                    "anchorB"
+                  ],
+                  "additionalProperties": false
+                }
               }
             },
             "required": [
@@ -2634,6 +2758,186 @@
             "receiveShadow": {
               "description": "Whether this mesh receives shadows cast by shadow-casting lights. Defaults to false.",
               "type": "boolean"
+            },
+            "rigidBody": {
+              "description": "Rigid-body physics simulated by @cadra/physics. Omitted means this mesh is not physics-driven.",
+              "type": "object",
+              "properties": {
+                "bodyType": {
+                  "type": "string",
+                  "enum": [
+                    "dynamic",
+                    "fixed",
+                    "kinematic"
+                  ]
+                },
+                "collider": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "shape": {
+                          "type": "string",
+                          "const": "box"
+                        },
+                        "halfExtents": {
+                          "type": "array",
+                          "prefixItems": [
+                            {
+                              "type": "number",
+                              "description": "The x component of the vector."
+                            },
+                            {
+                              "type": "number",
+                              "description": "The y component of the vector."
+                            },
+                            {
+                              "type": "number",
+                              "description": "The z component of the vector."
+                            }
+                          ],
+                          "description": "Half-width, half-height, half-depth of the box, in the mesh node's own local units."
+                        }
+                      },
+                      "required": [
+                        "shape",
+                        "halfExtents"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "shape": {
+                          "type": "string",
+                          "const": "sphere"
+                        },
+                        "radius": {
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "shape",
+                        "radius"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "shape": {
+                          "type": "string",
+                          "const": "capsule"
+                        },
+                        "halfHeight": {
+                          "type": "number",
+                          "exclusiveMinimum": 0,
+                          "description": "Half the length of the capsule's own straight cylindrical section, excluding its rounded caps."
+                        },
+                        "radius": {
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "shape",
+                        "halfHeight",
+                        "radius"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "shape": {
+                          "type": "string",
+                          "const": "cylinder"
+                        },
+                        "halfHeight": {
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        },
+                        "radius": {
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "shape",
+                        "halfHeight",
+                        "radius"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "mass": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "friction": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "restitution": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "linearDamping": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "angularDamping": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "initialLinearVelocity": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "A 3-component numeric tuple, typically a world-space position or axis."
+                },
+                "initialAngularVelocity": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "description": "The x component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The y component of the vector."
+                    },
+                    {
+                      "type": "number",
+                      "description": "The z component of the vector."
+                    }
+                  ],
+                  "description": "A 3-component numeric tuple, typically a world-space position or axis."
+                },
+                "ccdEnabled": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "bodyType",
+                "collider"
+              ],
+              "additionalProperties": false
             },
             "children": {
               "type": "array",

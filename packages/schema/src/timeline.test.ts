@@ -712,6 +712,51 @@ describe("compositionSchema", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("accepts a composition with a physics world and no constraints", () => {
+    const result = compositionSchema.safeParse({
+      ...validComposition(),
+      physics: { gravity: [0, -9.81, 0], substeps: 2 },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a composition with physicsConstraints", () => {
+    const result = compositionSchema.safeParse({
+      ...validComposition(),
+      physicsConstraints: [
+        {
+          id: "joint-1",
+          type: "revolute",
+          bodyA: "body-a",
+          bodyB: "body-b",
+          anchorA: [0, 0, 0],
+          anchorB: [0, 1, 0],
+          axis: [1, 0, 0],
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a composition with neither physics nor physicsConstraints", () => {
+    expect(compositionSchema.safeParse(validComposition()).success).toBe(true);
+  });
+
+  it("rejects an unrecognized physicsConstraints type", () => {
+    const result = compositionSchema.safeParse({
+      ...validComposition(),
+      physicsConstraints: [
+        { id: "joint-1", type: "ball-socket", bodyA: "a", bodyB: "b", anchorA: [0, 0, 0], anchorB: [0, 0, 0] },
+      ],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a non-positive physics.substeps", () => {
+    expect(compositionSchema.safeParse({ ...validComposition(), physics: { substeps: 0 } }).success).toBe(false);
+    expect(compositionSchema.safeParse({ ...validComposition(), physics: { substeps: -1 } }).success).toBe(false);
+  });
 });
 
 describe("projectSchema", () => {

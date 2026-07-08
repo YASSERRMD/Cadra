@@ -12,6 +12,7 @@ import type {
   Composition,
   CompositionColorGrading,
   CompositionEnvironment,
+  CompositionPhysics,
   CompositionPostProcessing,
   CompositionRenderMode,
   CompositionShadowQuality,
@@ -23,6 +24,7 @@ import type {
   LutEffectConfig,
   MotionBlurEffectConfig,
   PathTracingConfig,
+  PhysicsConstraintConfig,
   PostEffectConfig,
   Project,
   RenderQualityTier,
@@ -34,6 +36,7 @@ import type {
 } from "@cadra/core";
 import { z } from "zod";
 
+import { vector3Schema } from "./primitives.js";
 import { sceneNodeSchema } from "./scene-node.js";
 
 /**
@@ -659,6 +662,36 @@ export const pathTracingConfigSchema = z.strictObject({
 
 type _CheckPathTracingConfig = AssertTrue<AssertEqual<z.infer<typeof pathTracingConfigSchema>, PathTracingConfig>>;
 
+/** Whole-physics-world tuning, mirroring `CompositionPhysics`. */
+export const compositionPhysicsSchema = z.strictObject({
+  gravity: vector3Schema.optional().describe("Acceleration applied to every dynamic rigid body. Defaults to [0, -9.81, 0]."),
+  substeps: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Physics sub-steps per rendered frame, trading cost for stability. Defaults to 1."),
+});
+
+type _CheckCompositionPhysics = AssertTrue<
+  AssertEqual<z.infer<typeof compositionPhysicsSchema>, CompositionPhysics>
+>;
+
+/** A joint constraining two rigid bodies, mirroring `PhysicsConstraintConfig`. */
+export const physicsConstraintConfigSchema = z.strictObject({
+  id: z.string().describe("Unique identifier for this constraint within the composition."),
+  type: z.enum(["fixed", "spherical", "revolute", "prismatic"]),
+  bodyA: z.string().describe("Id of the MeshNode (with a rigidBody set) this constraint's first body attaches to."),
+  bodyB: z.string().describe("Id of the MeshNode (with a rigidBody set) this constraint's second body attaches to."),
+  anchorA: vector3Schema.describe("bodyA's own local-space attachment point."),
+  anchorB: vector3Schema.describe("bodyB's own local-space attachment point."),
+  axis: vector3Schema.optional().describe("The hinge (revolute) or sliding (prismatic) axis. Ignored for fixed and spherical."),
+});
+
+type _CheckPhysicsConstraintConfig = AssertTrue<
+  AssertEqual<z.infer<typeof physicsConstraintConfigSchema>, PhysicsConstraintConfig>
+>;
+
 /**
  * A single renderable timeline: a fixed frame rate, a fixed integer duration,
  * a fixed output size, and the tracks of clips that populate it.
@@ -699,6 +732,11 @@ export const compositionSchema = z.strictObject({
   pathTracing: pathTracingConfigSchema
     .optional()
     .describe("Optional path-traced render tuning, read only when renderMode is 'pathTraced'."),
+  physics: compositionPhysicsSchema.optional().describe("Optional whole-composition physics world tuning."),
+  physicsConstraints: z
+    .array(physicsConstraintConfigSchema)
+    .optional()
+    .describe("Optional joints constraining pairs of this composition's own rigid bodies."),
 });
 
 type _CheckComposition = AssertTrue<AssertEqual<z.infer<typeof compositionSchema>, Composition>>;

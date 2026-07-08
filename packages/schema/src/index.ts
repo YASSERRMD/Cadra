@@ -65,6 +65,7 @@ export { applyPatchAtPath, InvalidPathError, parsePath, PathTraversalError } fro
 export { colorRgbaSchema, transformSchema, vector2Schema, vector3Schema } from "./primitives.js";
 export {
   cameraNodeSchema,
+  colliderConfigSchema,
   compositionRefNodeSchema,
   easingNameSchema,
   groupNodeSchema,
@@ -72,6 +73,7 @@ export {
   lightNodeSchema,
   lightTypeSchema,
   meshNodeSchema,
+  rigidBodyConfigSchema,
   satoriElementKeyframesSchema,
   satoriLayerFontRefSchema,
   satoriNodeSchema,
@@ -107,9 +109,11 @@ export {
   audioFadeEnvelopeSchema,
   audioTrackSchema,
   clipSchema,
+  compositionPhysicsSchema,
   compositionRenderModeSchema,
   compositionSchema,
   pathTracingConfigSchema,
+  physicsConstraintConfigSchema,
   projectSchema,
   trackSchema,
   transitionSchema,
