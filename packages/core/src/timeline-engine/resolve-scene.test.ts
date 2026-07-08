@@ -7,7 +7,12 @@ import { Shape } from "../primitives/shape.js";
 import { createIdentityTransform } from "../scene-graph/primitives.js";
 import { createProject } from "../scene-graph/project-factory.js";
 import type { CompositionRefNode, SceneNode } from "../scene-graph/scene-node.js";
-import type { Composition, Project } from "../scene-graph/timeline.js";
+import type {
+  Composition,
+  CompositionPhysics,
+  PhysicsConstraintConfig,
+  Project,
+} from "../scene-graph/timeline.js";
 import { CompositionCycleError, CompositionNotFoundError } from "./errors.js";
 import { resolveSceneAtFrame } from "./resolve-scene.js";
 
@@ -1037,5 +1042,66 @@ describe("resolveSceneAtFrame: renderMode and pathTracing passthrough", () => {
     const state = resolveSceneAtFrame(project, "comp-raster", 5);
     expect(state.renderMode).toBeUndefined();
     expect(state.pathTracing).toBeUndefined();
+  });
+});
+
+describe("resolveSceneAtFrame: physics and physicsConstraints passthrough", () => {
+  it("carries the composition's own physics and physicsConstraints through unchanged", () => {
+    const shape = Shape({ id: "physics-shape" });
+    const physics: CompositionPhysics = { gravity: [0, -9.81, 0], substeps: 4 };
+    const physicsConstraints: PhysicsConstraintConfig[] = [
+      {
+        id: "joint-1",
+        type: "fixed",
+        bodyA: "body-a",
+        bodyB: "body-b",
+        anchorA: [0, 0, 0],
+        anchorB: [0, 0, 0],
+      },
+    ];
+    const composition = createComposition({
+      id: "comp-physics",
+      name: "Physics",
+      fps: 30,
+      durationInFrames: 30,
+      width: 100,
+      height: 100,
+      tracks: [
+        {
+          id: "track-content",
+          clips: [Sequence({ id: "clip-content", from: 0, durationInFrames: 30, content: shape })],
+        },
+      ],
+      physics,
+      physicsConstraints,
+    });
+    const project = createProject({ id: "p-physics", name: "Project", compositions: [composition] });
+
+    const state = resolveSceneAtFrame(project, "comp-physics", 5);
+    expect(state.physics).toEqual(physics);
+    expect(state.physicsConstraints).toEqual(physicsConstraints);
+  });
+
+  it("leaves physics and physicsConstraints undefined when the composition has neither", () => {
+    const shape = Shape({ id: "no-physics-shape" });
+    const composition = createComposition({
+      id: "comp-no-physics",
+      name: "No Physics",
+      fps: 30,
+      durationInFrames: 30,
+      width: 100,
+      height: 100,
+      tracks: [
+        {
+          id: "track-content",
+          clips: [Sequence({ id: "clip-content", from: 0, durationInFrames: 30, content: shape })],
+        },
+      ],
+    });
+    const project = createProject({ id: "p-no-physics", name: "Project", compositions: [composition] });
+
+    const state = resolveSceneAtFrame(project, "comp-no-physics", 5);
+    expect(state.physics).toBeUndefined();
+    expect(state.physicsConstraints).toBeUndefined();
   });
 });

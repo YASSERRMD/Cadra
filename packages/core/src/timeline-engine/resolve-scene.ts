@@ -119,6 +119,10 @@ function resolveComposition(
     ...(composition.postProcessing !== undefined && { postProcessing: composition.postProcessing }),
     ...(composition.renderMode !== undefined && { renderMode: composition.renderMode }),
     ...(composition.pathTracing !== undefined && { pathTracing: composition.pathTracing }),
+    ...(composition.physics !== undefined && { physics: composition.physics }),
+    ...(composition.physicsConstraints !== undefined && {
+      physicsConstraints: composition.physicsConstraints,
+    }),
   };
 }
 

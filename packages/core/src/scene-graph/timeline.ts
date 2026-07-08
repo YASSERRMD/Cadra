@@ -1,3 +1,4 @@
+import type { Vector3 } from "./primitives.js";
 import type { SceneNode } from "./scene-node.js";
 
 /**
@@ -222,6 +223,25 @@ export interface Composition {
    * `PathTracingConfig`'s own doc).
    */
   pathTracing?: PathTracingConfig;
+  /**
+   * The physics world every `MeshNode.rigidBody` in this composition
+   * simulates in (gravity, substeps), stepped by `@cadra/physics` (Phase
+   * 66) at a fixed timestep tied to this composition's own `fps`, never
+   * wall-clock. Fixed for the composition's entire length, exactly like
+   * `colorGrading`. Omitted means every field's own default (see
+   * `CompositionPhysics`'s own doc); a composition with no `rigidBody`
+   * anywhere in its scene graph never constructs a physics world at all,
+   * regardless of this field.
+   */
+  physics?: CompositionPhysics;
+  /**
+   * Joints constraining pairs of this composition's own rigid bodies to
+   * each other (a hinge, a fixed weld, and so on), by node id. Fixed for
+   * the composition's entire length, exactly like `colorGrading`. Omitted
+   * means no constraints: every rigid body simulates independently, only
+   * interacting through collision.
+   */
+  physicsConstraints?: PhysicsConstraintConfig[];
 }
 
 /**
@@ -290,6 +310,65 @@ export interface PathTracingConfig {
   bounces?: number;
   /** Applies edge-aware denoising to the accumulated result once sampling finishes, trading a small amount of fine detail for a dramatically cleaner image at the same sample budget. A deterministic post-process (a fixed function of the accumulated pixels), not part of sampling itself - never affects `samples`'s own reproducibility. Defaults to `false`. */
   denoise?: boolean;
+}
+
+/**
+ * Whole-physics-world tuning for `Composition.physics`. See
+ * `CompositionColorGrading`'s own doc for why this is a fixed,
+ * non-`Property<T>` setting.
+ *
+ * Determinism constraints: `@dimforge/rapier3d-compat` (the engine
+ * `@cadra/physics` simulates with) is bit-for-bit reproducible for the same
+ * scene, seed, and fixed timestep *on the same build running on the same
+ * platform* - the exact same guarantee this render farm already relies on
+ * for every other render-affecting dependency (`three`/`three-gpu-pathtracer`
+ * included): `pnpm-lock.yaml` pins the exact resolved version every worker
+ * installs, regardless of `package.json`'s own caret range, so every worker
+ * in a given render farm already runs identical dependency builds as long
+ * as they install from the same lockfile. It is a real, ordinary IEEE 754
+ * floating-point simulation, not a fixed-point one: it does *not* claim
+ * bit-identical results across different CPU architectures, compilers, or
+ * Rapier versions, so a render farm mixing worker hardware/architectures
+ * for the *same* job risks diverging physics between workers - keep every
+ * worker rendering a given physics-driven composition on the same
+ * architecture, installing from the same lockfile.
+ */
+export interface CompositionPhysics {
+  /** Acceleration applied to every dynamic rigid body, in units per second squared. Defaults to `[0, -9.81, 0]` (Earth gravity, Y-up). */
+  gravity?: Vector3;
+  /** Physics sub-steps per rendered frame: higher values trade cost for stability with fast-moving or thin bodies (reducing tunneling and jitter), without changing this composition's own `fps`. Defaults to `1`. */
+  substeps?: number;
+}
+
+/**
+ * A joint constraining two rigid bodies (`bodyA`/`bodyB`, by `MeshNode.id`)
+ * to move relative to each other in a restricted way, simulated by
+ * `@cadra/physics` (Phase 66) alongside `Composition.physics`. Both
+ * `bodyA` and `bodyB` must reference a `MeshNode` with `rigidBody` set;
+ * referencing a node with no `rigidBody`, or no node at all, is a
+ * configuration error `@cadra/physics` reports rather than silently
+ * ignores.
+ *
+ * `anchorA`/`anchorB` are each body's own local-space attachment point
+ * (e.g. `[0, 0, 0]` for its own center). `axis` is read only by `"revolute"`
+ * (the hinge axis) and `"prismatic"` (the sliding axis); it is ignored for
+ * `"fixed"` and `"spherical"`.
+ */
+export interface PhysicsConstraintConfig {
+  id: string;
+  /**
+   * `"fixed"` welds both bodies together with no relative motion at all.
+   * `"spherical"` (a ball-and-socket) allows free rotation about the shared
+   * anchor point but no translation between them. `"revolute"` (a hinge)
+   * allows rotation about `axis` alone. `"prismatic"` (a slider) allows
+   * translation along `axis` alone, no rotation.
+   */
+  type: "fixed" | "spherical" | "revolute" | "prismatic";
+  bodyA: string;
+  bodyB: string;
+  anchorA: Vector3;
+  anchorB: Vector3;
+  axis?: Vector3;
 }
 
 /**

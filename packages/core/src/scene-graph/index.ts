@@ -8,6 +8,7 @@ export type { CreateProjectInput } from "./project-factory.js";
 export { createProject } from "./project-factory.js";
 export type {
   CameraNode,
+  ColliderConfig,
   CompositionRefNode,
   GroupNode,
   ImageNode,
@@ -16,6 +17,7 @@ export type {
   LightType,
   MeshMaterialConfig,
   MeshNode,
+  RigidBodyConfig,
   SatoriBlendMode,
   SatoriElementKeyframes,
   SatoriLayerFontRef,
@@ -60,6 +62,7 @@ export type {
   Composition,
   CompositionColorGrading,
   CompositionEnvironment,
+  CompositionPhysics,
   CompositionPostProcessing,
   CompositionRenderMode,
   CompositionShadowQuality,
@@ -71,6 +74,7 @@ export type {
   LutEffectConfig,
   MotionBlurEffectConfig,
   PathTracingConfig,
+  PhysicsConstraintConfig,
   PostEffectConfig,
   Project,
   RenderQualityTier,

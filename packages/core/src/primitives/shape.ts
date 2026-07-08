@@ -1,6 +1,6 @@
 import type { Property } from "../keyframes/keyframe-track.js";
 import { type AnimatableTransform, createIdentityTransform } from "../scene-graph/primitives.js";
-import type { MeshMaterialConfig, MeshNode } from "../scene-graph/scene-node.js";
+import type { MeshMaterialConfig, MeshNode, RigidBodyConfig } from "../scene-graph/scene-node.js";
 
 /**
  * Props for `Shape`. Only `id` is required; everything else defaults.
@@ -14,6 +14,10 @@ import type { MeshMaterialConfig, MeshNode } from "../scene-graph/scene-node.js"
  * `material`, when provided, takes over from `materialRef` entirely (see
  * `MeshMaterialConfig`'s own doc); omit it to keep using `materialRef`'s
  * registry-resolved material, the pre-Phase-55 default.
+ *
+ * `rigidBody`, when provided, makes this shape physics-driven (see
+ * `RigidBodyConfig`'s own doc, Phase 66); omit it to keep this shape's
+ * `transform` resolving exactly as it did before Phase 66.
  *
  * `transform` and `visible` each accept either a plain value or a
  * `KeyframeTrack` (Phase 10's `Property<T>`); passing a plain value, as every
@@ -30,14 +34,16 @@ export interface ShapeProps {
   material?: MeshMaterialConfig;
   castShadow?: boolean;
   receiveShadow?: boolean;
+  rigidBody?: RigidBodyConfig;
 }
 
 /**
  * Creates a `MeshNode`: a renderable shape.
  *
  * Defaults: identity transform, `visible: true`, no children,
- * `geometryRef: "box"`, `materialRef: "default"`, no inline `material`, and
- * `castShadow`/`receiveShadow` both `false`.
+ * `geometryRef: "box"`, `materialRef: "default"`, no inline `material`,
+ * `castShadow`/`receiveShadow` both `false`, and no `rigidBody` (not
+ * physics-driven).
  */
 export function Shape(props: ShapeProps): MeshNode {
   return {
@@ -52,5 +58,6 @@ export function Shape(props: ShapeProps): MeshNode {
     ...(props.material !== undefined && { material: props.material }),
     ...(props.castShadow !== undefined && { castShadow: props.castShadow }),
     ...(props.receiveShadow !== undefined && { receiveShadow: props.receiveShadow }),
+    ...(props.rigidBody !== undefined && { rigidBody: props.rigidBody }),
   };
 }

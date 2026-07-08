@@ -97,6 +97,64 @@ export interface MeshMaterialConfig {
 }
 
 /**
+ * A rigid-body collision shape, in the mesh node's own local units. Mirrors
+ * `three-gpu-pathtracer`'s BVH-from-geometry precedent in spirit (`Phase
+ * 63`'s own doc): a simple, exact analytic shape a physics engine
+ * (`@cadra/physics`) can simulate directly, not derived from the mesh's own
+ * render geometry (a box collider on a non-box mesh is a deliberate,
+ * common physics-authoring simplification, not a bug).
+ */
+export type ColliderConfig =
+  | { shape: "box"; halfExtents: Vector3 }
+  | { shape: "sphere"; radius: number }
+  | { shape: "capsule"; halfHeight: number; radius: number }
+  | { shape: "cylinder"; halfHeight: number; radius: number };
+
+/**
+ * Rigid-body physics for a `MeshNode`, simulated by `@cadra/physics`
+ * (Phase 66) at a fixed timestep tied to the frame index, never wall-clock.
+ * Omitted (the default) means this mesh is not physics-driven at all: its
+ * `transform` resolves exactly as it did before Phase 66.
+ *
+ * `bodyType` controls who owns this node's `transform.position`/`.rotation`
+ * once physics is active:
+ * - `"dynamic"`: physics owns it from frame 0 onward. `transform`'s own
+ *   `position`/`.rotation` still supply the body's *initial* pose (resolved
+ *   once, at frame 0), but any keyframes past frame 0 are not read again -
+ *   the simulated result supersedes them, exactly like a path-traced
+ *   final's `postProcessing` parity notes document a similar "this input
+ *   is read once, not every frame" precedent (`CompositionRenderMode`'s own
+ *   doc, `timeline.ts`).
+ * - `"fixed"`: immovable. Never simulated past its own frame-0 pose; other
+ *   bodies collide against it as a static obstacle.
+ * - `"kinematic"`: the opposite of `"dynamic"` - `transform` keeps driving
+ *   this node's own rendered pose every frame exactly as authored (nothing
+ *   changes here from the pre-Phase-66 behavior), while `@cadra/physics`
+ *   additionally reads that same per-frame pose as an input, so dynamic
+ *   bodies still collide against it correctly as it moves.
+ */
+export interface RigidBodyConfig {
+  bodyType: "dynamic" | "fixed" | "kinematic";
+  collider: ColliderConfig;
+  /** This body's own mass, in the physics engine's own mass units. Defaults to a density-derived mass (`1` density) when omitted. Ignored for `"fixed"` and `"kinematic"` bodies (both are simulated as having infinite effective mass). */
+  mass?: number;
+  /** Surface friction coefficient, `0` (frictionless) upward. Defaults to `0.5`. */
+  friction?: number;
+  /** Bounciness, `0` (fully inelastic) to `1` (fully elastic). Defaults to `0`. */
+  restitution?: number;
+  /** Damps linear velocity over time (air resistance), `0` upward. Defaults to `0`. */
+  linearDamping?: number;
+  /** Damps angular velocity over time, `0` upward. Defaults to `0`. */
+  angularDamping?: number;
+  /** This body's own initial linear velocity, at frame 0. Defaults to zero. Ignored for `"fixed"` and `"kinematic"` bodies. */
+  initialLinearVelocity?: Vector3;
+  /** This body's own initial angular velocity (radians per second, about each axis), at frame 0. Defaults to zero. Ignored for `"fixed"` and `"kinematic"` bodies. */
+  initialAngularVelocity?: Vector3;
+  /** Enables continuous collision detection, preventing a fast-moving thin body from tunneling through a thin collider it should have hit. Defaults to `false`. Ignored for `"fixed"` and `"kinematic"` bodies. */
+  ccdEnabled?: boolean;
+}
+
+/**
  * A renderable mesh. `geometryRef` and `materialRef` are ids resolved
  * against a geometry and material registry by a later phase (the renderer's
  * scene-graph-to-Three.js mapping); the scene graph itself stays agnostic to
@@ -111,6 +169,8 @@ export interface MeshNode extends SceneNodeBase<"mesh"> {
   castShadow?: boolean;
   /** Whether this mesh receives shadows cast by shadow-casting lights. Defaults to `false`. */
   receiveShadow?: boolean;
+  /** Rigid-body physics simulated by `@cadra/physics` (Phase 66). Omitted means this mesh is not physics-driven; `transform` resolves exactly as before Phase 66. */
+  rigidBody?: RigidBodyConfig;
 }
 
 /**
