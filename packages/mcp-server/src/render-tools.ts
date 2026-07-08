@@ -46,7 +46,7 @@ import {
 } from "@cadra/encode";
 import { RenderJobNotFoundError } from "@cadra/headless";
 import { createGenerationStore, type GenerationStore } from "@cadra/providers";
-import { parseScene } from "@cadra/schema";
+import { compositionRenderModeSchema, parseScene, pathTracingConfigSchema } from "@cadra/schema";
 import type { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
@@ -200,9 +200,34 @@ export function registerCadraRenderTools(
           .describe(
             "Maximum ranges rendered concurrently (i.e. concurrent headless browser instances). Optional; defaults to @cadra/encode's own default.",
           ),
+        renderMode: compositionRenderModeSchema
+          .optional()
+          .describe(
+            "Overrides the target composition's own renderMode for this render call only, " +
+              "without persisting it onto the scene document (call update_scene for that). " +
+              "Omitted uses the composition's own already-persisted renderMode (defaults to raster).",
+          ),
+        pathTracing: pathTracingConfigSchema
+          .optional()
+          .describe(
+            "Overrides the target composition's own path-traced tuning for this render call " +
+              "only, without persisting it onto the scene document. Read only when the effective " +
+              "renderMode (this call's own override above, or the composition's persisted value) " +
+              "is 'pathTraced'.",
+          ),
       },
     },
-    async ({ sceneId, compositionId, seed, format, bitrate, rangeSizeFrames, maxConcurrency }) => {
+    async ({
+      sceneId,
+      compositionId,
+      seed,
+      format,
+      bitrate,
+      rangeSizeFrames,
+      maxConcurrency,
+      renderMode,
+      pathTracing,
+    }) => {
       const idValidation = sanitizeSceneId(sceneId);
       if (!idValidation.valid) {
         return jsonResult({
@@ -279,6 +304,27 @@ export function registerCadraRenderTools(
         } satisfies RenderToolFailurePayload);
       }
 
+      // Applies this call's own optional renderMode/pathTracing override onto
+      // the target composition only, without persisting either onto the
+      // scene document itself - a caller wanting a permanent change still
+      // calls update_scene. Every other composition in the project passes
+      // through untouched (same object reference, no unnecessary copies).
+      const projectToRender =
+        renderMode === undefined && pathTracing === undefined
+          ? effectiveProject
+          : {
+              ...effectiveProject,
+              compositions: effectiveProject.compositions.map((c) =>
+                c.id === compositionId
+                  ? {
+                      ...c,
+                      ...(renderMode !== undefined && { renderMode }),
+                      ...(pathTracing !== undefined && { pathTracing }),
+                    }
+                  : c,
+              ),
+            };
+
       const jobId = mintRenderJobId();
       const outputPath = resolveRenderOutputPath(config.outputDirectory, jobId, format);
       await ensureParentDirectoryExists(outputPath);
@@ -287,7 +333,7 @@ export function registerCadraRenderTools(
       let handle;
       try {
         handle = await submitEncodedRenderJob({
-          project: effectiveProject,
+          project: projectToRender,
           compositionId,
           seed,
           format,

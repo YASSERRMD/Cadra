@@ -339,6 +339,108 @@ describe("full agent loop: create scene, upload assets, render, poll, fetch outp
     const durationSeconds = readMp4FragmentedDurationTicks(outputBytes) / timescale;
     expect(durationSeconds).toBeCloseTo(DURATION_IN_FRAMES / FPS, 5);
   }, 120_000);
+
+  it(
+    "render_scene's own renderMode/pathTracing override renders path-traced without persisting either onto the scene document (Phase 65)",
+    async () => {
+      if (!chromiumAvailable) {
+        console.log(
+          "render_scene renderMode override e2e test: skipping, real Chromium not found (no cached Playwright browser in this environment).",
+        );
+        return;
+      }
+
+      workspaceRoot = await mkdtemp(join(tmpdir(), "cadra-render-e2e-override-test-"));
+      const outputDirectory = join(workspaceRoot, "out");
+
+      const { server } = createCadraMcpServer({
+        config: { workspaceRoot, outputDirectory },
+        logger: createLogger("test", {}, () => {
+          // Swallow log output in tests.
+        }),
+      });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const connectedClient = new Client({ name: "test-client", version: "0.0.0" });
+      await Promise.all([server.connect(serverTransport), connectedClient.connect(clientTransport)]);
+      client = connectedClient;
+
+      const createResult = await connectedClient.callTool({
+        name: CREATE_SCENE_TOOL_NAME,
+        arguments: {
+          sceneId: "e2e-scene",
+          name: "End-to-end scene",
+          composition: { id: "comp-1", name: "Main", fps: FPS, durationInFrames: DURATION_IN_FRAMES, width: WIDTH, height: HEIGHT },
+        },
+      });
+      expect(parseToolResult<{ success: boolean }>(createResult as ToolTextResult).success).toBe(true);
+
+      // buildFullSceneDocument()'s composition has no renderMode/pathTracing
+      // set at all (defaults to raster) - this render is only path-traced
+      // because of render_scene's own override below, never because of
+      // anything persisted on the scene document.
+      const replaceResult = await connectedClient.callTool({
+        name: UPDATE_SCENE_TOOL_NAME,
+        arguments: { sceneId: "e2e-scene", mode: "replace", document: buildFullSceneDocument() },
+      });
+      expect(parseToolResult<{ success: boolean }>(replaceResult as ToolTextResult).success).toBe(true);
+
+      const renderResult = await connectedClient.callTool({
+        name: RENDER_SCENE_TOOL_NAME,
+        arguments: {
+          sceneId: "e2e-scene",
+          compositionId: "comp-1",
+          seed: "e2e-override-seed",
+          format: "mp4",
+          bitrate: 1_000_000,
+          renderMode: "pathTraced",
+          pathTracing: { samples: 2, bounces: 1 },
+        },
+      });
+      const renderPayload = parseToolResult<RenderScenePayload>(renderResult as ToolTextResult);
+      expect(renderPayload.success).toBe(true);
+      const jobId = renderPayload.jobId;
+
+      const pollDeadline = Date.now() + 90_000;
+      let finalStatus: RenderStatusPayload | undefined;
+      while (Date.now() < pollDeadline) {
+        const statusResult = await connectedClient.callTool({
+          name: GET_RENDER_STATUS_TOOL_NAME,
+          arguments: { jobId },
+        });
+        const statusPayload = parseToolResult<RenderStatusPayload>(statusResult as ToolTextResult);
+        if (statusPayload.outcome !== undefined) {
+          finalStatus = statusPayload;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      expect(finalStatus?.outcome).toEqual({ ok: true });
+
+      const outputResult = await connectedClient.callTool({
+        name: GET_RENDER_OUTPUT_TOOL_NAME,
+        arguments: { jobId },
+      });
+      const outputPayload = parseToolResult<RenderOutputPayload>(outputResult as ToolTextResult);
+      expect(outputPayload.success).toBe(true);
+      const outputBytes = await readFile(outputPayload.outputPath!);
+      expect(outputBytes.byteLength).toBeGreaterThan(0);
+      const timescale = readMp4TrackTimescale(outputBytes);
+      expect(timescale).toBeGreaterThan(0);
+      expect(readMp4FragmentedDurationTicks(outputBytes) / timescale).toBeCloseTo(DURATION_IN_FRAMES / FPS, 5);
+
+      // The override applied to this one render call only: the persisted
+      // scene document itself still has no renderMode/pathTracing set.
+      const getSceneResult = await connectedClient.callTool({
+        name: GET_SCENE_TOOL_NAME,
+        arguments: { sceneId: "e2e-scene" },
+      });
+      const getScenePayload = parseToolResult<GetScenePayload>(getSceneResult as ToolTextResult);
+      const persistedComposition = getScenePayload.document?.project.compositions[0];
+      expect(persistedComposition?.renderMode).toBeUndefined();
+      expect(persistedComposition?.pathTracing).toBeUndefined();
+    },
+    120_000,
+  );
 });
 
 /**
