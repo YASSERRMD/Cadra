@@ -475,6 +475,7 @@ export function createNativeGpuHeadlessRenderer(
     },
     initPhysics: defaultThreeRendererDependencies.initPhysics,
     createPhysicsBake: defaultThreeRendererDependencies.createPhysicsBake,
+    createParticleRuntime: defaultThreeRendererDependencies.createParticleRuntime,
   };
 
   const inner = new ThreeRenderer(deps);

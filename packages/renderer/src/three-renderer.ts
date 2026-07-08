@@ -10,6 +10,11 @@ import {
   type SceneState,
 } from "@cadra/core";
 import {
+  createParticleRuntime as createRealParticleRuntime,
+  type ParticleRuntime,
+  type ParticleRuntimeDependencies,
+} from "@cadra/particles";
+import {
   createPhysicsBake as createRealPhysicsBake,
   initPhysics as initRealPhysics,
   type PhysicsBake,
@@ -94,7 +99,34 @@ interface ThreeRendererLike {
    * `renderer instanceof WebGPURenderer` check at every call site.
    */
   createEnvironmentMap: (equirectangular: THREE.Texture) => THREE.Texture;
+  /**
+   * Dispatches a GPU compute pass (`@cadra/particles`'s own TSL compute
+   * kernel, see `ParticleRuntimeDependencies`). `undefined` on the WebGL2
+   * backend: a classic `THREE.WebGLRenderer` has no `.compute()` at all
+   * (TSL/storage-buffer compute is a WebGPU-only capability, the same
+   * backend asymmetry `MotionBlurEffectConfig`'s own doc documents for the
+   * identical underlying reason), so this genuinely stays absent there
+   * rather than ever needing to be set to a no-op.
+   *
+   * Typed via `WebGpuComputeNode` (structurally extracted from
+   * `WebGPURenderer["compute"]` itself) rather than importing `ComputeNode`
+   * by name: that type is not exported from `three/webgpu`'s public surface
+   * at all (verified against the installed `@types/three@0.185.0` barrel).
+   * This lets `WebGPURenderer`'s own real `compute` method satisfy this
+   * field with no wrapper glue at all - `Object.assign(renderer, {...})`
+   * (see `withEnvironmentMapSupport`/`withWebGpuPostProcessingSupport`)
+   * preserves `renderer`'s own full type, `compute` included.
+   */
+  compute?: (computeNode: WebGpuComputeNode) => void;
 }
+
+/**
+ * `WebGPURenderer.compute`'s own real first-parameter type, extracted
+ * structurally so `ThreeRendererLike.compute` can match it exactly without
+ * needing to import the (not publicly exported) `ComputeNode` type by name;
+ * see `ThreeRendererLike.compute`'s own doc.
+ */
+type WebGpuComputeNode = Parameters<WebGPURenderer["compute"]>[0];
 
 /** Constructs the underlying Three.js renderer for a given backend and target. */
 export type ThreeRendererFactory = (target: RenderTarget, size: RenderSize) => ThreeRendererLike;
@@ -124,6 +156,16 @@ export interface ThreeRendererDependencies {
    * `(compositionId, seed)` pair being rendered changes.
    */
   createPhysicsBake: typeof createRealPhysicsBake;
+  /**
+   * Builds this renderer's own particle-system runtime (`@cadra/particles`).
+   * Called once, in `init()`, once `resolvedBackend` is known - unlike
+   * `createPhysicsBake`, never rebuilt per composition: the returned
+   * `ParticleRuntime` already manages its own per-node-id cache internally
+   * (see that type's own doc), keyed fresh off whatever `roots`/`seed` each
+   * `resolve` call is given, so a renderer instance only ever needs one for
+   * its whole lifetime.
+   */
+  createParticleRuntime: typeof createRealParticleRuntime;
 }
 
 /**
@@ -377,7 +419,15 @@ function withWebGpuPostProcessingSupport(
   });
 }
 
-/** The real WebGPU constructor path: `three/webgpu`'s `WebGPURenderer`, canvas passed via `canvas`. */
+/**
+ * The real WebGPU constructor path: `three/webgpu`'s `WebGPURenderer`,
+ * canvas passed via `canvas`. No explicit `compute` wiring needed:
+ * `WebGPURenderer.prototype.compute` already satisfies `ThreeRendererLike.compute`
+ * exactly (see `WebGpuComputeNode`'s own doc), and `Object.assign(renderer,
+ * {...})` (inside `withEnvironmentMapSupport`/`withWebGpuPostProcessingSupport`)
+ * only ever adds/overrides `render`/`dispose`/`createEnvironmentMap` on the
+ * same renderer instance, never touching `compute` at all.
+ */
 function createRealWebGpuRenderer(target: RenderTarget, _size: RenderSize): ThreeRendererLike {
   ensureWebGpuAreaLightSupport();
   const parameters: WebGPURendererParameters = { canvas: target };
@@ -403,6 +453,7 @@ export const defaultThreeRendererDependencies: ThreeRendererDependencies = {
   createWebGl2Renderer: createRealWebGl2Renderer,
   initPhysics: initRealPhysics,
   createPhysicsBake: createRealPhysicsBake,
+  createParticleRuntime: createRealParticleRuntime,
 };
 
 /**
@@ -604,6 +655,14 @@ export class ThreeRenderer implements Renderer {
   private physicsBake: PhysicsBake | undefined;
   /** The `(compositionId, seed)` pair `physicsBake` was built for; see that field's own doc. */
   private physicsBakeKey: string | undefined;
+  /**
+   * This renderer's own particle-system runtime (`@cadra/particles`).
+   * Constructed once, in `init()`, once `resolvedBackend` is known;
+   * `undefined` before `init()` completes. Unlike `physicsBake`, never
+   * rebuilt per composition (see `ThreeRendererDependencies.createParticleRuntime`'s
+   * own doc for why).
+   */
+  private particleRuntime: ParticleRuntime | undefined;
 
   constructor(
     deps: ThreeRendererDependencies = defaultThreeRendererDependencies,
@@ -637,8 +696,36 @@ export class ThreeRenderer implements Renderer {
     }
     await physicsInitPromise;
 
+    this.particleRuntime = this.deps.createParticleRuntime(this.buildParticleRuntimeDeps());
+
     this.threeRenderer.setSize(size.width, size.height, false);
     this.domTarget = target;
+  }
+
+  /**
+   * Builds `createParticleRuntime`'s own deps argument from this renderer's
+   * just-resolved backend: on WebGPU, `compute` dispatches through
+   * `this.threeRenderer`'s own `.compute()` (present there, absent on
+   * WebGL2 - see `ThreeRendererLike.compute`'s own doc); on WebGL2, the
+   * `webgl2` variant of `ParticleRuntimeDependencies` carries no `compute`
+   * field at all, since nothing in that backend's own particle path ever
+   * needs to dispatch a GPU compute pass.
+   */
+  private buildParticleRuntimeDeps(): ParticleRuntimeDependencies {
+    if (this.resolvedBackend === "webgpu") {
+      return {
+        backend: "webgpu",
+        compute: (computeNode) =>
+          // `@cadra/particles`'s own `ComputeDispatchable` is typed as the
+          // base `Node` class (see that package's own doc for why); this
+          // bridges to `ThreeRendererLike.compute`'s own narrower,
+          // structurally-real `WebGpuComputeNode` parameter type. The value
+          // genuinely is one at runtime (what that package's own
+          // `Fn(...).compute(...)` construction actually returns).
+          this.threeRenderer?.compute?.(computeNode as WebGpuComputeNode),
+      };
+    }
+    return { backend: "webgl2" };
   }
 
   renderFrame(sceneState: SceneState, frameContext: FrameContext): void {
@@ -654,6 +741,7 @@ export class ThreeRenderer implements Renderer {
     this.applyEnvironment(renderer, sceneState.environment);
     this.applyContactShadow(sceneState.shadowQuality?.contactShadows);
     const physicsTransforms = this.resolvePhysicsTransforms(sceneState, frameContext);
+    const particleObjects = this.resolveParticleSystems(sceneState, frameContext);
 
     const wrapperRoot = buildSceneStateRoot(sceneState);
     const reconciled = this.reconciler.reconcile(
@@ -661,6 +749,7 @@ export class ThreeRenderer implements Renderer {
       frameContext.frame,
       whiteBalanceGain,
       physicsTransforms,
+      particleObjects,
     );
     if (reconciled === null) {
       // `buildSceneStateRoot` always returns a non-null SceneNode, so
@@ -732,6 +821,27 @@ export class ThreeRenderer implements Renderer {
       this.physicsBakeKey = key;
     }
     return this.physicsBake.advanceTo(frameContext.frame);
+  }
+
+  /**
+   * Resolves this frame's own particle systems: `this.particleRuntime`
+   * already manages per-node-id creation, caching, and disposal internally
+   * (see `ParticleRuntime.resolve`'s own doc, `@cadra/particles`), so this
+   * only needs to hand it the current tree, seed, frame, and fps every
+   * call. `undefined` (every `"particles"` node renders as an empty group)
+   * only before `init()` completes, which never happens in practice since
+   * `renderFrame` is always called after `init()` resolves.
+   */
+  private resolveParticleSystems(
+    sceneState: SceneState,
+    frameContext: FrameContext,
+  ): ReadonlyMap<string, THREE.Object3D> | undefined {
+    return this.particleRuntime?.resolve(
+      sceneState.layers.map((layer) => layer.node),
+      frameContext.seed,
+      frameContext.frame,
+      frameContext.fps,
+    );
   }
 
   /**
@@ -964,6 +1074,7 @@ export class ThreeRenderer implements Renderer {
     this.clearCascadedShadows();
     this.removeContactShadowMesh();
     this.physicsBake?.dispose();
+    this.particleRuntime?.dispose();
     this.requireInitialized().dispose();
   }
 

@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@cadra/core": "workspace:*",
+    "@cadra/particles": "workspace:*",
     "@cadra/pathtracer": "workspace:*",
     "@cadra/physics": "workspace:*",
     "@cadra/satori-layer": "workspace:*",

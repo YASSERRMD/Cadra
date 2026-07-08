@@ -37,6 +37,10 @@ function createFakeDeps(): ThreeRendererDependencies {
       advanceTo: vi.fn(() => new Map()),
       dispose: vi.fn(),
     })) as unknown as ThreeRendererDependencies["createPhysicsBake"],
+    createParticleRuntime: vi.fn(() => ({
+      resolve: vi.fn(() => new Map()),
+      dispose: vi.fn(),
+    })) as unknown as ThreeRendererDependencies["createParticleRuntime"],
   };
 }
 
