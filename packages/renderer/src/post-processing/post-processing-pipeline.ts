@@ -7,6 +7,7 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import type { Pass } from "three/addons/postprocessing/Pass.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
+import { SSAARenderPass } from "three/addons/postprocessing/SSAARenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { FilmShader } from "three/addons/shaders/FilmShader.js";
 import { RGBShiftShader } from "three/addons/shaders/RGBShiftShader.js";
@@ -16,6 +17,7 @@ import { chromaticAberration as createChromaticAberrationNode } from "three/addo
 import { dof as createDofNode } from "three/addons/tsl/display/DepthOfFieldNode.js";
 import { ao as createGtaoNode } from "three/addons/tsl/display/GTAONode.js";
 import { motionBlur as createMotionBlurNode } from "three/addons/tsl/display/MotionBlur.js";
+import { ssaaPass } from "three/addons/tsl/display/SSAAPassNode.js";
 import {
   clamp,
   convertToTexture,
@@ -42,6 +44,7 @@ import { RenderPipeline, type WebGPURenderer } from "three/webgpu";
 import { computeFilmGrainSeed } from "./film-grain.js";
 import { computeMotionBlurVelocityScale } from "./motion-blur.js";
 import { computeSharpenKernelWeights, SharpenShader, updateSharpenUniforms } from "./sharpen.js";
+import { resolveSampleCountForTier, resolveSampleLevel } from "./temporal-accumulation.js";
 import type { AnyTslNode } from "./tsl-node.js";
 
 /**
@@ -66,9 +69,11 @@ export interface AmbientOcclusionRenderConfig {
 
 /** Fully resolved, render-ready post-processing config for one `renderFrame` call, produced by `resolvePostProcessing`. */
 export interface PostProcessingRenderConfig {
-  /** Trades render cost against fidelity. Not read by any effect Phase 58/59 ship (none has a tier-sensitive knob yet); threaded through so a future expensive effect can read it without another round of plumbing. */
+  /** Trades render cost against fidelity. Not read by any effect Phase 58/59 ship (none has a tier-sensitive knob yet); does drive `sampleCount`'s own tier-capping (see `resolveSampleCountForTier`). */
   tier: RenderQualityTier;
   effects: PostEffectConfig[];
+  /** Resolved accumulation sample count (see `resolveSampleCountForTier`), or `undefined` for no accumulation at all - a single, un-jittered sample, byte-identical to the pre-Phase-61 render path. */
+  sampleCount?: number;
 }
 
 /**
@@ -110,16 +115,31 @@ export interface BuiltPipeline<Handle> {
 /**
  * Resolves a `Composition`'s own `postProcessing` into a
  * `PostProcessingRenderConfig`, or `undefined` for a no-op stack (mirrors
- * `Composition.postProcessing`'s own doc: omitted, or `effects: []`, must
- * render byte-identical to no post-processing pipeline at all).
+ * `Composition.postProcessing`'s own doc: omitted, or both `effects: []` and
+ * no meaningful `sampleCount`, must render byte-identical to no
+ * post-processing pipeline at all). `sampleCount` alone, with an empty
+ * `effects`, is not a no-op: accumulation is valuable purely for
+ * anti-aliasing, independent of whether any other effect is configured.
  */
 export function resolvePostProcessing(
   postProcessing: CompositionPostProcessing | undefined,
 ): PostProcessingRenderConfig | undefined {
-  if (postProcessing === undefined || postProcessing.effects.length === 0) {
+  if (postProcessing === undefined) {
     return undefined;
   }
-  return { tier: postProcessing.tier ?? "final", effects: postProcessing.effects };
+
+  const authoredSampleCount = postProcessing.sampleCount;
+  if (postProcessing.effects.length === 0 && (authoredSampleCount === undefined || authoredSampleCount <= 1)) {
+    return undefined;
+  }
+
+  const tier = postProcessing.tier ?? "final";
+  return {
+    tier,
+    effects: postProcessing.effects,
+    ...(authoredSampleCount !== undefined &&
+      authoredSampleCount > 1 && { sampleCount: resolveSampleCountForTier(authoredSampleCount, tier) }),
+  };
 }
 
 /**
@@ -333,15 +353,21 @@ function buildWebGl2EffectPass(
  * Builds the one shared `EffectComposer` chain for the WebGL2 backend:
  * `RenderPass` (linear HDR; `EffectComposer`'s own default internal buffers
  * are already `HalfFloatType`, per this project's installed
- * `three@0.185.1` source) -> `GTAOPass` if `ambientOcclusion` is set ->
- * pre-tonemap effect passes -> `OutputPass` (applies `renderer.toneMapping`
- * and `renderer.outputColorSpace` together, reading them fresh every
- * `render()` call per `OutputPass`'s own source) -> post-tonemap effect
- * passes. `EffectComposer` tracks which of its own passes is last and
- * renders only that one to screen automatically (verified directly against
- * this project's installed `three@0.185.1` source,
- * `isLastEnabledPass`/`addPass`), so nothing here ever sets `renderToScreen`
- * itself.
+ * `three@0.185.1` source), or `SSAARenderPass` in its exact place when
+ * `postProcessing.sampleCount` calls for accumulation (a real, deterministic
+ * drop-in replacement: same `(scene, camera)` constructor, same "produces
+ * one linear-HDR frame in the composer's buffers" contract, re-rendering the
+ * scene `2^sampleLevel` times through a fixed, non-random jitter-vector
+ * table - verified directly against this project's installed
+ * `three@0.185.1` source - and averaging) -> `GTAOPass` if
+ * `ambientOcclusion` is set -> pre-tonemap effect passes -> `OutputPass`
+ * (applies `renderer.toneMapping` and `renderer.outputColorSpace` together,
+ * reading them fresh every `render()` call per `OutputPass`'s own source) ->
+ * post-tonemap effect passes. `EffectComposer` tracks which of its own
+ * passes is last and renders only that one to screen automatically
+ * (verified directly against this project's installed `three@0.185.1`
+ * source, `isLastEnabledPass`/`addPass`), so nothing here ever sets
+ * `renderToScreen` itself.
  */
 export function buildWebGl2Pipeline(
   renderer: THREE.WebGLRenderer,
@@ -352,7 +378,14 @@ export function buildWebGl2Pipeline(
   config: RenderPassConfig,
 ): BuiltPipeline<EffectComposer> {
   const composer = new EffectComposer(renderer);
-  composer.addPass(new RenderPass(scene, camera));
+  const sampleCount = config.postProcessing?.sampleCount;
+  if (sampleCount !== undefined) {
+    const ssaaRenderPass = new SSAARenderPass(scene, camera);
+    ssaaRenderPass.sampleLevel = resolveSampleLevel(sampleCount);
+    composer.addPass(ssaaRenderPass);
+  } else {
+    composer.addPass(new RenderPass(scene, camera));
+  }
 
   if (config.ambientOcclusion !== undefined) {
     const ao = config.ambientOcclusion;
@@ -414,8 +447,18 @@ export function buildWebGpuPipeline(
 ): BuiltPipeline<RenderPipeline> {
   const effects = config.postProcessing?.effects ?? [];
   const hasMotionBlur = effects.some((effect) => effect.type === "motionBlur");
+  const sampleCount = config.postProcessing?.sampleCount;
 
-  const scenePass = pass(scene, camera);
+  // ssaaPass is a real, drop-in PassNode subclass (see buildWebGl2Pipeline's
+  // own doc for the identical WebGL2-side swap and why it is safe): every
+  // .setMRT()/.getTextureNode()/.getViewZNode() call below keeps working
+  // unchanged, it just re-renders through a fixed, deterministic jitter
+  // pattern 2^sampleLevel times and averages, instead of once.
+  const scenePass: AnyTslNode = sampleCount !== undefined ? ssaaPass(scene, camera) : pass(scene, camera);
+  if (sampleCount !== undefined) {
+    scenePass.sampleLevel = resolveSampleLevel(sampleCount);
+  }
+
   if (config.ambientOcclusion !== undefined && hasMotionBlur) {
     scenePass.setMRT(mrt({ output, normal: normalView, velocity }));
   } else if (config.ambientOcclusion !== undefined) {
