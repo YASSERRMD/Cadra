@@ -7,6 +7,7 @@ import {
   audioFadeEnvelopeSchema,
   audioTrackSchema,
   clipSchema,
+  compositionFogSchema,
   compositionSchema,
   postEffectConfigSchema,
   projectSchema,
@@ -162,6 +163,24 @@ describe("postEffectConfigSchema", () => {
     expect(postEffectConfigSchema.safeParse({ type: "motionBlur" }).success).toBe(true);
   });
 
+  it("accepts a godRays effect with every field, and with only the required lightNodeId", () => {
+    expect(
+      postEffectConfigSchema.safeParse({
+        type: "godRays",
+        lightNodeId: "light-1",
+        raymarchSteps: 80,
+        density: 0.8,
+        maxDensity: 0.6,
+        distanceAttenuation: 1.5,
+      }).success,
+    ).toBe(true);
+    expect(postEffectConfigSchema.safeParse({ type: "godRays", lightNodeId: "light-1" }).success).toBe(true);
+  });
+
+  it("rejects a godRays effect missing lightNodeId", () => {
+    expect(postEffectConfigSchema.safeParse({ type: "godRays" }).success).toBe(false);
+  });
+
   it("accepts a colorGrade effect with all fields, and with none", () => {
     expect(
       postEffectConfigSchema.safeParse({
@@ -192,10 +211,54 @@ describe("postEffectConfigSchema", () => {
     expect(postEffectConfigSchema.safeParse({ type: "depthOfField", blurriness: 1 }).success).toBe(false);
     expect(postEffectConfigSchema.safeParse({ type: "vignette", radius: 1 }).success).toBe(false);
     expect(postEffectConfigSchema.safeParse({ type: "motionBlur", exposure: 1 }).success).toBe(false);
+    expect(
+      postEffectConfigSchema.safeParse({ type: "godRays", lightNodeId: "light-1", intensity: 1 }).success,
+    ).toBe(false);
     expect(postEffectConfigSchema.safeParse({ type: "colorGrade", curve: [] }).success).toBe(false);
     expect(postEffectConfigSchema.safeParse({ type: "lut", lutRef: "warm", path: "/tmp/x.cube" }).success).toBe(
       false,
     );
+  });
+});
+
+describe("compositionFogSchema", () => {
+  it("accepts a linear fog with color, near, and far", () => {
+    const result = compositionFogSchema.safeParse({ type: "linear", color: [0.5, 0.5, 0.5, 1], near: 1, far: 50 });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts an exponential fog with color and density", () => {
+    const result = compositionFogSchema.safeParse({ type: "exponential", color: [0.5, 0.5, 0.5, 1], density: 0.01 });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a height fog with color, density, and height", () => {
+    const result = compositionFogSchema.safeParse({
+      type: "height",
+      color: [0.5, 0.5, 0.5, 1],
+      density: 0.05,
+      height: 2,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects an unrecognized fog type", () => {
+    expect(compositionFogSchema.safeParse({ type: "volumetric", color: [1, 1, 1, 1] }).success).toBe(false);
+  });
+
+  it("rejects a negative exponential density", () => {
+    const result = compositionFogSchema.safeParse({ type: "exponential", color: [1, 1, 1, 1], density: -0.1 });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a linear fog missing near or far", () => {
+    expect(compositionFogSchema.safeParse({ type: "linear", color: [1, 1, 1, 1], far: 50 }).success).toBe(false);
+    expect(compositionFogSchema.safeParse({ type: "linear", color: [1, 1, 1, 1], near: 1 }).success).toBe(false);
+  });
+
+  it("rejects a fog variant carrying another variant's own field", () => {
+    const result = compositionFogSchema.safeParse({ type: "linear", color: [1, 1, 1, 1], near: 1, far: 50, height: 2 });
+    expect(result.success).toBe(false);
   });
 });
 

@@ -25,6 +25,7 @@ describe("sceneNodeKindSchema", () => {
       "compositionRef",
       "satori",
       "particles",
+      "volume",
     ];
     for (const kind of kinds) {
       expect(sceneNodeKindSchema.safeParse(kind).success).toBe(true);
@@ -1642,6 +1643,88 @@ describe("sceneNodeSchema: particles (Phase 67)", () => {
 
   it("rejects a stray, unrecognized field (strict object)", () => {
     const result = sceneNodeSchema.safeParse({ ...minimalParticlesFields(), unknownField: true });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("sceneNodeSchema: volume (Phase 68)", () => {
+  function minimalVolumeFields() {
+    return {
+      ...baseFields(),
+      kind: "volume" as const,
+      shape: { type: "sphere" as const, radius: 1 },
+      color: [0.8, 0.8, 0.85, 1] as const,
+      density: 1,
+    };
+  }
+
+  it("accepts a minimal volume node", () => {
+    const result = sceneNodeSchema.safeParse(minimalVolumeFields());
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a volume node missing shape, color, or density", () => {
+    const fields = minimalVolumeFields();
+    for (const omit of ["shape", "color", "density"] as const) {
+      const { [omit]: _omitted, ...rest } = fields;
+      expect(sceneNodeSchema.safeParse(rest).success).toBe(false);
+    }
+  });
+
+  it("accepts both shape kinds", () => {
+    expect(
+      sceneNodeSchema.safeParse({ ...minimalVolumeFields(), shape: { type: "box", halfExtents: [1, 1, 1] } })
+        .success,
+    ).toBe(true);
+    expect(
+      sceneNodeSchema.safeParse({ ...minimalVolumeFields(), shape: { type: "sphere", radius: 2 } }).success,
+    ).toBe(true);
+  });
+
+  it("rejects an unrecognized shape type", () => {
+    const result = sceneNodeSchema.safeParse({ ...minimalVolumeFields(), shape: { type: "cone", radius: 1 } });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts a keyframe track for color and density", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...minimalVolumeFields(),
+      color: {
+        type: "keyframeTrack",
+        keyframes: [
+          { frame: 0, value: [1, 1, 1, 1] },
+          { frame: 30, value: [0, 0, 0, 0] },
+        ],
+      },
+      density: {
+        type: "keyframeTrack",
+        keyframes: [
+          { frame: 0, value: 0 },
+          { frame: 30, value: 1 },
+        ],
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a negative density", () => {
+    const result = sceneNodeSchema.safeParse({ ...minimalVolumeFields(), density: -1 });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts every optional field together", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...minimalVolumeFields(),
+      noiseFrequency: 2,
+      driftSpeed: 0.5,
+      raymarchSteps: 40,
+      seed: 3,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a stray, unrecognized field (strict object)", () => {
+    const result = sceneNodeSchema.safeParse({ ...minimalVolumeFields(), unknownField: true });
     expect(result.success).toBe(false);
   });
 });

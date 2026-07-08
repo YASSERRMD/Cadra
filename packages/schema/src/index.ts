@@ -109,6 +109,8 @@ export {
   videoFitModeSchema,
   videoNodeSchema,
   videoOutOfRangeBehaviorSchema,
+  volumeNodeSchema,
+  volumeShapeSchema,
 } from "./scene-node.js";
 export {
   activeCameraEntrySchema,

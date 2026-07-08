@@ -8,6 +8,7 @@ import {
   SHAPE_ANIMATABLE_PROPERTIES,
   TEXT_ANIMATABLE_PROPERTIES,
   VIDEO_ANIMATABLE_PROPERTIES,
+  VOLUME_ANIMATABLE_PROPERTIES,
 } from "@cadra/core";
 
 import { CURRENT_SCHEMA_VERSION } from "./envelope.js";
@@ -116,6 +117,7 @@ const PRIMITIVE_ANIMATABLE_PROPERTIES: Record<string, readonly string[]> = {
   compositionRef: ["transform.position", "transform.rotation", "transform.scale", "visible"],
   satori: SATORI_ANIMATABLE_PROPERTIES,
   particles: PARTICLES_ANIMATABLE_PROPERTIES,
+  volume: VOLUME_ANIMATABLE_PROPERTIES,
 };
 
 /**

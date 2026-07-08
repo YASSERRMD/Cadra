@@ -347,6 +347,165 @@
                 ],
                 "additionalProperties": false
               },
+              "fog": {
+                "description": "Optional whole-composition atmospheric fog.",
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "linear"
+                      },
+                      "color": {
+                        "type": "array",
+                        "prefixItems": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "description": "The red channel, in the inclusive range 0 to 1."
+                          },
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "description": "The green channel, in the inclusive range 0 to 1."
+                          },
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "description": "The blue channel, in the inclusive range 0 to 1."
+                          },
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "description": "The alpha channel, in the inclusive range 0 to 1."
+                          }
+                        ],
+                        "description": "A straight (non-premultiplied) RGBA color. Each channel is a number in the inclusive range 0 to 1, not 0 to 255."
+                      },
+                      "near": {
+                        "type": "number"
+                      },
+                      "far": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "color",
+                      "near",
+                      "far"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "exponential"
+                      },
+                      "color": {
+                        "type": "array",
+                        "prefixItems": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "description": "The red channel, in the inclusive range 0 to 1."
+                          },
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "description": "The green channel, in the inclusive range 0 to 1."
+                          },
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "description": "The blue channel, in the inclusive range 0 to 1."
+                          },
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "description": "The alpha channel, in the inclusive range 0 to 1."
+                          }
+                        ],
+                        "description": "A straight (non-premultiplied) RGBA color. Each channel is a number in the inclusive range 0 to 1, not 0 to 255."
+                      },
+                      "density": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "color",
+                      "density"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "height"
+                      },
+                      "color": {
+                        "type": "array",
+                        "prefixItems": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "description": "The red channel, in the inclusive range 0 to 1."
+                          },
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "description": "The green channel, in the inclusive range 0 to 1."
+                          },
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "description": "The blue channel, in the inclusive range 0 to 1."
+                          },
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "description": "The alpha channel, in the inclusive range 0 to 1."
+                          }
+                        ],
+                        "description": "A straight (non-premultiplied) RGBA color. Each channel is a number in the inclusive range 0 to 1, not 0 to 255."
+                      },
+                      "density": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "height": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "color",
+                      "density",
+                      "height"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
               "shadowQuality": {
                 "description": "Optional whole-composition shadow and ambient-occlusion tuning.",
                 "type": "object",
@@ -587,6 +746,40 @@
                           },
                           "required": [
                             "type"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "godRays"
+                            },
+                            "lightNodeId": {
+                              "type": "string",
+                              "description": "Id of the LightNode light shafts are cast from."
+                            },
+                            "raymarchSteps": {
+                              "description": "Raymarch steps sampled along each pixel's own view ray. Higher is smoother and more expensive. Defaults to 60.",
+                              "type": "number"
+                            },
+                            "density": {
+                              "description": "Overall ray density/brightness. Defaults to 0.7.",
+                              "type": "number"
+                            },
+                            "maxDensity": {
+                              "description": "Caps how dense (opaque) the accumulated rays can become. Defaults to 0.5.",
+                              "type": "number"
+                            },
+                            "distanceAttenuation": {
+                              "description": "How strongly rays fade with distance from the light. Defaults to 2.",
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "lightNodeId"
                           ],
                           "additionalProperties": false
                         },
@@ -10531,6 +10724,660 @@
             "initialSpeed",
             "direction",
             "startSize",
+            "children"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Unique identifier for this scene node within the project."
+            },
+            "kind": {
+              "type": "string",
+              "const": "volume",
+              "description": "Discriminant identifying this node as a volumetric smoke/mist volume."
+            },
+            "name": {
+              "description": "Optional human-readable label, purely for authoring and debugging.",
+              "type": "string"
+            },
+            "transform": {
+              "type": "object",
+              "properties": {
+                "position": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "World-space translation of the node. A plain Vector3 or a keyframe track."
+                },
+                "rotation": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "Euler rotation in radians, applied in intrinsic XYZ order. A plain Vector3 or a keyframe track."
+                },
+                "scale": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "Per-axis scale factor of the node. A plain Vector3 or a keyframe track."
+                }
+              },
+              "required": [
+                "position",
+                "rotation",
+                "scale"
+              ],
+              "additionalProperties": false,
+              "description": "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track."
+            },
+            "visible": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "boolean",
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track."
+            },
+            "shape": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "box"
+                    },
+                    "halfExtents": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "Half-width, half-height, half-depth of the box, in the node's own local units."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "halfExtents"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "sphere"
+                    },
+                    "radius": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "radius"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "The bounding shape this volume's density field fills."
+            },
+            "color": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1,
+                      "description": "The red channel, in the inclusive range 0 to 1."
+                    },
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1,
+                      "description": "The green channel, in the inclusive range 0 to 1."
+                    },
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1,
+                      "description": "The blue channel, in the inclusive range 0 to 1."
+                    },
+                    {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1,
+                      "description": "The alpha channel, in the inclusive range 0 to 1."
+                    }
+                  ],
+                  "description": "A straight (non-premultiplied) RGBA color. Each channel is a number in the inclusive range 0 to 1, not 0 to 255."
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "The red channel, in the inclusive range 0 to 1."
+                              },
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "The green channel, in the inclusive range 0 to 1."
+                              },
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "The blue channel, in the inclusive range 0 to 1."
+                              },
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "The alpha channel, in the inclusive range 0 to 1."
+                              }
+                            ],
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "This volume's own base color, lit by the scene's own lights. A plain ColorRGBA or a keyframe track."
+            },
+            "density": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "number",
+                            "minimum": 0,
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Overall density multiplier: higher looks thicker/more opaque. A plain number or a keyframe track. Defaults to 1."
+            },
+            "noiseFrequency": {
+              "description": "Spatial frequency of the underlying curl-noise field. Higher values give smaller, more turbulent detail. Defaults to 1.",
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "driftSpeed": {
+              "description": "How fast the sampled noise field drifts along its own local Z axis, in units per second. Defaults to 0 (static).",
+              "type": "number"
+            },
+            "raymarchSteps": {
+              "description": "Raymarch step count through shape. Higher is smoother, slower. Defaults to 25.",
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "seed": {
+              "description": "Combined with the composition's own frame seed and this node's own id to derive this volume's deterministic noise field.",
+              "type": "number"
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "description": "Child scene nodes nested under this node."
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "transform",
+            "visible",
+            "shape",
+            "color",
+            "density",
             "children"
           ],
           "additionalProperties": false
