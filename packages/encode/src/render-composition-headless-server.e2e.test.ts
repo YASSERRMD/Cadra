@@ -142,20 +142,23 @@ function buildProject(): Project {
 }
 
 /**
- * `buildProject`'s own scene, plus every Phase 58/59 post-processing effect
- * (both pre-tonemap: `bloom`, `depthOfField`; and post-tonemap: `sharpen`,
- * `chromaticAberration`, `vignette`, `filmGrain`, `lensDistortion`) and
- * ambient occlusion together in one composition. This is real, non-mocked
- * coverage that the whole unified pipeline (`buildWebGl2Pipeline` in
- * `@cadra/renderer`, since this exact headless Chromium/SwiftShader
- * environment resolves to the WebGL2 fallback backend, per `buildProject`'s
- * own doc) actually runs end to end through a real browser without
- * throwing, composes AO and post-processing correctly (see
- * `RenderPassConfig`'s own doc in `@cadra/renderer` for why they must share
- * one composer), and still produces real, non-blank pixel output - exactly
- * the kind of coverage this improvement track's own working rules call for
- * ("every new visual effect must be covered by a golden-frame test") ahead
- * of Phase 71's own dedicated golden-frame harness.
+ * `buildProject`'s own scene, plus every Phase 58/59/62 post-processing
+ * effect (both pre-tonemap: `bloom`, `depthOfField`; and post-tonemap:
+ * `sharpen`, `chromaticAberration`, `vignette`, `filmGrain`,
+ * `lensDistortion`, `colorGrade`, `lut`) and ambient occlusion together in
+ * one composition. `lut` references `"warm"`, one of
+ * `createDefaultLutRegistry`'s own built-in procedural LUTs, requiring no
+ * registry setup here. This is real, non-mocked coverage that the whole
+ * unified pipeline (`buildWebGl2Pipeline` in `@cadra/renderer`, since this
+ * exact headless Chromium/SwiftShader environment resolves to the WebGL2
+ * fallback backend, per `buildProject`'s own doc) actually runs end to end
+ * through a real browser without throwing, composes AO and post-processing
+ * correctly (see `RenderPassConfig`'s own doc in `@cadra/renderer` for why
+ * they must share one composer), and still produces real, non-blank pixel
+ * output - exactly the kind of coverage this improvement track's own
+ * working rules call for ("every new visual effect must be covered by a
+ * golden-frame test") ahead of Phase 71's own dedicated golden-frame
+ * harness.
  */
 function buildProjectWithPostProcessing(): Project {
   const project = buildProject();
@@ -176,6 +179,8 @@ function buildProjectWithPostProcessing(): Project {
         { type: "vignette", darkness: 0.5, offset: 1 },
         { type: "filmGrain", intensity: 0.3 },
         { type: "lensDistortion", amount: 0.05 },
+        { type: "colorGrade", lift: [0.01, 0, -0.01], gamma: [1, 1.05, 0.95], gain: [1.05, 1, 0.98], saturation: 1.1, contrast: 1.05 },
+        { type: "lut", lutRef: "warm", intensity: 0.7 },
       ],
     },
   };

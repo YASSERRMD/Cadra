@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { BokehPass } from "three/addons/postprocessing/BokehPass.js";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
+import { LUTPass } from "three/addons/postprocessing/LUTPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import type { Pass } from "three/addons/postprocessing/Pass.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
@@ -16,6 +17,7 @@ import { bloom as createBloomNode } from "three/addons/tsl/display/BloomNode.js"
 import { chromaticAberration as createChromaticAberrationNode } from "three/addons/tsl/display/ChromaticAberrationNode.js";
 import { dof as createDofNode } from "three/addons/tsl/display/DepthOfFieldNode.js";
 import { ao as createGtaoNode } from "three/addons/tsl/display/GTAONode.js";
+import { lut3D as createLut3DNode } from "three/addons/tsl/display/Lut3DNode.js";
 import { motionBlur as createMotionBlurNode } from "three/addons/tsl/display/MotionBlur.js";
 import { ssaaPass } from "three/addons/tsl/display/SSAAPassNode.js";
 import {
@@ -30,6 +32,7 @@ import {
   output,
   pass,
   rand,
+  texture,
   textureSize,
   toneMappingExposure,
   uniform,
@@ -41,6 +44,7 @@ import {
 } from "three/tsl";
 import { RenderPipeline, type WebGPURenderer } from "three/webgpu";
 
+import { ColorGradeShader, updateColorGradeUniforms } from "./color-grade.js";
 import { computeFilmGrainSeed } from "./film-grain.js";
 import { computeMotionBlurVelocityScale } from "./motion-blur.js";
 import { computeSharpenKernelWeights, SharpenShader, updateSharpenUniforms } from "./sharpen.js";
@@ -89,12 +93,18 @@ export interface PostProcessingRenderConfig {
  * key (see `renderPassConfigKey`): it changes every call by construction,
  * and only ever drives a handful of already-built passes' own per-frame
  * uniforms (currently: film grain's seed) via each built pipeline's own
- * `updateFrame`, never a full composer/pipeline rebuild.
+ * `updateFrame`, never a full composer/pipeline rebuild. `resolveLut`
+ * resolves a `LutEffectConfig.lutRef` to its own real `THREE.Data3DTexture`
+ * (see `LutRegistry` in `../lut/lut-registry.ts`): resolution itself can
+ * involve real file I/O (a real `.cube` file), so it always happens ahead of
+ * time in `ThreeRenderer`, never synchronously inside pipeline construction;
+ * this is purely the already-resolved lookup function.
  */
 export interface RenderPassConfig {
   ambientOcclusion?: AmbientOcclusionRenderConfig;
   postProcessing?: PostProcessingRenderConfig;
   frame: number;
+  resolveLut?: (ref: string) => THREE.Data3DTexture | undefined;
 }
 
 /**
@@ -161,6 +171,8 @@ function isPreTonemapEffect(effect: PostEffectConfig): boolean {
     case "vignette":
     case "filmGrain":
     case "lensDistortion":
+    case "colorGrade":
+    case "lut":
       return false;
   }
 }
@@ -290,6 +302,7 @@ function buildWebGl2EffectPass(
   width: number,
   height: number,
   registerFrameUpdate: (update: (frame: number) => void) => void,
+  resolveLut: (ref: string) => THREE.Data3DTexture | undefined,
 ): Pass | undefined {
   switch (effect.type) {
     case "sharpen": {
@@ -346,6 +359,26 @@ function buildWebGl2EffectPass(
     case "motionBlur": {
       return undefined;
     }
+    case "colorGrade": {
+      const shaderPass = new ShaderPass(ColorGradeShader);
+      updateColorGradeUniforms(
+        shaderPass.material,
+        effect.lift ?? [0, 0, 0],
+        effect.gamma ?? [1, 1, 1],
+        effect.gain ?? [1, 1, 1],
+        effect.saturation ?? 1,
+        effect.contrast ?? 1,
+      );
+      return shaderPass;
+    }
+    case "lut": {
+      const lutTexture = resolveLut(effect.lutRef);
+      if (lutTexture === undefined) {
+        return undefined;
+      }
+      const lutPass = new LUTPass({ lut: lutTexture, intensity: effect.intensity ?? 1 });
+      return lutPass;
+    }
   }
 }
 
@@ -398,10 +431,11 @@ export function buildWebGl2Pipeline(
   const registerFrameUpdate = (update: (frame: number) => void): void => {
     frameUpdates.push(update);
   };
+  const resolveLut = config.resolveLut ?? ((): undefined => undefined);
 
   const { preTonemap, postTonemap } = partitionEffectsByStage(config.postProcessing?.effects ?? []);
   for (const effect of preTonemap) {
-    const effectPass = buildWebGl2EffectPass(effect, scene, camera, width, height, registerFrameUpdate);
+    const effectPass = buildWebGl2EffectPass(effect, scene, camera, width, height, registerFrameUpdate, resolveLut);
     if (effectPass !== undefined) {
       composer.addPass(effectPass);
     }
@@ -410,7 +444,7 @@ export function buildWebGl2Pipeline(
   composer.addPass(new OutputPass());
 
   for (const effect of postTonemap) {
-    const effectPass = buildWebGl2EffectPass(effect, scene, camera, width, height, registerFrameUpdate);
+    const effectPass = buildWebGl2EffectPass(effect, scene, camera, width, height, registerFrameUpdate, resolveLut);
     if (effectPass !== undefined) {
       composer.addPass(effectPass);
     }
@@ -485,11 +519,12 @@ export function buildWebGpuPipeline(
   const registerFrameUpdate = (update: (frame: number) => void): void => {
     frameUpdates.push(update);
   };
+  const resolveLut = config.resolveLut ?? ((): undefined => undefined);
 
   const { preTonemap, postTonemap } = partitionEffectsByStage(effects);
 
   for (const effect of preTonemap) {
-    node = applyWebGpuEffect(node, effect, scenePass, camera, registerFrameUpdate);
+    node = applyWebGpuEffect(node, effect, scenePass, camera, registerFrameUpdate, resolveLut);
   }
 
   // Mirrors RenderOutputNode's own setup() guard (verified directly against
@@ -506,7 +541,7 @@ export function buildWebGpuPipeline(
   }
 
   for (const effect of postTonemap) {
-    node = applyWebGpuEffect(node, effect, scenePass, camera, registerFrameUpdate);
+    node = applyWebGpuEffect(node, effect, scenePass, camera, registerFrameUpdate, resolveLut);
   }
 
   const renderPipeline = new RenderPipeline(renderer);
@@ -547,6 +582,7 @@ function applyWebGpuEffect(
   scenePass: AnyTslNode,
   camera: THREE.Camera,
   registerFrameUpdate: (update: (frame: number) => void) => void,
+  resolveLut: (ref: string) => THREE.Data3DTexture | undefined,
 ): AnyTslNode {
   switch (effect.type) {
     case "sharpen": {
@@ -637,6 +673,35 @@ function applyWebGpuEffect(
       const velocityTexture: AnyTslNode = scenePass.getTextureNode("velocity");
       const scaledVelocity = velocityTexture.mul(float(computeMotionBlurVelocityScale(effect.shutterAngle ?? 180)));
       return createMotionBlurNode(convertToTexture(colorTexture), scaledVelocity, int(effect.samples ?? 16));
+    }
+    case "colorGrade": {
+      // Reproduces applyColorGrade's exact formula (see that function's own
+      // doc for why both backends share one source of truth for the actual
+      // math). No convertToTexture needed: only .rgb/.a property access
+      // below, never .sample() (see the "lensDistortion" case's own comment
+      // for why that distinction matters).
+      const [liftR, liftG, liftB] = effect.lift ?? [0, 0, 0];
+      const [gammaR, gammaG, gammaB] = effect.gamma ?? [1, 1, 1];
+      const [gainR, gainG, gainB] = effect.gain ?? [1, 1, 1];
+      const lift = vec3(liftR, liftG, liftB);
+      const gamma = vec3(gammaR, gammaG, gammaB);
+      const gain = vec3(gainR, gainG, gainB);
+      const lifted = colorTexture.rgb.mul(float(1).sub(lift)).add(lift);
+      const gained = lifted.mul(gain);
+      const graded = gained.max(0).pow(float(1).div(gamma));
+      const luma = graded.dot(vec3(0.2126, 0.7152, 0.0722));
+      const saturated = vec3(luma).add(graded.sub(vec3(luma)).mul(float(effect.saturation ?? 1)));
+      const contrasted = saturated.sub(0.5).mul(float(effect.contrast ?? 1)).add(0.5);
+      return vec4(contrasted, colorTexture.a);
+    }
+    case "lut": {
+      const lutTexture = resolveLut(effect.lutRef);
+      if (lutTexture === undefined) {
+        return colorTexture;
+      }
+      const lutSize = lutTexture.image.width;
+      const lutTextureNode = texture(lutTexture);
+      return createLut3DNode(colorTexture, lutTextureNode, lutSize, float(effect.intensity ?? 1));
     }
   }
 }

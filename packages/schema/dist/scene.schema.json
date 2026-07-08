@@ -589,6 +589,94 @@
                             "type"
                           ],
                           "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "colorGrade"
+                            },
+                            "lift": {
+                              "description": "Shadow offset per channel, raising or lowering black level. [0, 0, 0] is a no-op.",
+                              "type": "array",
+                              "prefixItems": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "number"
+                                }
+                              ]
+                            },
+                            "gamma": {
+                              "description": "Midtone power per channel. [1, 1, 1] is a no-op.",
+                              "type": "array",
+                              "prefixItems": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "number"
+                                }
+                              ]
+                            },
+                            "gain": {
+                              "description": "Highlight multiplier per channel. [1, 1, 1] is a no-op.",
+                              "type": "array",
+                              "prefixItems": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "number"
+                                }
+                              ]
+                            },
+                            "saturation": {
+                              "description": "Overall color intensity: 0 is grayscale, 1 is a no-op, above 1 oversaturates. Defaults to 1.",
+                              "type": "number"
+                            },
+                            "contrast": {
+                              "description": "Contrast around the mid-gray pivot: 1 is a no-op. Defaults to 1.",
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "lut"
+                            },
+                            "lutRef": {
+                              "type": "string",
+                              "description": "Id of a registered 3D LUT, resolved against a LUT registry."
+                            },
+                            "intensity": {
+                              "description": "Blends between the un-graded image (0) and the full LUT result (1). Defaults to 1.",
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "lutRef"
+                          ],
+                          "additionalProperties": false
                         }
                       ]
                     },

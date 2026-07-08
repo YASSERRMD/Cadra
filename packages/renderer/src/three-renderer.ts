@@ -28,6 +28,7 @@ import {
   createDefaultEnvironmentRegistry,
   type EnvironmentRegistry,
 } from "./environment/environment-registry.js";
+import { createDefaultLutRegistry, type LutRegistry } from "./lut/lut-registry.js";
 import {
   type AmbientOcclusionRenderConfig,
   buildWebGl2Pipeline,
@@ -487,6 +488,7 @@ function findActiveCamera(
 export class ThreeRenderer implements Renderer {
   private readonly deps: ThreeRendererDependencies;
   private readonly environmentRegistry: EnvironmentRegistry;
+  private readonly lutRegistry: LutRegistry;
   private threeRenderer: ThreeRendererLike | undefined;
   private resolvedBackend: RendererBackend | undefined;
   private wasFallback = false;
@@ -571,9 +573,11 @@ export class ThreeRenderer implements Renderer {
   constructor(
     deps: ThreeRendererDependencies = defaultThreeRendererDependencies,
     environmentRegistry: EnvironmentRegistry = createDefaultEnvironmentRegistry(),
+    lutRegistry: LutRegistry = createDefaultLutRegistry(),
   ) {
     this.deps = deps;
     this.environmentRegistry = environmentRegistry;
+    this.lutRegistry = lutRegistry;
     this.defaultCamera.position.set(0, 0, 5);
   }
 
@@ -647,6 +651,7 @@ export class ThreeRenderer implements Renderer {
       ambientOcclusion: this.resolveAmbientOcclusion(sceneState.shadowQuality),
       postProcessing: resolvePostProcessing(sceneState.postProcessing),
       frame: frameContext.frame,
+      resolveLut: (ref: string) => this.lutRegistry.resolve(ref),
     });
   }
 

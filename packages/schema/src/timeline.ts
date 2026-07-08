@@ -8,6 +8,7 @@ import type {
   CascadedShadowConfig,
   ChromaticAberrationEffectConfig,
   Clip,
+  ColorGradeEffectConfig,
   Composition,
   CompositionColorGrading,
   CompositionEnvironment,
@@ -18,6 +19,7 @@ import type {
   EnvironmentGroundProjection,
   FilmGrainEffectConfig,
   LensDistortionEffectConfig,
+  LutEffectConfig,
   MotionBlurEffectConfig,
   PostEffectConfig,
   Project,
@@ -547,6 +549,40 @@ type _CheckMotionBlurEffectConfig = AssertTrue<
   AssertEqual<z.infer<typeof motionBlurEffectConfigSchema>, MotionBlurEffectConfig>
 >;
 
+/** An `[r, g, b]` triple, mirroring `ColorGradeEffectConfig`'s own `lift`/`gamma`/`gain` fields. */
+const rgbTripleSchema = z.tuple([z.number(), z.number(), z.number()]);
+
+/** A three-way lift/gamma/gain color grading pass, mirroring `ColorGradeEffectConfig`. */
+export const colorGradeEffectConfigSchema = z.strictObject({
+  type: z.literal("colorGrade"),
+  lift: rgbTripleSchema
+    .optional()
+    .describe("Shadow offset per channel, raising or lowering black level. [0, 0, 0] is a no-op."),
+  gamma: rgbTripleSchema.optional().describe("Midtone power per channel. [1, 1, 1] is a no-op."),
+  gain: rgbTripleSchema.optional().describe("Highlight multiplier per channel. [1, 1, 1] is a no-op."),
+  saturation: z
+    .number()
+    .optional()
+    .describe("Overall color intensity: 0 is grayscale, 1 is a no-op, above 1 oversaturates. Defaults to 1."),
+  contrast: z.number().optional().describe("Contrast around the mid-gray pivot: 1 is a no-op. Defaults to 1."),
+});
+
+type _CheckColorGradeEffectConfig = AssertTrue<
+  AssertEqual<z.infer<typeof colorGradeEffectConfigSchema>, ColorGradeEffectConfig>
+>;
+
+/** A 3D lookup table pass, mirroring `LutEffectConfig`. */
+export const lutEffectConfigSchema = z.strictObject({
+  type: z.literal("lut"),
+  lutRef: z.string().describe("Id of a registered 3D LUT, resolved against a LUT registry."),
+  intensity: z
+    .number()
+    .optional()
+    .describe("Blends between the un-graded image (0) and the full LUT result (1). Defaults to 1."),
+});
+
+type _CheckLutEffectConfig = AssertTrue<AssertEqual<z.infer<typeof lutEffectConfigSchema>, LutEffectConfig>>;
+
 /**
  * One configured entry in `compositionPostProcessingSchema.effects`, mirroring
  * `PostEffectConfig`. A discriminated union on `type`, growing by one variant
@@ -561,6 +597,8 @@ export const postEffectConfigSchema = z.discriminatedUnion("type", [
   filmGrainEffectConfigSchema,
   lensDistortionEffectConfigSchema,
   motionBlurEffectConfigSchema,
+  colorGradeEffectConfigSchema,
+  lutEffectConfigSchema,
 ]);
 
 type _CheckPostEffectConfig = AssertTrue<AssertEqual<z.infer<typeof postEffectConfigSchema>, PostEffectConfig>>;
