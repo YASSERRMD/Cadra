@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { WebGLPathTracer } from "three-gpu-pathtracer";
+import { MeshBVH } from "three-mesh-bvh";
 
 /**
  * The subset of `WebGLPathTracer` (`three-gpu-pathtracer`) this package
@@ -31,5 +32,33 @@ export interface WebGLPathTracerLike {
 /** Constructs the real `WebGLPathTracerLike` for a given `WebGLRenderer`. */
 export type CreatePathTracer = (renderer: THREE.WebGLRenderer) => WebGLPathTracerLike;
 
+/**
+ * Builds the BVH for `setSceneAsync`'s own geometry synchronously on the
+ * calling thread instead of via a real Web Worker (`three-mesh-bvh`'s own
+ * `GenerateMeshBVHWorker`, which `WebGLPathTracer` otherwise requires
+ * *some* `BVHWorker` to be set before `setSceneAsync` can run at all -
+ * confirmed directly against `PathTracingSceneGenerator.js`'s own
+ * `generateAsync`, which throws `"setBVHWorker" must be called before
+ * "generateAsync"` otherwise).
+ *
+ * Deliberately not a real worker: `GenerateMeshBVHWorker` spawns a
+ * `new Worker(new URL("./generateMeshBVH.worker.js", import.meta.url))`,
+ * requiring this monorepo's own bundler to correctly chunk and serve a
+ * third-party package's internal worker file - real complexity this
+ * offline, headless render path (already blocking on hundreds of
+ * synchronous `renderSample()` calls) has no need to take on. `MeshBVH`'s
+ * own construction is synchronous and deterministic either way; wrapping
+ * it in an already-resolved `Promise` satisfies `BVHWorker`'s async shape
+ * with no threading involved at all.
+ */
+const mainThreadBvhWorker = {
+  generate: (geometry: THREE.BufferGeometry, options?: ConstructorParameters<typeof MeshBVH>[1]) =>
+    Promise.resolve(new MeshBVH(geometry, options)),
+};
+
 /** The dependency `renderPathTracedFrame` uses when no override is supplied, i.e. the real `three-gpu-pathtracer`. */
-export const defaultCreatePathTracer: CreatePathTracer = (renderer) => new WebGLPathTracer(renderer);
+export const defaultCreatePathTracer: CreatePathTracer = (renderer) => {
+  const pathTracer = new WebGLPathTracer(renderer);
+  pathTracer.setBVHWorker(mainThreadBvhWorker);
+  return pathTracer;
+};
