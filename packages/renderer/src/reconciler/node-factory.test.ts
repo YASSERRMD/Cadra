@@ -4,6 +4,7 @@ import {
   type LightType,
   type MeshMaterialConfig,
   type MeshNode,
+  type ModelNode,
   type SatoriNode,
   type SceneNode,
   type TextPhysicsConfig,
@@ -17,6 +18,7 @@ import * as THREE from "three";
 import { VolumeNodeMaterial } from "three/webgpu";
 import { describe, expect, it, vi } from "vitest";
 
+import type { LoadedModel, ModelRegistry } from "../assets/model-registry.js";
 import {
   computeSatoriLayerRenderKey,
   createInMemorySatoriLayerRenderRegistry,
@@ -1136,6 +1138,282 @@ describe("node-factory: volumetric smoke (Phase 68)", () => {
   it("does not throw applying properties against the WebGL2 fallback's empty group (no owned.volume at all)", () => {
     const ctx: NodeFactoryContext = { ...makeCtx(), backend: "webgl2" };
     const node = volumeNode();
+    const built = createThreeObject(node, ctx);
+    expect(() => applyNodeProperties(node, built.object3D, ctx, 5, built.owned)).not.toThrow();
+  });
+});
+
+/** A minimal, valid `ModelNode`, with any given field overridden. */
+function modelNode(overrides: Partial<ModelNode> = {}): ModelNode {
+  return {
+    id: "model-1",
+    kind: "model",
+    transform: createIdentityTransform(),
+    visible: true,
+    children: [],
+    assetRef: "character.glb",
+    ...overrides,
+  };
+}
+
+/** A `LoadedModel` with one plain (non-skinned) mesh named `"Body"` and no animations. */
+function fakeLoadedModel(overrides: Partial<LoadedModel> = {}): LoadedModel {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial());
+  mesh.name = "Body";
+  const scene = new THREE.Group();
+  scene.add(mesh);
+  return { scene, animations: [], ...overrides };
+}
+
+/** A `LoadedModel` with a single `THREE.SkinnedMesh` bound to a two-bone skeleton, no animations. */
+function fakeSkinnedLoadedModel(): LoadedModel {
+  const rootBone = new THREE.Bone();
+  const childBone = new THREE.Bone();
+  childBone.position.y = 1;
+  rootBone.add(childBone);
+  const skeleton = new THREE.Skeleton([rootBone, childBone]);
+
+  const geometry = new THREE.CylinderGeometry(0.2, 0.2, 2, 4);
+  const skinIndices: number[] = [];
+  const skinWeights: number[] = [];
+  const vertexCount = geometry.attributes.position?.count ?? 0;
+  for (let i = 0; i < vertexCount; i += 1) {
+    skinIndices.push(0, 1, 0, 0);
+    skinWeights.push(0.5, 0.5, 0, 0);
+  }
+  geometry.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(skinIndices, 4));
+  geometry.setAttribute("skinWeight", new THREE.Float32BufferAttribute(skinWeights, 4));
+
+  const mesh = new THREE.SkinnedMesh(geometry, new THREE.MeshStandardMaterial());
+  mesh.name = "Rig";
+  mesh.add(rootBone);
+  mesh.bind(skeleton);
+
+  const scene = new THREE.Group();
+  scene.add(mesh);
+  return { scene, animations: [] };
+}
+
+/** A `LoadedModel` with one plain mesh carrying two named morph targets, no animations. */
+function fakeMorphLoadedModel(): LoadedModel {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial());
+  mesh.name = "Face";
+  mesh.morphTargetDictionary = { smile: 0, frown: 1 };
+  mesh.morphTargetInfluences = [0, 0];
+  const scene = new THREE.Group();
+  scene.add(mesh);
+  return { scene, animations: [] };
+}
+
+/** A single-track `THREE.AnimationClip` linearly animating the clip root's own `position[axis]` from `0` at time `0` to `endValue` at time `duration`. */
+function positionClip(name: string, axis: "x" | "y", endValue: number, duration = 1): THREE.AnimationClip {
+  const track = new THREE.NumberKeyframeTrack(`.position[${axis}]`, [0, duration], [0, endValue]);
+  return new THREE.AnimationClip(name, duration, [track]);
+}
+
+/** `makeCtx()` plus a `modelRegistry` pre-populated with `entries` (by `assetRef`). */
+function makeCtxWithModel(entries: Record<string, LoadedModel>): NodeFactoryContext {
+  const registry: ModelRegistry = {
+    resolve(assetRef: string): LoadedModel | undefined {
+      return entries[assetRef];
+    },
+  };
+  return { ...makeCtx(), modelRegistry: registry, fps: 30 };
+}
+
+describe("node-factory: GLTF models, skeletal and morph animation (Phase 69)", () => {
+  it("renders an empty group with no owned resources when assetRef is not registered", () => {
+    const ctx = makeCtxWithModel({});
+    const built = createThreeObject(modelNode(), ctx);
+    expect(built.object3D).toBeInstanceOf(THREE.Group);
+    expect((built.object3D as THREE.Group).children.length).toBe(0);
+    expect(built.owned).toBeUndefined();
+  });
+
+  it("also renders an empty group when no modelRegistry is configured at all", () => {
+    const ctx = makeCtx();
+    const built = createThreeObject(modelNode(), ctx);
+    expect(built.object3D).toBeInstanceOf(THREE.Group);
+    expect(built.owned).toBeUndefined();
+  });
+
+  it("builds a clone of the registry entry's own scene, not the shared template itself", () => {
+    const entry = fakeLoadedModel();
+    const ctx = makeCtxWithModel({ "character.glb": entry });
+    const built = createThreeObject(modelNode(), ctx);
+
+    expect(built.object3D).not.toBe(entry.scene);
+    expect(built.object3D.getObjectByName("Body")).toBeInstanceOf(THREE.Mesh);
+    expect(built.object3D.getObjectByName("Body")).not.toBe(entry.scene.getObjectByName("Body"));
+  });
+
+  it("gives two reconciled instances of the same assetRef their own independent clone", () => {
+    const entry = fakeLoadedModel();
+    const ctx = makeCtxWithModel({ "character.glb": entry });
+
+    const first = createThreeObject(modelNode({ id: "a" }), ctx);
+    const second = createThreeObject(modelNode({ id: "b" }), ctx);
+
+    expect(first.object3D).not.toBe(second.object3D);
+  });
+
+  it("defaults castShadow/receiveShadow to false and applies them to every mesh in the hierarchy", () => {
+    const ctx = makeCtxWithModel({ "character.glb": fakeLoadedModel() });
+
+    const plain = createThreeObject(modelNode(), ctx).object3D.getObjectByName("Body") as THREE.Mesh;
+    expect(plain.castShadow).toBe(false);
+    expect(plain.receiveShadow).toBe(false);
+
+    const shadowed = createThreeObject(
+      modelNode({ castShadow: true, receiveShadow: true }),
+      ctx,
+    ).object3D.getObjectByName("Body") as THREE.Mesh;
+    expect(shadowed.castShadow).toBe(true);
+    expect(shadowed.receiveShadow).toBe(true);
+  });
+
+  it("gives a cloned SkinnedMesh its own independent Skeleton, tracked in owned.model.skeletons", () => {
+    const ctx = makeCtxWithModel({ "character.glb": fakeSkinnedLoadedModel() });
+    const originalMesh = (ctx.modelRegistry?.resolve("character.glb") as LoadedModel).scene.getObjectByName(
+      "Rig",
+    ) as THREE.SkinnedMesh;
+
+    const built = createThreeObject(modelNode(), ctx);
+    const clonedMesh = built.object3D.getObjectByName("Rig") as THREE.SkinnedMesh;
+
+    expect(clonedMesh.skeleton).not.toBe(originalMesh.skeleton);
+    expect(built.owned?.model?.skeletons).toContain(clonedMesh.skeleton);
+  });
+
+  it("plays a single clip: clip-local time is (frame / fps) * timeScale, and weight is resolved fresh per frame", () => {
+    const entry = fakeLoadedModel({ animations: [positionClip("Move", "x", 10)] });
+    const ctx = makeCtxWithModel({ "character.glb": entry });
+    // loop: "clamp" here (rather than the "repeat" default): frame 30 lands
+    // at exactly rawTime === duration, and a "repeat" clip's own t=0 and
+    // t=duration poses are conventionally the same (a seamless loop) - this
+    // fixture's own 0-to-10 track is deliberately not seamless, so "clamp"
+    // is what actually asserts "played through to the end", unambiguously.
+    const node = modelNode({ clips: [{ name: "Move", weight: 1, loop: "clamp" }] });
+    const built = createThreeObject(node, ctx);
+
+    applyNodeProperties(node, built.object3D, ctx, 15, built.owned);
+    expect(built.object3D.position.x).toBeCloseTo(5);
+
+    applyNodeProperties(node, built.object3D, ctx, 30, built.owned);
+    expect(built.object3D.position.x).toBeCloseTo(10);
+  });
+
+  it("resolves a keyframed clip weight per frame, muting the clip entirely at weight 0", () => {
+    const entry = fakeLoadedModel({ animations: [positionClip("Move", "x", 10)] });
+    const ctx = makeCtxWithModel({ "character.glb": entry });
+    const node = modelNode({
+      clips: [
+        {
+          name: "Move",
+          weight: { type: "keyframeTrack", keyframes: [{ frame: 0, value: 0 }, { frame: 30, value: 1 }] },
+          loop: "clamp",
+        },
+      ],
+    });
+    const built = createThreeObject(node, ctx);
+
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+    expect(built.object3D.position.x).toBeCloseTo(0);
+
+    applyNodeProperties(node, built.object3D, ctx, 30, built.owned);
+    expect(built.object3D.position.x).toBeCloseTo(10);
+  });
+
+  it("supports multiple simultaneous clips driving independent properties (blending)", () => {
+    const entry = fakeLoadedModel({
+      animations: [positionClip("MoveX", "x", 10), positionClip("MoveY", "y", 20)],
+    });
+    const ctx = makeCtxWithModel({ "character.glb": entry });
+    const node = modelNode({
+      clips: [
+        { name: "MoveX", weight: 1, loop: "clamp" },
+        { name: "MoveY", weight: 1, loop: "clamp" },
+      ],
+    });
+    const built = createThreeObject(node, ctx);
+
+    applyNodeProperties(node, built.object3D, ctx, 30, built.owned);
+
+    expect(built.object3D.position.x).toBeCloseTo(10);
+    expect(built.object3D.position.y).toBeCloseTo(20);
+  });
+
+  it("mutes a loaded clip the current frame's clips array does not reference", () => {
+    const entry = fakeLoadedModel({
+      animations: [positionClip("MoveX", "x", 10), positionClip("Unused", "x", 999)],
+    });
+    const ctx = makeCtxWithModel({ "character.glb": entry });
+    const node = modelNode({ clips: [{ name: "MoveX", weight: 1, loop: "clamp" }] });
+    const built = createThreeObject(node, ctx);
+
+    applyNodeProperties(node, built.object3D, ctx, 30, built.owned);
+
+    expect(built.object3D.position.x).toBeCloseTo(10);
+  });
+
+  it("silently ignores a clips entry naming a clip the loaded asset does not have", () => {
+    const entry = fakeLoadedModel({ animations: [positionClip("Move", "x", 10)] });
+    const ctx = makeCtxWithModel({ "character.glb": entry });
+    const node = modelNode({ clips: [{ name: "DoesNotExist", weight: 1 }] });
+    const built = createThreeObject(node, ctx);
+
+    expect(() => applyNodeProperties(node, built.object3D, ctx, 15, built.owned)).not.toThrow();
+  });
+
+  it("applies timeScale to a clip's own local time", () => {
+    const entry = fakeLoadedModel({ animations: [positionClip("Move", "x", 10)] });
+    const ctx = makeCtxWithModel({ "character.glb": entry });
+    const node = modelNode({ clips: [{ name: "Move", weight: 1, timeScale: 2, loop: "clamp" }] });
+    const built = createThreeObject(node, ctx);
+
+    // frame 15 at 30fps = 0.5s raw; * timeScale 2 = 1.0s local time = the clip's own full duration.
+    applyNodeProperties(node, built.object3D, ctx, 15, built.owned);
+    expect(built.object3D.position.x).toBeCloseTo(10);
+  });
+
+  it("clamps past the clip's own duration when loop is 'clamp', and wraps when loop is 'repeat' (the default)", () => {
+    const entry = fakeLoadedModel({ animations: [positionClip("Move", "x", 10, 1)] });
+    const ctx = makeCtxWithModel({ "character.glb": entry });
+
+    const clamped = modelNode({ clips: [{ name: "Move", weight: 1, loop: "clamp" }] });
+    const clampedBuilt = createThreeObject(clamped, ctx);
+    applyNodeProperties(clamped, clampedBuilt.object3D, ctx, 45, clampedBuilt.owned);
+    expect(clampedBuilt.object3D.position.x).toBeCloseTo(10);
+
+    const repeated = modelNode({ clips: [{ name: "Move", weight: 1, loop: "repeat" }] });
+    const repeatedBuilt = createThreeObject(repeated, ctx);
+    // frame 45 at 30fps = 1.5s raw; wraps into [0, 1) as 0.5s -> halfway (5).
+    applyNodeProperties(repeated, repeatedBuilt.object3D, ctx, 45, repeatedBuilt.owned);
+    expect(repeatedBuilt.object3D.position.x).toBeCloseTo(5);
+  });
+
+  it("applies keyframed morph target weights by name, across every morph-capable mesh, and ignores an unknown target name", () => {
+    const ctx = makeCtxWithModel({ "character.glb": fakeMorphLoadedModel() });
+    const node = modelNode({
+      morphTargets: {
+        smile: { type: "keyframeTrack", keyframes: [{ frame: 0, value: 0 }, { frame: 30, value: 1 }] },
+        doesNotExist: 0.5,
+      },
+    });
+    const built = createThreeObject(node, ctx);
+    const mesh = built.object3D.getObjectByName("Face") as THREE.Mesh;
+
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+    expect(mesh.morphTargetInfluences?.[0]).toBeCloseTo(0);
+
+    applyNodeProperties(node, built.object3D, ctx, 30, built.owned);
+    expect(mesh.morphTargetInfluences?.[0]).toBeCloseTo(1);
+    expect(mesh.morphTargetInfluences?.[1]).toBeCloseTo(0);
+  });
+
+  it("does not throw applying properties against the not-registered empty group (no owned.model at all)", () => {
+    const ctx = makeCtxWithModel({});
+    const node = modelNode({ clips: [{ name: "Move", weight: 1 }] });
     const built = createThreeObject(node, ctx);
     expect(() => applyNodeProperties(node, built.object3D, ctx, 5, built.owned)).not.toThrow();
   });

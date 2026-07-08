@@ -97,11 +97,31 @@ describe("@cadra/renderer public surface", () => {
  * enforced by their own `.test.ts` files asserting on those modules' actual
  * exported types, not by a source-text scan here.
  *
+ * `assets/gltf-loader.ts` is excluded for the same reason, as of Phase 69:
+ * `createDefaultParseGltf`'s own declared signature (`(): ParseGltf`, where
+ * `ParseGltf = (bytes: Uint8Array) => Promise<GltfAsset>` and `GltfAsset` is
+ * the deliberately opaque `object`) is already entirely free of Three.js
+ * types, but its *implementation* imports three.js's own `GLTFLoader`
+ * (`three/addons/loaders/GLTFLoader.js`) directly to do the real parsing,
+ * exactly like `three-renderer.ts`/the gizmo/picking modules above.
+ *
+ * `assets/model-registry.ts` is excluded for a different reason, as of Phase
+ * 69, mirroring `./reconciler` instead: `LoadedModel`'s own declared shape
+ * (`{scene: THREE.Object3D, animations: THREE.AnimationClip[]}`) genuinely,
+ * deliberately exposes real Three.js types as part of its own contract - a
+ * caller (namely `@cadra/headless`'s experimental native-GPU path, which
+ * needs to register a real model before rendering one) constructs and
+ * populates a `ModelRegistry` outside this package entirely, so unlike
+ * `createDefaultParseGltf` above, there is no Three.js-free signature to
+ * preserve here; scanning this file for "no Three.js" would contradict its
+ * entire purpose the same way scanning `./reconciler` would.
+ *
  * What this proves: none of the source files that make up the `Renderer`-facing
  * export graph (`index.ts` itself, plus every local module it re-exports
  * types or values from, excluding `./reconciler/*`, `three-renderer.ts`,
- * `gizmo/attach-transform-gizmo.ts`, and `picking/pick-node-at-point.ts`)
- * contain a `from "three"` or `from "three/*"` import. Since those are
+ * `gizmo/attach-transform-gizmo.ts`, `picking/pick-node-at-point.ts`,
+ * `assets/gltf-loader.ts`, and `assets/model-registry.ts`) contain a
+ * `from "three"` or `from "three/*"` import. Since those are
  * exactly the files whose declared export shapes become that part of
  * `@cadra/renderer`'s public `.d.ts` surface, this rules out a `three` type
  * reaching an exported `Renderer`-facing signature through any *other* file.
@@ -126,7 +146,6 @@ describe("@cadra/renderer Renderer-facing surface has no Three.js leakage", () =
     "assets/asset-loader-orchestrator.ts",
     "assets/audio-loader.ts",
     "assets/font-loader.ts",
-    "assets/gltf-loader.ts",
     "assets/image-loader.ts",
     "assets/render-when-ready.ts",
     "assets/types.ts",

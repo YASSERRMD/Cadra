@@ -6,6 +6,7 @@ import {
   type FrameContext,
   type LightNode,
   type MeshNode,
+  type ModelNode,
   type PhysicsConstraintConfig,
   type SceneNode,
   type SceneState,
@@ -16,6 +17,8 @@ import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
 import { GroundedSkybox } from "three/addons/objects/GroundedSkybox.js";
 import { describe, expect, it, vi } from "vitest";
 
+import type { LoadedModel } from "./assets/model-registry.js";
+import { createInMemoryModelRegistry } from "./assets/model-registry.js";
 import type { EnvironmentRegistry } from "./environment/environment-registry.js";
 import type { RenderSize, RenderTarget } from "./renderer.js";
 import type { ThreeRendererDependencies, ThreeRendererFactory } from "./three-renderer.js";
@@ -97,6 +100,28 @@ function meshNode(id: string, overrides: Partial<MeshNode> = {}): MeshNode {
     materialRef: "default",
     ...overrides,
   };
+}
+
+/** A single `model` `SceneNode` referencing `assetRef`. */
+function modelNode(id: string, assetRef: string, overrides: Partial<ModelNode> = {}): ModelNode {
+  return {
+    id,
+    kind: "model",
+    transform: createIdentityTransform(),
+    visible: true,
+    children: [],
+    assetRef,
+    ...overrides,
+  };
+}
+
+/** A `LoadedModel` with one plain mesh named `name`, no animations. */
+function fakeLoadedModel(name: string): LoadedModel {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial());
+  mesh.name = name;
+  const scene = new THREE.Group();
+  scene.add(mesh);
+  return { scene, animations: [] };
 }
 
 /** A single white point-light `SceneNode`, for asserting resolved color under a color grade. */
@@ -1094,6 +1119,92 @@ describe("ThreeRenderer.renderFrame: scene fog (Phase 68)", () => {
     const scene = renderer.getScene() as THREE.Scene & { fogNode: unknown };
     expect(scene.fog).toBeNull();
     expect(scene.fogNode).toBeNull();
+  });
+});
+
+describe("ThreeRenderer: GLTF models (Phase 69)", () => {
+  it("renders an empty placeholder for a model node when no modelRegistry was ever given a matching assetRef", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({
+        layers: [
+          {
+            compositionId: "comp-1",
+            trackId: "track-1",
+            clipId: "clip-1",
+            node: modelNode("model-1", "character.glb"),
+            zIndex: 0,
+            localFrame: 3,
+            opacity: 1,
+          },
+        ],
+      }),
+      makeFrameContext(),
+    );
+
+    const object3D = renderer.getObject3DByNodeId("model-1");
+    expect(object3D).toBeInstanceOf(THREE.Group);
+    expect(object3D?.children.length).toBe(0);
+  });
+
+  it("threads a modelRegistry passed to the constructor all the way through to a real renderFrame call", async () => {
+    const { deps } = createFakeDeps();
+    const modelRegistry = createInMemoryModelRegistry();
+    modelRegistry.register("character.glb", fakeLoadedModel("Body"));
+    const renderer = new ThreeRenderer(deps, undefined, undefined, modelRegistry);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({
+        layers: [
+          {
+            compositionId: "comp-1",
+            trackId: "track-1",
+            clipId: "clip-1",
+            node: modelNode("model-1", "character.glb"),
+            zIndex: 0,
+            localFrame: 3,
+            opacity: 1,
+          },
+        ],
+      }),
+      makeFrameContext(),
+    );
+
+    const object3D = renderer.getObject3DByNodeId("model-1");
+    expect(object3D?.getObjectByName("Body")).toBeInstanceOf(THREE.Mesh);
+  });
+
+  it("gives two independently constructed renderers their own registered models, not a shared default", async () => {
+    const { deps: depsA } = createFakeDeps();
+    const registryA = createInMemoryModelRegistry();
+    registryA.register("character.glb", fakeLoadedModel("Body"));
+    const rendererA = new ThreeRenderer(depsA, undefined, undefined, registryA);
+    await rendererA.init(htmlCanvasLikeTarget, size);
+
+    const { deps: depsB } = createFakeDeps();
+    const rendererB = new ThreeRenderer(depsB);
+    await rendererB.init(htmlCanvasLikeTarget, size);
+
+    const layers = [
+      {
+        compositionId: "comp-1",
+        trackId: "track-1",
+        clipId: "clip-1",
+        node: modelNode("model-1", "character.glb"),
+        zIndex: 0,
+        localFrame: 3,
+        opacity: 1,
+      },
+    ];
+    rendererA.renderFrame(makeSceneState({ layers }), makeFrameContext());
+    rendererB.renderFrame(makeSceneState({ layers }), makeFrameContext());
+
+    expect(rendererA.getObject3DByNodeId("model-1")?.getObjectByName("Body")).toBeInstanceOf(THREE.Mesh);
+    expect(rendererB.getObject3DByNodeId("model-1")?.children.length).toBe(0);
   });
 });
 

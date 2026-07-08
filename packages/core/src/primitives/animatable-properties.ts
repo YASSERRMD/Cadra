@@ -93,3 +93,16 @@ export const VOLUME_ANIMATABLE_PROPERTIES = [
   "color",
   "density",
 ] as const;
+
+/**
+ * `Model` (`ModelNode`) animatable props: transform and visibility only.
+ * `clips[].weight` and `morphTargets[name]` are genuinely `Property<number>`
+ * (fully keyframeable, resolved the same way every other property here is),
+ * but are not simple top-level dot-paths this flat list format can name: an
+ * array of clip configs and a dynamically-named map of morph targets, not a
+ * fixed field - mirroring `PARTICLES_ANIMATABLE_PROPERTIES`'s own precedent
+ * of leaving a primitive's own nested, structurally-varying configuration
+ * out of this dot-path mechanism (editable via the DSL panel's raw JSON
+ * instead, which has no trouble with arbitrary nested shape).
+ */
+export const MODEL_ANIMATABLE_PROPERTIES = [...TRANSFORM_ANIMATABLE_PROPERTIES, "visible"] as const;

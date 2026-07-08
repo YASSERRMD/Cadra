@@ -1,5 +1,11 @@
-import type { PixelReadableRenderer, RenderSize, RenderTarget, ThreeRendererDependencies } from "@cadra/renderer";
-import { defaultThreeRendererDependencies, ThreeRenderer } from "@cadra/renderer";
+import type {
+  ModelRegistry,
+  PixelReadableRenderer,
+  RenderSize,
+  RenderTarget,
+  ThreeRendererDependencies,
+} from "@cadra/renderer";
+import { createDefaultModelRegistry, defaultThreeRendererDependencies, ThreeRenderer } from "@cadra/renderer";
 import type { Texture } from "three";
 import { PMREMGenerator, WebGPURenderer } from "three/webgpu";
 
@@ -385,6 +391,15 @@ async function readNativeGpuTexturePixels(
 export interface CreateNativeGpuHeadlessRendererOptions {
   /** Acquires the native `GPUDevice` this renderer draws through. Defaults to a real `webgpu`-package device via `createNativeGpuDevice()`. */
   createDevice?: () => Promise<GPUDevice>;
+  /**
+   * Resolves a `"model"` scene node's own `assetRef` to its already-loaded
+   * `LoadedModel` (Phase 69). Defaults to a fresh, empty
+   * `createDefaultModelRegistry()`, mirroring `ThreeRenderer`'s own
+   * constructor default - every `"model"` node then renders as an empty
+   * placeholder until a caller `.register()`s a real one on this exact
+   * instance before rendering.
+   */
+  modelRegistry?: ModelRegistry;
 }
 
 /**
@@ -432,6 +447,7 @@ export function createNativeGpuHeadlessRenderer(
   installNativeGpuGlobals();
 
   const createDevice = options.createDevice ?? (() => createNativeGpuDevice());
+  const modelRegistry = options.modelRegistry ?? createDefaultModelRegistry();
 
   let headlessTarget: ReturnType<typeof createHeadlessGpuCanvasTarget> | undefined;
   let device: GPUDevice | undefined;
@@ -478,7 +494,7 @@ export function createNativeGpuHeadlessRenderer(
     createParticleRuntime: defaultThreeRendererDependencies.createParticleRuntime,
   };
 
-  const inner = new ThreeRenderer(deps);
+  const inner = new ThreeRenderer(deps, undefined, undefined, modelRegistry);
 
   return {
     async init(_target: RenderTarget, size: RenderSize): Promise<void> {

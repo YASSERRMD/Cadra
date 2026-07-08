@@ -10,6 +10,8 @@ import type {
   LightType,
   MeshMaterialConfig,
   MeshNode,
+  ModelClipConfig,
+  ModelNode,
   ParticleBlendMode,
   ParticleColliderConfig,
   ParticleColorStop,
@@ -106,6 +108,7 @@ export const sceneNodeKindSchema = z
     "satori",
     "particles",
     "volume",
+    "model",
   ])
   .describe("Which of the fixed set of scene node kinds this node is.");
 
@@ -1442,9 +1445,88 @@ export const volumeNodeSchema = z.strictObject({
 type _CheckVolumeNode = AssertTrue<AssertEqual<z.infer<typeof volumeNodeSchema>, VolumeNode>>;
 
 /**
+ * One GLTF animation clip playing on a `ModelNode` (Phase 69), mirroring
+ * `ModelClipConfig`. See that type's own doc for why blending/crossfades are
+ * just multiple entries with independently keyframed `weight`, and why there
+ * is no separate `startFrame` field.
+ */
+export const modelClipConfigSchema = z.strictObject({
+  name: z
+    .string()
+    .describe("The GLTF clip's own name, matched exactly against the loaded asset's animation clips."),
+  weight: propertySchema(z.number()).describe(
+    "This clip's own contribution weight. A plain number or a keyframe track; 0 mutes it without removing it from clips.",
+  ),
+  timeScale: z
+    .number()
+    .optional()
+    .describe(
+      "Playback speed multiplier: 1 is the clip's own authored speed, negative reverses it. Defaults to 1.",
+    ),
+  loop: z
+    .enum(["repeat", "clamp"])
+    .optional()
+    .describe(
+      'Whether local time wraps back to the clip\'s start once past its own duration ("repeat"), or holds on the last frame ("clamp"). Defaults to "repeat".',
+    ),
+});
+
+type _CheckModelClipConfig = AssertTrue<
+  AssertEqual<z.infer<typeof modelClipConfigSchema>, ModelClipConfig>
+>;
+
+/**
+ * A loaded GLTF/GLB model (Phase 69), mirroring `ModelNode`. `assetRef` is
+ * resolved against a model registry, the same kind of ref
+ * `imageNodeSchema.assetRef`/`videoNodeSchema.assetRef` already are.
+ */
+export const modelNodeSchema = z.strictObject({
+  id: z.string().describe("Unique identifier for this scene node within the project."),
+  kind: z.literal("model").describe("Discriminant identifying this node as a loaded GLTF/GLB model."),
+  name: z
+    .string()
+    .optional()
+    .describe("Optional human-readable label, purely for authoring and debugging."),
+  transform: animatableTransformSchema.describe(
+    "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track.",
+  ),
+  visible: propertySchema(z.boolean()).describe(
+    "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track.",
+  ),
+  assetRef: z
+    .string()
+    .describe("Id of a GLTF/GLB model asset, resolved against a model registry by the renderer."),
+  castShadow: z
+    .boolean()
+    .optional()
+    .describe("Whether this model casts a shadow onto other shadow-receiving surfaces. Defaults to false."),
+  receiveShadow: z
+    .boolean()
+    .optional()
+    .describe("Whether this model receives shadows cast by shadow-casting lights. Defaults to false."),
+  clips: z
+    .array(modelClipConfigSchema)
+    .optional()
+    .describe(
+      "Which of the asset's own animation clips play, and how they blend. Omitted or empty means the asset's own bind pose, unanimated.",
+    ),
+  morphTargets: z
+    .record(z.string(), propertySchema(z.number()))
+    .optional()
+    .describe(
+      "Named morph-target (blend-shape) weights, by the asset's own morph target name. Omitted means every morph target stays at the asset's own authored default influence.",
+    ),
+  get children(): z.ZodArray<typeof sceneNodeSchema> {
+    return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
+  },
+});
+
+type _CheckModelNode = AssertTrue<AssertEqual<z.infer<typeof modelNodeSchema>, ModelNode>>;
+
+/**
  * A node in the scene graph, discriminated on `kind`. Mirrors the `SceneNode`
  * union in `@cadra/core` exactly: every variant is a strict, closed shape,
- * and an object whose `kind` does not match one of the eleven known literals
+ * and an object whose `kind` does not match one of the twelve known literals
  * is rejected rather than coerced into the closest variant.
  */
 export const sceneNodeSchema: z.ZodDiscriminatedUnion<
@@ -1460,6 +1542,7 @@ export const sceneNodeSchema: z.ZodDiscriminatedUnion<
     typeof satoriNodeSchema,
     typeof particleSystemNodeSchema,
     typeof volumeNodeSchema,
+    typeof modelNodeSchema,
   ]
 > = z.discriminatedUnion("kind", [
   groupNodeSchema,
@@ -1473,6 +1556,7 @@ export const sceneNodeSchema: z.ZodDiscriminatedUnion<
   satoriNodeSchema,
   particleSystemNodeSchema,
   volumeNodeSchema,
+  modelNodeSchema,
 ]);
 
 type _CheckSceneNode = AssertTrue<AssertEqual<z.infer<typeof sceneNodeSchema>, SceneNode>>;

@@ -26,6 +26,7 @@ describe("sceneNodeKindSchema", () => {
       "satori",
       "particles",
       "volume",
+      "model",
     ];
     for (const kind of kinds) {
       expect(sceneNodeKindSchema.safeParse(kind).success).toBe(true);
@@ -1725,6 +1726,111 @@ describe("sceneNodeSchema: volume (Phase 68)", () => {
 
   it("rejects a stray, unrecognized field (strict object)", () => {
     const result = sceneNodeSchema.safeParse({ ...minimalVolumeFields(), unknownField: true });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("sceneNodeSchema: model (Phase 69)", () => {
+  function minimalModelFields() {
+    return {
+      ...baseFields(),
+      kind: "model" as const,
+      assetRef: "character.glb",
+    };
+  }
+
+  it("accepts a minimal model node", () => {
+    const result = sceneNodeSchema.safeParse(minimalModelFields());
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a model node missing assetRef", () => {
+    const { assetRef: _omitted, ...rest } = minimalModelFields();
+    expect(sceneNodeSchema.safeParse(rest).success).toBe(false);
+  });
+
+  it("accepts castShadow, receiveShadow, clips, and morphTargets together", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...minimalModelFields(),
+      castShadow: true,
+      receiveShadow: true,
+      clips: [{ name: "Walk", weight: 1 }],
+      morphTargets: { smile: 0.5 },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts empty clips and morphTargets", () => {
+    const result = sceneNodeSchema.safeParse({ ...minimalModelFields(), clips: [], morphTargets: {} });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a keyframe track for a clip's own weight and for a morph target's own weight", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...minimalModelFields(),
+      clips: [
+        {
+          name: "Walk",
+          weight: {
+            type: "keyframeTrack",
+            keyframes: [
+              { frame: 0, value: 0 },
+              { frame: 30, value: 1 },
+            ],
+          },
+        },
+      ],
+      morphTargets: {
+        smile: {
+          type: "keyframeTrack",
+          keyframes: [
+            { frame: 0, value: 0 },
+            { frame: 30, value: 1 },
+          ],
+        },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a clip entry missing name or weight", () => {
+    for (const clip of [{ weight: 1 }, { name: "Walk" }]) {
+      const result = sceneNodeSchema.safeParse({ ...minimalModelFields(), clips: [clip] });
+      expect(result.success).toBe(false);
+    }
+  });
+
+  it("accepts a clip's own timeScale and both loop values, rejecting an unrecognized one", () => {
+    expect(
+      sceneNodeSchema.safeParse({
+        ...minimalModelFields(),
+        clips: [{ name: "Walk", weight: 1, timeScale: -1, loop: "repeat" }],
+      }).success,
+    ).toBe(true);
+    expect(
+      sceneNodeSchema.safeParse({
+        ...minimalModelFields(),
+        clips: [{ name: "Walk", weight: 1, loop: "clamp" }],
+      }).success,
+    ).toBe(true);
+    expect(
+      sceneNodeSchema.safeParse({
+        ...minimalModelFields(),
+        clips: [{ name: "Walk", weight: 1, loop: "pingpong" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a stray, unrecognized field on the model node itself (strict object)", () => {
+    const result = sceneNodeSchema.safeParse({ ...minimalModelFields(), unknownField: true });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a stray, unrecognized field on a clip entry (strict object)", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...minimalModelFields(),
+      clips: [{ name: "Walk", weight: 1, unknownField: true }],
+    });
     expect(result.success).toBe(false);
   });
 });

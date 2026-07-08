@@ -73,6 +73,8 @@ export {
   lightNodeSchema,
   lightTypeSchema,
   meshNodeSchema,
+  modelClipConfigSchema,
+  modelNodeSchema,
   particleBlendModeSchema,
   particleColliderConfigSchema,
   particleColorStopSchema,

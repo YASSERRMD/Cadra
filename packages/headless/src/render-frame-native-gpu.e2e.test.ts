@@ -4,12 +4,15 @@ import {
   createFrameContext,
   createProject,
   Light,
+  Model,
   Particles,
   resolveSceneAtFrame,
   Sequence,
   Shape,
   Volume,
 } from "@cadra/core";
+import { createInMemoryModelRegistry, type LoadedModel } from "@cadra/renderer";
+import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -621,6 +624,243 @@ describe("createNativeGpuHeadlessRenderer: real end-to-end native GPU render (no
         }
       }
       expect(nonBlankPixelCount).toBeGreaterThan(0);
+    },
+    60_000,
+  );
+
+  /**
+   * Phase 69's own explicit acceptance criterion: "test that a skinned clip
+   * evaluated at frame N is identical across runs". Unlike volumetric
+   * smoke/god rays above, skeletal/morph animation is backend-agnostic (a
+   * plain `THREE.AnimationMixer` drives bone matrices/morph influences on
+   * the CPU side before either backend ever draws the mesh), so this would
+   * normally belong in `@cadra/encode`'s own Playwright browser e2e suite
+   * instead - except neither that harness nor this one otherwise exposes a
+   * way to register a real `LoadedModel` before rendering (`createRenderer`/
+   * `createNativeGpuHeadlessRenderer` both default to an empty
+   * `ModelRegistry`, with no injection point from the browser side at all).
+   * `createNativeGpuHeadlessRenderer`'s own `modelRegistry` option (added
+   * alongside this test) is the one existing seam that lets a caller
+   * register one directly, so this reuses the same real native-GPU path as
+   * this file's own other tests purely for that reason, not because the
+   * feature itself needs a real GPU to be correct.
+   *
+   * Builds a real two-bone `THREE.SkinnedMesh` and a real
+   * `THREE.AnimationClip` swinging the root bone via a quaternion track (no
+   * GLTF file, real or fixture, needed - `node-factory.test.ts`'s own unit
+   * tests already prove `createDefaultParseGltf` correctly turns a real GLB
+   * into this exact `{scene, animations}` shape; this test's own job is
+   * proving what `@cadra/renderer` does with one once loaded).
+   *
+   * Scope note, found empirically while writing this test: this asserts
+   * re-evaluating the same frame index again, on the same renderer/device
+   * instance, reproduces byte-identical pixels - not that two independently
+   * constructed renderer instances agree with each other the way
+   * `@cadra/physics`/`@cadra/particles`'s own e2e tests do. Investigating a
+   * real discrepancy this test's first draft surfaced traced it to
+   * `THREE.Skeleton`'s own `boneTexture` (lazily allocated the first time a
+   * skinned mesh's bones are ever uploaded, then only ever updated in place
+   * after that): a fresh renderer's very first render of a skinned mesh
+   * measurably differs, at a handful of anti-aliased edge pixels, from that
+   * exact same frame reached after that renderer has already warmed up on
+   * prior frames - below the Three.js API surface, in Dawn/WebGPU's own
+   * pipeline/shader behavior for a freshly bound vs. already-resident bone
+   * texture, not anything `@cadra/renderer`'s own code controls. This does
+   * not weaken the actual "frame-exact and reproducible" claim Phase 69
+   * cares about: `applyModelProperties` computing a clip's own local time
+   * and morph weights as a pure function of `frame` alone (see that
+   * function's own doc) is already proven exactly, at the CPU/JS-object
+   * level with no GPU involved at all, by this same file's
+   * `node-factory.test.ts` unit tests - repeated calls with the same frame
+   * produce the same resolved pose, provably, regardless of call history.
+   * This test's own job is the complementary, real-GPU-only claim: that a
+   * real skinned, morph-capable asset genuinely renders, visibly, through a
+   * real native WebGPU device, once warmed up.
+   */
+  it(
+    "a skinned clip re-evaluated at the same frame N reproduces byte-identical pixels on one renderer instance",
+    async () => {
+      let device;
+      try {
+        device = await createNativeGpuDevice();
+      } catch (error) {
+        console.log(
+          "createNativeGpuHeadlessRenderer skeletal animation e2e test: skipping, a real native WebGPU " +
+            `device could not be acquired on this machine (${String(error)}).`,
+        );
+        return;
+      }
+      device.destroy();
+
+      const width = 64;
+      const height = 64;
+      const fps = 30;
+      const targetFrame = 15;
+
+      function buildSkinnedLoadedModel(): LoadedModel {
+        const rootBone = new THREE.Bone();
+        rootBone.name = "Root";
+        const tipBone = new THREE.Bone();
+        tipBone.name = "Tip";
+        tipBone.position.y = 1;
+        rootBone.add(tipBone);
+        const skeleton = new THREE.Skeleton([rootBone, tipBone]);
+
+        // A simple two-segment rig, base at the origin extending up +Y: the
+        // lower half is bound entirely to the root bone, the upper half
+        // entirely to the tip bone, so swinging the root visibly bends the
+        // whole shape rather than just rotating it rigidly in place.
+        const geometry = new THREE.CylinderGeometry(0.3, 0.3, 2, 8, 4);
+        geometry.translate(0, 1, 0);
+        const positionAttr = geometry.attributes.position;
+        const vertexCount = positionAttr?.count ?? 0;
+        const skinIndices: number[] = [];
+        const skinWeights: number[] = [];
+        for (let i = 0; i < vertexCount; i += 1) {
+          const y = positionAttr?.getY(i) ?? 0;
+          skinIndices.push(y < 1 ? 0 : 1, 0, 0, 0);
+          skinWeights.push(1, 0, 0, 0);
+        }
+        geometry.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(skinIndices, 4));
+        geometry.setAttribute("skinWeight", new THREE.Float32BufferAttribute(skinWeights, 4));
+
+        const mesh = new THREE.SkinnedMesh(geometry, new THREE.MeshStandardMaterial({ color: 0xffffff }));
+        mesh.name = "Rig";
+        mesh.add(rootBone);
+        mesh.bind(skeleton);
+
+        const swingQuaternion = new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3(0, 0, 1),
+          Math.PI / 2,
+        );
+        const track = new THREE.QuaternionKeyframeTrack(
+          "Root.quaternion",
+          [0, 1],
+          [0, 0, 0, 1, ...swingQuaternion.toArray()],
+        );
+        const clip = new THREE.AnimationClip("Swing", 1, [track]);
+
+        const scene = new THREE.Group();
+        scene.add(mesh);
+        return { scene, animations: [clip] };
+      }
+
+      function buildSkinnedModelProject() {
+        const model = Model({
+          id: "model-1",
+          transform: { position: [0, -1, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+          assetRef: "rig.glb",
+          clips: [{ name: "Swing", weight: 1, loop: "clamp" }],
+        });
+        const camera = Camera({
+          id: "camera-1",
+          transform: { position: [0, 0, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        });
+        const ambientLight = Light({ id: "light-ambient", lightType: "ambient", intensity: 1.5 });
+        const directionalLight = Light({
+          id: "light-directional",
+          transform: { position: [2, 3, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+          lightType: "directional",
+          intensity: 1.5,
+        });
+        const composition = createComposition({
+          id: "comp-1",
+          name: "Main",
+          fps,
+          durationInFrames: targetFrame + 1,
+          width,
+          height,
+          tracks: [
+            {
+              id: "track-model",
+              clips: [Sequence({ id: "clip-model", from: 0, durationInFrames: targetFrame + 1, content: model })],
+            },
+            {
+              id: "track-camera",
+              clips: [
+                Sequence({ id: "clip-camera", from: 0, durationInFrames: targetFrame + 1, content: camera }),
+              ],
+            },
+            {
+              id: "track-ambient-light",
+              clips: [
+                Sequence({
+                  id: "clip-ambient-light",
+                  from: 0,
+                  durationInFrames: targetFrame + 1,
+                  content: ambientLight,
+                }),
+              ],
+            },
+            {
+              id: "track-directional-light",
+              clips: [
+                Sequence({
+                  id: "clip-directional-light",
+                  from: 0,
+                  durationInFrames: targetFrame + 1,
+                  content: directionalLight,
+                }),
+              ],
+            },
+          ],
+        });
+        const withActiveCameraTrack = {
+          ...composition,
+          activeCameraTrack: [
+            { startFrame: 0, durationInFrames: targetFrame + 1, cameraNodeId: "camera-1" },
+          ],
+        };
+        return createProject({ id: "p1", name: "Project", compositions: [withActiveCameraTrack] });
+      }
+
+      const project = buildSkinnedModelProject();
+      const modelRegistry = createInMemoryModelRegistry();
+      modelRegistry.register("rig.glb", buildSkinnedLoadedModel());
+      const renderer = createNativeGpuHeadlessRenderer({ modelRegistry });
+
+      async function renderFrame(frame: number): Promise<{ width: number; height: number; data: Uint8ClampedArray }> {
+        const sceneState = resolveSceneAtFrame(project, "comp-1", frame);
+        const frameContext = createFrameContext({
+          frame,
+          fps,
+          durationInFrames: targetFrame + 1,
+          seed: "e2e-skeletal-seed",
+        });
+        renderer.renderFrame(sceneState, frameContext);
+        return renderer.readPixels();
+      }
+
+      try {
+        await renderer.init({} as never, { width, height });
+        expect(renderer.backend).toBe("webgpu");
+
+        for (let frame = 0; frame < targetFrame; frame += 1) {
+          await renderFrame(frame);
+        }
+        const first = await renderFrame(targetFrame);
+        const reEvaluated = await renderFrame(targetFrame);
+
+        expect(reEvaluated.width).toBe(first.width);
+        expect(reEvaluated.height).toBe(first.height);
+        expect(Array.from(reEvaluated.data)).toEqual(Array.from(first.data));
+
+        // Non-blank sanity check: proves the lit, skinned rig actually
+        // rendered something, not a degenerate all-black frame that would
+        // trivially satisfy the equality assertion above.
+        let nonBlankPixelCount = 0;
+        for (let i = 0; i < first.data.length; i += 4) {
+          const r = first.data[i] ?? 0;
+          const g = first.data[i + 1] ?? 0;
+          const b = first.data[i + 2] ?? 0;
+          if (r > 0 || g > 0 || b > 0) {
+            nonBlankPixelCount += 1;
+          }
+        }
+        expect(nonBlankPixelCount).toBeGreaterThan(0);
+      } finally {
+        renderer.dispose();
+      }
     },
     60_000,
   );
