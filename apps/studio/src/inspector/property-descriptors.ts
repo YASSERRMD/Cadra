@@ -8,6 +8,7 @@ import {
   SHAPE_ANIMATABLE_PROPERTIES,
   TEXT_ANIMATABLE_PROPERTIES,
   VIDEO_ANIMATABLE_PROPERTIES,
+  VOLUME_ANIMATABLE_PROPERTIES,
 } from "@cadra/core";
 
 /**
@@ -111,6 +112,12 @@ const SATORI_EXTRA_DESCRIPTORS = new Map<string, PropertyDescriptor>([
   ["opacity", { path: "opacity", label: "Opacity", valueKind: "number" }],
 ]);
 
+/** Extra descriptors for `VOLUME_ANIMATABLE_PROPERTIES`. */
+const VOLUME_EXTRA_DESCRIPTORS = new Map<string, PropertyDescriptor>([
+  ["color", { path: "color", label: "Color", valueKind: "color" }],
+  ["density", { path: "density", label: "Density", valueKind: "number" }],
+]);
+
 /**
  * Every `PropertyDescriptor` for each `SceneNodeKind`, derived from
  * `@cadra/core`'s own `*_ANIMATABLE_PROPERTIES` lists (Phase 7's per-
@@ -134,4 +141,5 @@ export const NODE_KIND_PROPERTY_DESCRIPTORS: Record<SceneNodeKind, PropertyDescr
   light: buildDescriptors(LIGHT_ANIMATABLE_PROPERTIES, LIGHT_EXTRA_DESCRIPTORS),
   satori: buildDescriptors(SATORI_ANIMATABLE_PROPERTIES, SATORI_EXTRA_DESCRIPTORS),
   particles: buildDescriptors(PARTICLES_ANIMATABLE_PROPERTIES, new Map()),
+  volume: buildDescriptors(VOLUME_ANIMATABLE_PROPERTIES, VOLUME_EXTRA_DESCRIPTORS),
 };
