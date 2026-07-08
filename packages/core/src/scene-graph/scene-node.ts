@@ -970,9 +970,22 @@ export type VolumeShape =
 
 /**
  * A simple animated volumetric smoke/mist volume (Phase 68): a raymarched,
- * curl-noise-driven density field filling `shape`, lit by the scene's own
+ * value-noise-driven density field filling `shape`, lit by the scene's own
  * lights (via Three.js's `VolumeNodeMaterial`/`VolumetricLightingModel`; see
- * `@cadra/renderer`'s own wiring).
+ * `@cadra/renderer`'s own wiring). A scalar density field, so this reuses
+ * `@cadra/particles`'s own scalar value-noise function, not its curl-noise
+ * one (curl noise is a vector, appropriate for a particle force/flow
+ * direction, not a density quantity).
+ *
+ * Only receives light from `"point"`/`"spot"` lights: this project's
+ * installed `VolumetricLightingModel` (Three.js's own `direct()` lighting
+ * step) skips any light whose `light.distance` is `undefined`, which is
+ * every `"ambient"`/`"directional"`/`"hemisphere"` light (none of those
+ * Three.js classes has a `distance` field at all - only `PointLight`/
+ * `SpotLight` do), regardless of that light's own intensity. A volume lit
+ * only by ambient/directional lights renders as fully invisible, not dim -
+ * discovered directly by this project's own e2e test initially rendering
+ * blank at any density until its light was switched to `"point"`.
  *
  * WebGPU-backend only, and silently renders nothing at all on the WebGL2
  * fallback: this technique is TSL-node infrastructure (a raymarch through a
@@ -988,11 +1001,11 @@ export type VolumeShape =
  */
 export interface VolumeNode extends SceneNodeBase<"volume"> {
   shape: VolumeShape;
-  /** The volume's own base color, lit by the scene's own lights. */
+  /** The volume's own base color, lit by the scene's own point/spot lights (see this type's own doc for why ambient/directional lights do not contribute). */
   color: Property<ColorRGBA>;
   /** Overall density multiplier: higher looks thicker/more opaque. */
   density: Property<number>;
-  /** Spatial frequency of the underlying curl-noise field: higher values give smaller, more turbulent detail. Defaults to `1`. */
+  /** Spatial frequency of the underlying value-noise field: higher values give smaller, more turbulent detail. Defaults to `1`. */
   noiseFrequency?: number;
   /** How fast the sampled noise field drifts along its own local Z axis, in units per second. Defaults to `0` (static, non-animated). */
   driftSpeed?: number;
