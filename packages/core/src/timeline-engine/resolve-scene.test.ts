@@ -887,3 +887,56 @@ describe("resolveSceneAtFrame: environment passthrough", () => {
     expect(state.environment).toBeUndefined();
   });
 });
+
+describe("resolveSceneAtFrame: shadowQuality passthrough", () => {
+  it("carries the composition's own shadowQuality through unchanged", () => {
+    const shape = Shape({ id: "shadowed-shape" });
+    const shadowQuality = {
+      tier: "final" as const,
+      cascadedShadows: { cascades: 4, maxFar: 500 },
+      ambientOcclusion: { radius: 1.5, intensity: 0.8 },
+      contactShadows: { groundY: 0, opacity: 0.6 },
+    };
+    const composition = createComposition({
+      id: "comp-shadow-quality",
+      name: "Shadow Quality",
+      fps: 30,
+      durationInFrames: 30,
+      width: 100,
+      height: 100,
+      tracks: [
+        {
+          id: "track-content",
+          clips: [Sequence({ id: "clip-content", from: 0, durationInFrames: 30, content: shape })],
+        },
+      ],
+      shadowQuality,
+    });
+    const project = createProject({ id: "p-shadow-quality", name: "Project", compositions: [composition] });
+
+    const state = resolveSceneAtFrame(project, "comp-shadow-quality", 5);
+    expect(state.shadowQuality).toEqual(shadowQuality);
+  });
+
+  it("leaves shadowQuality undefined when the composition has none", () => {
+    const shape = Shape({ id: "unshadowed-shape" });
+    const composition = createComposition({
+      id: "comp-no-shadow-quality",
+      name: "No Shadow Quality",
+      fps: 30,
+      durationInFrames: 30,
+      width: 100,
+      height: 100,
+      tracks: [
+        {
+          id: "track-content",
+          clips: [Sequence({ id: "clip-content", from: 0, durationInFrames: 30, content: shape })],
+        },
+      ],
+    });
+    const project = createProject({ id: "p-no-shadow-quality", name: "Project", compositions: [composition] });
+
+    const state = resolveSceneAtFrame(project, "comp-no-shadow-quality", 5);
+    expect(state.shadowQuality).toBeUndefined();
+  });
+});

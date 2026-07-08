@@ -48,15 +48,20 @@ export type {
 } from "./scene-node.js";
 export type {
   ActiveCameraEntry,
+  AmbientOcclusionConfig,
   AudioClip,
   AudioFadeEnvelope,
   AudioTrack,
+  CascadedShadowConfig,
   Clip,
   Composition,
   CompositionColorGrading,
   CompositionEnvironment,
+  CompositionShadowQuality,
+  ContactShadowConfig,
   EnvironmentGroundProjection,
   Project,
+  ShadowQualityTier,
   Track,
   Transition,
 } from "./timeline.js";

@@ -40,7 +40,7 @@ describe("createComposition", () => {
     expect(composition.tracks).toEqual(tracks);
   });
 
-  it("omits activeCameraTrack, audioTracks, colorGrading, and environment entirely when not provided", () => {
+  it("omits activeCameraTrack, audioTracks, colorGrading, environment, and shadowQuality entirely when not provided", () => {
     const composition = createComposition({
       id: "comp-1",
       name: "Main",
@@ -54,6 +54,7 @@ describe("createComposition", () => {
     expect("audioTracks" in composition).toBe(false);
     expect("colorGrading" in composition).toBe(false);
     expect("environment" in composition).toBe(false);
+    expect("shadowQuality" in composition).toBe(false);
   });
 
   it("preserves activeCameraTrack when provided", () => {
@@ -118,5 +119,26 @@ describe("createComposition", () => {
     });
 
     expect(composition.environment).toEqual(environment);
+  });
+
+  it("preserves shadowQuality when provided", () => {
+    const shadowQuality = {
+      tier: "final" as const,
+      cascadedShadows: { cascades: 4, maxFar: 500 },
+      ambientOcclusion: { radius: 1.5, intensity: 0.8 },
+      contactShadows: { groundY: 0, opacity: 0.6, radius: 3 },
+    };
+
+    const composition = createComposition({
+      id: "comp-1",
+      name: "Main",
+      fps: 30,
+      durationInFrames: 300,
+      width: 1920,
+      height: 1080,
+      shadowQuality,
+    });
+
+    expect(composition.shadowQuality).toEqual(shadowQuality);
   });
 });
