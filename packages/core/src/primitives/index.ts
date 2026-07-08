@@ -18,6 +18,8 @@ export type { ImageProps } from "./image.js";
 export { Image } from "./image.js";
 export type { LightProps } from "./light.js";
 export { Light } from "./light.js";
+export type { LookPreset, LookPresetLight } from "./look-presets.js";
+export { applyLookPreset, LOOK_PRESETS, UnknownLookPresetError } from "./look-presets.js";
 export type { ResolvedMeshMaterial } from "./material.js";
 export { PBR_PRESETS, resolveMeshMaterial } from "./material.js";
 export type { ModelProps } from "./model.js";
