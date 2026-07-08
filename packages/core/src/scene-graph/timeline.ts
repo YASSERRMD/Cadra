@@ -360,16 +360,114 @@ export interface SharpenEffectConfig {
 }
 
 /**
+ * A bloom pass: extracts pixels above `threshold` (in linear scene-referred
+ * HDR, before tone mapping - see `PostEffectConfig`'s own doc for why bloom
+ * is a pre-tonemap effect), blurs them, and adds the result back over the
+ * scene, the classic "bright things glow" cinematic look.
+ */
+export interface BloomEffectConfig {
+  type: "bloom";
+  /** Luminance level above which a pixel starts contributing to the glow, in linear scene-referred HDR. Defaults to `0.85`. */
+  threshold?: number;
+  /** Multiplies the glow's own brightness once added back over the scene. Defaults to `1`. */
+  intensity?: number;
+  /** How far the glow spreads from a bright pixel, roughly in screen-relative units. Defaults to `0.4`. */
+  radius?: number;
+}
+
+/**
+ * A depth of field pass: blurs the scene away from `focusDistance`, driven by
+ * a real bokeh model over the scene's own depth buffer (not a flat blur), in
+ * linear scene-referred HDR (see `PostEffectConfig`'s own doc for why depth
+ * of field is a pre-tonemap effect - correct-looking bokeh highlights need
+ * HDR headroom above 1.0).
+ */
+export interface DepthOfFieldEffectConfig {
+  type: "depthOfField";
+  /** Distance from the camera, in scene units, that stays in sharp focus. Defaults to `10`. */
+  focusDistance?: number;
+  /** How wide the lens opening is: larger values blur out-of-focus regions more strongly, mirroring a real camera's own aperture. Defaults to `0.025`. */
+  aperture?: number;
+  /** Caps how far the blur can spread, independent of `aperture`. Defaults to `1`. */
+  maxBlur?: number;
+}
+
+/**
+ * A chromatic aberration pass: shifts the final image's color channels apart
+ * slightly, the color fringing a real camera lens produces at high contrast
+ * edges. Display-referred (post-tonemap - see `PostEffectConfig`'s own doc):
+ * this is a lens/sensor artifact on the image an audience actually sees, not
+ * a property of the scene's own lighting.
+ */
+export interface ChromaticAberrationEffectConfig {
+  type: "chromaticAberration";
+  /** Strength of the channel shift. `0` is a no-op. Defaults to `0.5`. */
+  intensity?: number;
+}
+
+/**
+ * A vignette pass: darkens the final image toward its own corners.
+ * Display-referred (post-tonemap - see `PostEffectConfig`'s own doc): a
+ * framing/lens characteristic of the image an audience actually sees.
+ */
+export interface VignetteEffectConfig {
+  type: "vignette";
+  /** How dark the corners get, 0 (no darkening) to 1 (fully black). Defaults to `1`. */
+  darkness?: number;
+  /** How far the darkening reaches in from the corners toward the center; larger values reach further. Defaults to `1`. */
+  offset?: number;
+}
+
+/**
+ * A film grain pass: adds fine, per-pixel photographic noise to the final
+ * image, reseeded every frame from that frame's own integer index (never
+ * `Math.random()` or a wall-clock timer - see
+ * `computeFilmGrainSeed`/`FILM_GRAIN_SEED_MULTIPLIER` in `@cadra/renderer`),
+ * so a given frame's grain is reproducible on every render while still
+ * animating from frame to frame like real film stock. Display-referred
+ * (post-tonemap - see `PostEffectConfig`'s own doc): a texture of the final
+ * image itself, not the underlying scene lighting.
+ */
+export interface FilmGrainEffectConfig {
+  type: "filmGrain";
+  /** Strength of the noise. `0` is a no-op. Defaults to `0.35`. */
+  intensity?: number;
+}
+
+/**
+ * A lens distortion pass: warps the final image radially from its center,
+ * the barrel (`amount > 0`) or pincushion (`amount < 0`) curvature a real
+ * camera lens introduces. Display-referred (post-tonemap - see
+ * `PostEffectConfig`'s own doc): a pure UV remap of the composited image, not
+ * a scene-lighting effect, grouped with the other lens/sensor artifacts for
+ * simplicity even though a geometric warp has no tone-mapping dependency of
+ * its own.
+ */
+export interface LensDistortionEffectConfig {
+  type: "lensDistortion";
+  /** Distortion strength: positive bulges outward (barrel), negative pinches inward (pincushion), `0` is a no-op. Defaults to `0`. */
+  amount?: number;
+}
+
+/**
  * One configured entry in `CompositionPostProcessing.effects`. A
  * discriminated union on `type`, growing by one variant per effect Phase 59
- * onward adds; `SharpenEffectConfig` is the only variant Phase 58 itself
- * ships. Which side of tone mapping a given `type` renders on (linear
+ * onward adds. Which side of tone mapping a given `type` renders on (linear
  * scene-referred HDR versus the final display-referred image) is an inherent
  * property of that effect, decided by the renderer, not an authorable field
  * here: getting it wrong would silently clip or wash out the effect, so it is
- * not something a scene author or agent can misconfigure.
+ * not something a scene author or agent can misconfigure. `bloom` and
+ * `depthOfField` render pre-tonemap; `sharpen`, `chromaticAberration`,
+ * `vignette`, `filmGrain`, and `lensDistortion` render post-tonemap.
  */
-export type PostEffectConfig = SharpenEffectConfig;
+export type PostEffectConfig =
+  | SharpenEffectConfig
+  | BloomEffectConfig
+  | DepthOfFieldEffectConfig
+  | ChromaticAberrationEffectConfig
+  | VignetteEffectConfig
+  | FilmGrainEffectConfig
+  | LensDistortionEffectConfig;
 
 /**
  * A whole-composition post-processing effect stack. See
