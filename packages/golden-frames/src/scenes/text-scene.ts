@@ -77,7 +77,24 @@ export const textOpentypeScene: GoldenScene = {
   ],
 };
 
-/** The same scene, shaped by `@cadra/text`'s independent `fontkit`-backed engine (Node-only, richer variable-font introspection) - proving both text engines produce a correctly-rendered result, not just one. */
+/**
+ * The same scene, shaped by `@cadra/text`'s independent `fontkit`-backed
+ * engine (Node-only, richer variable-font introspection) - proving both
+ * text engines produce a correctly-rendered result, not just one.
+ *
+ * Its own reference PNG currently happens to be byte-identical to
+ * `textOpentypeScene`'s: verified while building this harness that this is
+ * expected, not a bug (e.g. a registry/cache key collision between the
+ * two) - `CONTENT` has no `variationAxes` set, and both backends are
+ * faithful parsers of the same standard `glyf` outline data for a font's
+ * own default (non-instanced) state, so they have nothing to disagree on
+ * here. `parseFontWithOpentype`'s own doc notes it "does not do
+ * variable-font `gvar` interpolation ... reads the font's own current
+ * default state," which only fontkit does differently - exercising that
+ * distinction would need this scene to set `variationAxes` and this
+ * package's own `render-raster-scene.ts` to actually apply it before
+ * shaping, neither of which this phase's scope required.
+ */
 export const textFontkitScene: GoldenScene = {
   name: "text-fontkit",
   driver: "nativeGpuHeadless",

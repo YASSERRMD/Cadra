@@ -19,6 +19,20 @@ export const VERSION = "0.0.0";
  */
 export const PACKAGE_NAME = "@cadra/golden-frames";
 
+export type {
+  GoldenFrameCompareReason,
+  GoldenFrameCompareResult,
+  GoldenFrameReferenceOptions,
+  GoldenFrameUpdateResult,
+} from "./golden-frame-harness.js";
+export {
+  compareGoldenSceneAgainstReference,
+  DEFAULT_REFERENCES_DIR,
+  referencePngPath,
+  renderGoldenScene,
+  updateGoldenSceneReference,
+  writeGoldenFrameDiffArtifacts,
+} from "./golden-frame-harness.js";
 export type { PerceptualDiffResult } from "./perceptual-diff.js";
 export {
   comparePixelBuffers,

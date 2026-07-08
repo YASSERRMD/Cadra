@@ -30,15 +30,23 @@ function countNonBlankPixels(data: Uint8ClampedArray): number {
  * `render-raster-scene.e2e.test.ts`).
  */
 describe("renderBrowserGoldenScene: real headless-Chromium renders", () => {
-  it("renders the path-traced scene to a non-blank PixelBuffer at the scene's own size", async () => {
-    const pixels = await renderBrowserGoldenScene(pathTracedScene);
+  it(
+    "renders the path-traced scene to a non-blank PixelBuffer at the scene's own size",
+    async () => {
+      const pixels = await renderBrowserGoldenScene(pathTracedScene);
 
-    expect(pixels.width).toBe(pathTracedScene.width);
-    expect(pixels.height).toBe(pathTracedScene.height);
-    expect(pixels.data.length).toBe(pathTracedScene.width * pathTracedScene.height * 4);
-    expect(countNonBlankPixels(pixels.data)).toBeGreaterThan(0);
+      expect(pixels.width).toBe(pathTracedScene.width);
+      expect(pixels.height).toBe(pathTracedScene.height);
+      expect(pixels.data.length).toBe(pathTracedScene.width * pathTracedScene.height * 4);
+      expect(countNonBlankPixels(pixels.data)).toBeGreaterThan(0);
 
-    const pngBytes = encodePixelBufferToPng(pixels);
-    expect(pngBytes.length).toBeGreaterThan(0);
-  });
+      const pngBytes = encodePixelBufferToPng(pixels);
+      expect(pngBytes.length).toBeGreaterThan(0);
+    },
+    // A real browser launch plus a real path-traced render comfortably
+    // exceeds Vitest's 5s default under concurrent load (this package's
+    // other real-GPU/real-browser test files running at the same time);
+    // see compare-references.e2e.test.ts's own identical timeout.
+    30_000,
+  );
 });
