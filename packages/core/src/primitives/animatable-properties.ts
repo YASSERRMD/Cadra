@@ -22,16 +22,71 @@ const TRANSFORM_ANIMATABLE_PROPERTIES = [
   "transform.scale",
 ] as const;
 
-/** `Shape` (`MeshNode`) animatable props: transform plus visibility toggling. */
-export const SHAPE_ANIMATABLE_PROPERTIES = [...TRANSFORM_ANIMATABLE_PROPERTIES, "visible"] as const;
+/**
+ * `Shape` (`MeshNode`) animatable props: transform, visibility toggling, and
+ * every genuinely `Property<T>`-typed field of an inline `material`
+ * (`MeshMaterialConfig`), resolved per frame by `resolveMeshMaterial` the
+ * same way `transform`/`visible` themselves are. Listed even though
+ * `material` itself is optional (a node may use `materialRef` instead) -
+ * mirroring `TEXT_ANIMATABLE_PROPERTIES`'s own `extrudeDepth`, itself an
+ * optional field already named here. `normalMapRef`/`aoMapRef` are excluded:
+ * both are plain asset-registry ref strings, not `Property<T>`.
+ */
+export const SHAPE_ANIMATABLE_PROPERTIES = [
+  ...TRANSFORM_ANIMATABLE_PROPERTIES,
+  "visible",
+  "material.baseColor",
+  "material.metalness",
+  "material.roughness",
+  "material.emissive",
+  "material.emissiveIntensity",
+  "material.clearcoat",
+  "material.clearcoatRoughness",
+  "material.transmission",
+  "material.ior",
+  "material.thickness",
+  "material.sheen",
+  "material.sheenRoughness",
+  "material.sheenColor",
+  "material.opacity",
+] as const;
 
-/** `Text` (`TextNode`) animatable props: transform, color, font size, and extrusion depth. */
+/**
+ * `Text` (`TextNode`) animatable props: transform, color, font size,
+ * extrusion depth, and every genuinely `Property<T>`-typed field of the
+ * optional `path`/`morph`/`outline`/`glow`/`shadow` effect configs (each
+ * resolved per frame - `path`/`morph` via `apply-text-effects.ts`,
+ * `outline`/`glow`/`shadow` via `resolveTextOutline`/`resolveTextGlow`/
+ * `resolveTextShadow` in `node-factory.ts`). `stagger`/`physics` are
+ * deliberately excluded: every one of their own fields is a plain,
+ * once-authored value, not `Property<T>` (see each config's own doc in
+ * `scene-graph/scene-node.ts`) - a stagger/physics effect is itself the
+ * animation, not something with its own sub-fields to further keyframe.
+ * `fill` is also excluded: its one directly nameable field
+ * (`{type: "solid"}`'s own `color`) already duplicates `color` above, and
+ * every other variant's animatable field (a gradient stop's own `color`) is
+ * inside an array, the same "dynamic, not a fixed dot-path" reason
+ * `ModelNode`'s own `clips[].weight` is excluded from
+ * `MODEL_ANIMATABLE_PROPERTIES` below.
+ */
 export const TEXT_ANIMATABLE_PROPERTIES = [
   ...TRANSFORM_ANIMATABLE_PROPERTIES,
   "color",
   "fontSize",
   "extrudeDepth",
   "visible",
+  "path.progress",
+  "path.startOffset",
+  "morph.progress",
+  "outline.width",
+  "outline.color",
+  "glow.radius",
+  "glow.color",
+  "glow.intensity",
+  "shadow.offsetX",
+  "shadow.offsetY",
+  "shadow.blur",
+  "shadow.color",
 ] as const;
 
 /** `Image` (`ImageNode`) animatable props: transform and visibility. */
