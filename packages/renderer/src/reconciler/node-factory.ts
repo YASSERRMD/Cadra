@@ -4,6 +4,7 @@ import {
   type LightShadowConfig,
   type LightType,
   type MeshNode,
+  type ModelNode,
   resolveBooleanProperty,
   resolveColorProperty,
   type ResolvedMeshMaterial,
@@ -27,9 +28,11 @@ import { valueNoise3DTSL } from "@cadra/particles";
 import type { PhysicsTransform } from "@cadra/physics";
 import type { PositionedGlyph } from "@cadra/text/browser";
 import * as THREE from "three";
+import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
 import { clamp, float, uint, uniform, vec3 } from "three/tsl";
 import { type Node, VolumeNodeMaterial } from "three/webgpu";
 
+import type { LoadedModel, ModelRegistry } from "../assets/model-registry.js";
 import { resolveSceneColor } from "../color/resolve-scene-color.js";
 import type { RendererBackend } from "../renderer.js";
 import { createSvgTexture } from "../svg-layer/create-svg-texture.js";
@@ -165,9 +168,20 @@ export interface NodeFactoryContext {
    * `reconciler.ts`'s own `reconcile` at the start of every call, mirroring
    * `backend`'s own treatment. Read only by `"volume"`, to convert its own
    * `driftSpeed` (authored in units per second, so the same composition
-   * looks the same regardless of its own fps) into a per-frame offset.
+   * looks the same regardless of its own fps) into a per-frame offset. Also
+   * read by `"model"`, to convert each active `ModelClipConfig`'s own
+   * `timeScale` (also authored in a real-time unit, seconds) into a
+   * per-frame clip-local time.
    */
   fps?: number;
+  /**
+   * Resolves a `ModelNode.assetRef` to its already-loaded `LoadedModel`.
+   * Optional, mirroring `textRenderRegistry`/`satoriLayerRenderRegistry`'s
+   * own optionality: omitted, or no entry for a given `assetRef`, falls
+   * back to an empty group (the same "resource not ready yet" placeholder
+   * every other node kind's own registry-miss case already uses).
+   */
+  modelRegistry?: ModelRegistry;
 }
 
 /**
@@ -230,6 +244,36 @@ export interface OwnedResources {
    * carrying this node's own `scatteringNode`), never registry-shared.
    */
   volume?: { geometry: THREE.BufferGeometry; material: VolumeNodeMaterial };
+  /**
+   * A `model` node's own owned per-instance state: everything unique to
+   * this reconciled clone of a shared `LoadedModel` registry entry, as
+   * opposed to the entry's own geometries/materials/textures (shared with
+   * every other instance and the registry's own cached template, via
+   * `SkeletonUtils.clone`'s "clone the hierarchy, reuse the leaf
+   * resources" behavior - see `"model"`'s own `buildThreeObject` case doc
+   * for why disposing them here would be wrong).
+   */
+  model?: ModelOwnedResources;
+}
+
+/**
+ * A `model` node's own owned per-instance state (see `OwnedResources.model`'s
+ * own doc for why this is its own type rather than inlined there): one
+ * `THREE.AnimationMixer` built against this instance's own cloned root, one
+ * `THREE.AnimationAction` per clip the loaded asset has (by clip name,
+ * pre-built once so `applyNodeProperties` never rebuilds one just to mute or
+ * re-enable it - only ever mutates `.time`/`.weight` on an already-built
+ * action), every cloned `THREE.SkinnedMesh`'s own cloned `Skeleton` (each
+ * one's `boneTexture`, lazily allocated real GPU memory, needs its own
+ * explicit `.dispose()` - see `disposeEntry` in `reconciler.ts`), and every
+ * morph-target-capable mesh in this instance's own hierarchy (collected once
+ * here rather than re-traversed every `applyNodeProperties` call).
+ */
+interface ModelOwnedResources {
+  mixer: THREE.AnimationMixer;
+  actions: ReadonlyMap<string, THREE.AnimationAction>;
+  skeletons: readonly THREE.Skeleton[];
+  morphMeshes: readonly THREE.Mesh[];
 }
 
 /** The result of building a fresh Three.js object for a node: the object plus what it owns. */
@@ -351,7 +395,66 @@ function buildThreeObject(node: SceneNode, ctx: NodeFactoryContext): BuiltObject
       const mesh = new THREE.Mesh(geometry, material);
       return { object3D: mesh, owned: { volume: { geometry, material } } };
     }
+
+    case "model": {
+      const entry = ctx.modelRegistry?.resolve(node.assetRef);
+      if (entry === undefined) {
+        return { object3D: new THREE.Group(), owned: undefined };
+      }
+      return buildModelObject(node, entry);
+    }
   }
+}
+
+/**
+ * Builds a `model` node's own reconciled instance from an already-loaded
+ * `LoadedModel`: clones its scene (`SkeletonUtils.clone`, not a plain
+ * `Object3D.clone()` - the latter would leave every `SkinnedMesh` bound to
+ * the registry entry's own shared `Skeleton`/bones, so every reconciled
+ * instance of the same asset would visibly share one pose instead of
+ * animating independently; `SkeletonUtils.clone` gives each clone its own
+ * independent skeleton, correctly rebound, and is also safe to call on a
+ * model with no skinning at all - its own skeleton-specific rebinding step
+ * simply finds nothing to do), applies `castShadow`/`receiveShadow` to
+ * every mesh in the cloned hierarchy (a `ModelNode` has no per-submesh
+ * override, mirroring `MeshNode`'s own single flag applied to its one
+ * mesh), and pre-builds one `THREE.AnimationAction` per clip the asset has
+ * (regardless of whether `ModelNode.clips` currently references it - see
+ * `applyModelProperties`'s own doc for why).
+ */
+function buildModelObject(node: ModelNode, entry: LoadedModel): BuiltObject {
+  const cloned = cloneSkinned(entry.scene);
+
+  const skeletons: THREE.Skeleton[] = [];
+  const morphMeshes: THREE.Mesh[] = [];
+  cloned.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) {
+      return;
+    }
+    child.castShadow = node.castShadow ?? false;
+    child.receiveShadow = node.receiveShadow ?? false;
+    if (child instanceof THREE.SkinnedMesh) {
+      skeletons.push(child.skeleton);
+    }
+    if (child.morphTargetDictionary !== undefined && child.morphTargetInfluences !== undefined) {
+      morphMeshes.push(child);
+    }
+  });
+
+  const mixer = new THREE.AnimationMixer(cloned);
+  const actions = new Map<string, THREE.AnimationAction>();
+  for (const clip of entry.animations) {
+    const action = mixer.clipAction(clip);
+    // Enrolls this action in the mixer's own active-update list; every
+    // per-frame pose comes from applyModelProperties directly setting
+    // .time/.weight below and calling mixer.update(0), never from this
+    // action's own time accumulating on its own.
+    action.play();
+    action.weight = 0;
+    actions.set(clip.name, action);
+  }
+
+  return { object3D: cloned, owned: { model: { mixer, actions, skeletons, morphMeshes } } };
 }
 
 /** The bounding geometry a `VolumeNode`'s own `shape` maps to, centered on the node's own local origin. */
@@ -618,6 +721,11 @@ export function applyNodeProperties(
       applyVolumeProperties(node, owned?.volume?.material, frame, ctx);
       return;
     }
+
+    case "model": {
+      applyModelProperties(node, owned?.model, frame, ctx);
+      return;
+    }
   }
 }
 
@@ -668,6 +776,92 @@ function applyVolumeProperties(
  */
 function setUniformValue(node: Node<"float">, value: number): void {
   (node as unknown as { value: number }).value = value;
+}
+
+/**
+ * Applies this frame's resolved clip weights/time-scales and morph-target
+ * weights onto a `model` node's own pre-built `ModelOwnedResources`, driving
+ * every clip's own `AnimationAction.time`/`.weight` directly rather than
+ * accumulating via repeated `mixer.update(dt)` calls: unlike
+ * `@cadra/physics`/`@cadra/particles`, sampling a clip at a given local time
+ * is a pure function of that time alone (see `ModelNode`'s own doc), so
+ * computing each action's own local time directly from `frame` and calling
+ * `mixer.update(0)` once resolves frame N identically whether every prior
+ * frame was ever rendered or not - a stronger determinism guarantee than
+ * either of those two packages' own "bake incrementally" pattern needs.
+ *
+ * A `clips` entry naming a clip the loaded asset does not have is a silent
+ * no-op for that entry alone (see `ModelNode`'s own doc); any pre-built
+ * action *not* referenced by this frame's own `clips` gets `weight = 0`
+ * (contributes nothing), rather than being destroyed - the same "mute, not
+ * rebuild" treatment every other per-frame property in this file gets.
+ *
+ * Explicit `morphTargets` are applied *after* `mixer.update(0)`: a clip can
+ * itself carry a baked morph-target-influence track, and an author's own
+ * explicit `morphTargets` weight for the same target is meant to override
+ * it, not race it.
+ */
+function applyModelProperties(
+  node: ModelNode,
+  model: ModelOwnedResources | undefined,
+  frame: number,
+  ctx: NodeFactoryContext,
+): void {
+  if (model === undefined) {
+    return;
+  }
+  const fps = ctx.fps ?? 30;
+
+  const referencedClipNames = new Set<string>();
+  for (const clipConfig of node.clips ?? []) {
+    const action = model.actions.get(clipConfig.name);
+    if (action === undefined) {
+      continue;
+    }
+    referencedClipNames.add(clipConfig.name);
+    const timeScale = clipConfig.timeScale ?? 1;
+    const rawTime = (frame / fps) * timeScale;
+    action.time = resolveModelClipLocalTime(rawTime, action.getClip().duration, clipConfig.loop ?? "repeat");
+    action.weight = resolveNumberProperty(clipConfig.weight, frame);
+  }
+  for (const [name, action] of model.actions) {
+    if (!referencedClipNames.has(name)) {
+      action.weight = 0;
+    }
+  }
+  model.mixer.update(0);
+
+  for (const [targetName, weightProperty] of Object.entries(node.morphTargets ?? {})) {
+    const weight = resolveNumberProperty(weightProperty, frame);
+    for (const mesh of model.morphMeshes) {
+      const index = mesh.morphTargetDictionary?.[targetName];
+      if (index !== undefined && mesh.morphTargetInfluences !== undefined) {
+        mesh.morphTargetInfluences[index] = weight;
+      }
+    }
+  }
+}
+
+/**
+ * Maps a raw, unbounded clip-local time (`(frame / fps) * timeScale`,
+ * which can be negative when `timeScale` is negative, or exceed `duration`
+ * for any clip shorter than the node has been "playing") into the clip's
+ * own `[0, duration]` range: `"repeat"` wraps modulo `duration` (correcting
+ * for JS's `%` returning a negative result for a negative left operand, so
+ * a reversed clip - a negative `timeScale` - still wraps into a valid
+ * range rather than sampling before the clip's own start), `"clamp"` holds
+ * at either end. `duration <= 0` (a degenerate, zero-length clip) always
+ * resolves to `0`, since there is no meaningful time to wrap or clamp to.
+ */
+function resolveModelClipLocalTime(rawTime: number, duration: number, loop: "repeat" | "clamp"): number {
+  if (duration <= 0) {
+    return 0;
+  }
+  if (loop === "clamp") {
+    return Math.min(Math.max(rawTime, 0), duration);
+  }
+  const wrapped = rawTime % duration;
+  return wrapped < 0 ? wrapped + duration : wrapped;
 }
 
 /**

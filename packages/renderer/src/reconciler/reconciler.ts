@@ -2,6 +2,7 @@ import type { SceneNode, SceneNodeKind, WhiteBalanceGain } from "@cadra/core";
 import type { PhysicsTransform } from "@cadra/physics";
 import type * as THREE from "three";
 
+import type { ModelRegistry } from "../assets/model-registry.js";
 import type { RendererBackend } from "../renderer.js";
 import type { SatoriLayerRenderRegistry } from "../svg-layer/satori-layer-render-registry.js";
 import type { TextRenderRegistry } from "../text/text-render-registry.js";
@@ -32,12 +33,15 @@ interface ReconciledEntry {
  * `satoriLayerRenderRegistry` are also optional; omitted, every `text`/
  * `satori` node renders as an empty group (see `node-factory.ts`'s
  * `buildTextObject`/`buildThreeObject`'s own `"satori"` case).
+ * `modelRegistry` is optional the same way; omitted, every `"model"` node
+ * renders as an empty group too.
  */
 export interface ReconcilerOptions {
   geometryRegistry?: GeometryRegistry;
   materialRegistry?: MaterialRegistry;
   textRenderRegistry?: TextRenderRegistry;
   satoriLayerRenderRegistry?: SatoriLayerRenderRegistry;
+  modelRegistry?: ModelRegistry;
 }
 
 /**
@@ -112,6 +116,7 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
     ...(options.satoriLayerRenderRegistry !== undefined && {
       satoriLayerRenderRegistry: options.satoriLayerRenderRegistry,
     }),
+    ...(options.modelRegistry !== undefined && { modelRegistry: options.modelRegistry }),
   };
 
   const entries = new Map<string, ReconciledEntry>();
@@ -314,6 +319,18 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
     if (entry.owned?.volume !== undefined) {
       entry.owned.volume.geometry.dispose();
       entry.owned.volume.material.dispose();
+    }
+    if (entry.owned?.model !== undefined) {
+      // Geometries/materials/textures are never disposed here: they are
+      // shared with the ModelRegistry's own cached template (and every
+      // other reconciled instance of the same assetRef) via
+      // SkeletonUtils.clone's "clone the hierarchy, reuse the leaf
+      // resources" behavior - see buildModelObject's own doc. Only this
+      // instance's own cloned Skeletons (each with their own lazily
+      // allocated boneTexture, real GPU memory) are genuinely unique to it.
+      for (const skeleton of entry.owned.model.skeletons) {
+        skeleton.dispose();
+      }
     }
   }
 

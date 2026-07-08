@@ -36,6 +36,7 @@ import {
   type WebGPURendererParameters,
 } from "three/webgpu";
 
+import { createDefaultModelRegistry, type ModelRegistry } from "./assets/model-registry.js";
 import { detectWebGpuSupport, type WebGpuDetector } from "./capability-detection.js";
 import { resolveSceneColor } from "./color/resolve-scene-color.js";
 import {
@@ -567,6 +568,7 @@ export class ThreeRenderer implements Renderer {
   private readonly deps: ThreeRendererDependencies;
   private readonly environmentRegistry: EnvironmentRegistry;
   private readonly lutRegistry: LutRegistry;
+  private readonly modelRegistry: ModelRegistry;
   private threeRenderer: ThreeRendererLike | undefined;
   private resolvedBackend: RendererBackend | undefined;
   private wasFallback = false;
@@ -586,9 +588,11 @@ export class ThreeRenderer implements Renderer {
    * `resolvedBackend` above): the reconciler's own incremental-update
    * guarantees (stable `Object3D` identity for an unchanged node id) only
    * hold if it is the same instance diffing against its own prior output
-   * frame to frame, not a fresh one built per call.
+   * frame to frame, not a fresh one built per call. Assigned in the
+   * constructor body, not inline here, since it needs `modelRegistry`
+   * (a constructor parameter, not yet in scope for a field initializer).
    */
-  private readonly reconciler: Reconciler = createReconciler();
+  private readonly reconciler: Reconciler;
   /** The one persistent Three.js scene every reconciled wrapper root is attached under. */
   private readonly scene = new THREE.Scene();
   /**
@@ -672,10 +676,13 @@ export class ThreeRenderer implements Renderer {
     deps: ThreeRendererDependencies = defaultThreeRendererDependencies,
     environmentRegistry: EnvironmentRegistry = createDefaultEnvironmentRegistry(),
     lutRegistry: LutRegistry = createDefaultLutRegistry(),
+    modelRegistry: ModelRegistry = createDefaultModelRegistry(),
   ) {
     this.deps = deps;
     this.environmentRegistry = environmentRegistry;
     this.lutRegistry = lutRegistry;
+    this.modelRegistry = modelRegistry;
+    this.reconciler = createReconciler({ modelRegistry });
     this.defaultCamera.position.set(0, 0, 5);
   }
 
