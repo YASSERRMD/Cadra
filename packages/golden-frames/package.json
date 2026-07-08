@@ -19,9 +19,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
-    "test": "vitest run",
+    "test": "vitest run --exclude src/compare-references.e2e.test.ts",
     "lint": "eslint src",
-    "update-references": "node scripts/update-references.mjs"
+    "update-references": "node scripts/update-references.mjs",
+    "compare-references": "vitest run src/compare-references.e2e.test.ts"
   },
   "dependencies": {
     "@cadra/core": "workspace:*",

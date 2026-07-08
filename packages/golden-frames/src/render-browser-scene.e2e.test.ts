@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import { encodePixelBufferToPng } from "./png-codec.js";
 import { renderBrowserGoldenScene } from "./render-browser-scene.js";
 import { pathTracedScene } from "./scenes/index.js";
+import { isRealChromiumAvailable } from "./test-support/environment-checks.js";
+
+const chromiumAvailable = isRealChromiumAvailable();
 
 /** How many of a `PixelBuffer`'s pixels have any non-zero color/alpha channel at all. */
 function countNonBlankPixels(data: Uint8ClampedArray): number {
@@ -33,6 +36,10 @@ describe("renderBrowserGoldenScene: real headless-Chromium renders", () => {
   it(
     "renders the path-traced scene to a non-blank PixelBuffer at the scene's own size",
     async () => {
+      if (!chromiumAvailable) {
+        return;
+      }
+
       const pixels = await renderBrowserGoldenScene(pathTracedScene);
 
       expect(pixels.width).toBe(pathTracedScene.width);

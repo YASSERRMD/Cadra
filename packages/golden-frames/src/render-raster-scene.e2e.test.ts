@@ -10,6 +10,7 @@ import {
   textFontkitScene,
   textOpentypeScene,
 } from "./scenes/index.js";
+import { isNativeGpuAvailable } from "./test-support/environment-checks.js";
 
 /** How many of a `PixelBuffer`'s pixels have any non-zero color/alpha channel at all. */
 function countNonBlankPixels(data: Uint8ClampedArray): number {
@@ -38,14 +39,26 @@ function countNonBlankPixels(data: Uint8ClampedArray): number {
  * covered here like any other `nativeGpuHeadless` scene (it renders
  * successfully and deterministically; see that scene's own doc for the
  * separately-tracked, currently-invisible `motionBlur` effect itself).
+ *
+ * Every test below skips cleanly (an early `return` inside a passing test,
+ * not `it.skip`) when no real native WebGPU device can be acquired at all,
+ * mirroring `render-frame-native-gpu.e2e.test.ts`'s own convention in
+ * `@cadra/headless` - see `isNativeGpuAvailable`'s own doc for why there is
+ * no cheaper synchronous pre-check.
  */
 describe("renderRasterGoldenScene: real native GPU renders (no browser)", () => {
+  const nativeGpuAvailable = isNativeGpuAvailable();
+
   it.each([
     ["materials", materialsScene],
     ["lighting", lightingScene],
     ["post-processing", postProcessingScene],
     ["motion-blur", motionBlurScene],
   ] as const)("renders %s to a non-blank PixelBuffer at the scene's own size", async (_label, scene) => {
+    if (!(await nativeGpuAvailable)) {
+      return;
+    }
+
     const pixels = await renderRasterGoldenScene(scene);
 
     expect(pixels.width).toBe(scene.width);
@@ -62,6 +75,10 @@ describe("renderRasterGoldenScene: real native GPU renders (no browser)", () => 
   });
 
   it("renders real shaped text via the opentype engine, producing visibly more lit pixels than an empty placeholder would", async () => {
+    if (!(await nativeGpuAvailable)) {
+      return;
+    }
+
     const pixels = await renderRasterGoldenScene(textOpentypeScene);
 
     expect(pixels.width).toBe(textOpentypeScene.width);
@@ -76,6 +93,10 @@ describe("renderRasterGoldenScene: real native GPU renders (no browser)", () => 
   });
 
   it("renders real shaped text via the fontkit engine, producing visibly more lit pixels than an empty placeholder would", async () => {
+    if (!(await nativeGpuAvailable)) {
+      return;
+    }
+
     const pixels = await renderRasterGoldenScene(textFontkitScene);
 
     const nonBlank = countNonBlankPixels(pixels.data);
@@ -83,6 +104,10 @@ describe("renderRasterGoldenScene: real native GPU renders (no browser)", () => 
   });
 
   it("renders the opentype and fontkit text engines to visually similar (not pixel-identical) output for the same content", async () => {
+    if (!(await nativeGpuAvailable)) {
+      return;
+    }
+
     const opentypePixels = await renderRasterGoldenScene(textOpentypeScene);
     const fontkitPixels = await renderRasterGoldenScene(textFontkitScene);
 

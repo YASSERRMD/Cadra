@@ -13,6 +13,7 @@ import {
 } from "./golden-frame-harness.js";
 import type { GoldenScene } from "./scenes/golden-scene.js";
 import { lightingScene } from "./scenes/index.js";
+import { isNativeGpuAvailable } from "./test-support/environment-checks.js";
 
 const RECOLORED_BASE_COLOR: ColorRGBA = [0, 1, 0, 1];
 
@@ -57,14 +58,24 @@ function buildRecoloredLightingScene(): GoldenScene {
  * real through `createNativeGpuHeadlessRenderer` (the fastest of this
  * package's two drivers), against a scratch `references/`-shaped directory
  * unique to each test, never this package's own checked-in `references/`.
+ *
+ * Every test below skips cleanly when no real native WebGPU device can be
+ * acquired at all; see `render-raster-scene.e2e.test.ts`'s own identical
+ * convention and `isNativeGpuAvailable`'s own doc.
  */
 describe("golden-frame compare/update flow", () => {
+  const nativeGpuAvailable = isNativeGpuAvailable();
+
   function withScratchReferencesDir<T>(run: (referencesDir: string) => Promise<T>): Promise<T> {
     const referencesDir = mkdtempSync(join(tmpdir(), "cadra-golden-frames-e2e-"));
     return run(referencesDir).finally(() => rmSync(referencesDir, { recursive: true, force: true }));
   }
 
   it("reports missing-reference when no reference exists yet", async () => {
+    if (!(await nativeGpuAvailable)) {
+      return;
+    }
+
     await withScratchReferencesDir(async (referencesDir) => {
       const result = await compareGoldenSceneAgainstReference(lightingScene, { referencesDir });
 
@@ -76,6 +87,10 @@ describe("golden-frame compare/update flow", () => {
   });
 
   it("updateGoldenSceneReference writes a real PNG a later compare call matches with zero diff (task 6: identical renders produce zero diff)", async () => {
+    if (!(await nativeGpuAvailable)) {
+      return;
+    }
+
     await withScratchReferencesDir(async (referencesDir) => {
       const updateResult = await updateGoldenSceneReference(lightingScene, { referencesDir });
       expect(updateResult.wasNew).toBe(true);
@@ -93,6 +108,10 @@ describe("golden-frame compare/update flow", () => {
   });
 
   it("catches an intentional change: a differently-colored scene fails the same reference (task 6)", async () => {
+    if (!(await nativeGpuAvailable)) {
+      return;
+    }
+
     await withScratchReferencesDir(async (referencesDir) => {
       await updateGoldenSceneReference(lightingScene, { referencesDir });
 
@@ -106,6 +125,10 @@ describe("golden-frame compare/update flow", () => {
   });
 
   it("updateGoldenSceneReference reports a non-zero diffFromPrevious when overwriting a changed reference", async () => {
+    if (!(await nativeGpuAvailable)) {
+      return;
+    }
+
     await withScratchReferencesDir(async (referencesDir) => {
       await updateGoldenSceneReference(lightingScene, { referencesDir });
 
@@ -117,6 +140,10 @@ describe("golden-frame compare/update flow", () => {
   });
 
   it("writeGoldenFrameDiffArtifacts writes real actual/expected/diff PNGs for a failing comparison", async () => {
+    if (!(await nativeGpuAvailable)) {
+      return;
+    }
+
     await withScratchReferencesDir(async (referencesDir) => {
       await updateGoldenSceneReference(lightingScene, { referencesDir });
 
