@@ -1,13 +1,16 @@
 import {
   easeInBack,
+  easeInBounce,
   easeInCubic,
   easeInElastic,
   easeInExpo,
   easeInOutBack,
+  easeInOutBounce,
   easeInOutCubic,
   easeInOutElastic,
   easeInOutExpo,
   easeOutBack,
+  easeOutBounce,
   easeOutCubic,
   easeOutElastic,
   easeOutExpo,
@@ -34,7 +37,10 @@ export type EasingName =
   | "easeInOutBack"
   | "easeInElastic"
   | "easeOutElastic"
-  | "easeInOutElastic";
+  | "easeInOutElastic"
+  | "easeInBounce"
+  | "easeOutBounce"
+  | "easeInOutBounce";
 
 const EASING_FUNCTIONS_BY_NAME: Readonly<Record<EasingName, (t: number) => number>> = {
   linear,
@@ -50,6 +56,9 @@ const EASING_FUNCTIONS_BY_NAME: Readonly<Record<EasingName, (t: number) => numbe
   easeInElastic,
   easeOutElastic,
   easeInOutElastic,
+  easeInBounce,
+  easeOutBounce,
+  easeInOutBounce,
 };
 
 /** Resolves an `EasingName` to the real curve function it names, for handing to `interpolate`'s `options.easing`. */

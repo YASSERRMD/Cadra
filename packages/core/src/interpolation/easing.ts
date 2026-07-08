@@ -98,6 +98,36 @@ export function easeInOutElastic(t: number): number {
     : (Math.pow(2, -20 * t + 10) * Math.sin((20 * t - 11.125) * period)) / 2 + 1;
 }
 
+// --- Bounce ---
+
+/** Scaling and duration constants for the `bounce` family, per Robert Penner's original easing equations (matching the widely-used easings.net reference implementation). */
+const BOUNCE_SCALE = 7.5625;
+const BOUNCE_SEGMENT = 2.75;
+
+export function easeOutBounce(t: number): number {
+  if (t < 1 / BOUNCE_SEGMENT) {
+    return BOUNCE_SCALE * t * t;
+  }
+  if (t < 2 / BOUNCE_SEGMENT) {
+    const adjusted = t - 1.5 / BOUNCE_SEGMENT;
+    return BOUNCE_SCALE * adjusted * adjusted + 0.75;
+  }
+  if (t < 2.5 / BOUNCE_SEGMENT) {
+    const adjusted = t - 2.25 / BOUNCE_SEGMENT;
+    return BOUNCE_SCALE * adjusted * adjusted + 0.9375;
+  }
+  const adjusted = t - 2.625 / BOUNCE_SEGMENT;
+  return BOUNCE_SCALE * adjusted * adjusted + 0.984375;
+}
+
+export function easeInBounce(t: number): number {
+  return 1 - easeOutBounce(1 - t);
+}
+
+export function easeInOutBounce(t: number): number {
+  return t < 0.5 ? (1 - easeOutBounce(1 - 2 * t)) / 2 : (1 + easeOutBounce(2 * t - 1)) / 2;
+}
+
 // --- Cubic Bezier (CSS `cubic-bezier()` semantics) ---
 
 /** Newton-Raphson iterations attempted before falling back to bisection. */

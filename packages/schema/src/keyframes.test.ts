@@ -19,6 +19,9 @@ describe("easingSchema", () => {
       "easeInElastic",
       "easeOutElastic",
       "easeInOutElastic",
+      "easeInBounce",
+      "easeOutBounce",
+      "easeInOutBounce",
       "hold",
     ];
     for (const name of names) {

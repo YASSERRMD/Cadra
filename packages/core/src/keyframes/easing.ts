@@ -1,13 +1,16 @@
 import {
   easeInBack,
+  easeInBounce,
   easeInCubic,
   easeInElastic,
   easeInExpo,
   easeInOutBack,
+  easeInOutBounce,
   easeInOutCubic,
   easeInOutElastic,
   easeInOutExpo,
   easeOutBack,
+  easeOutBounce,
   easeOutCubic,
   easeOutElastic,
   easeOutExpo,
@@ -16,7 +19,8 @@ import {
 
 /**
  * Every easing curve a `Keyframe` can name, by string literal: every named
- * curve Phase 9's `interpolation/easing.ts` exports, plus `'hold'`.
+ * curve Phase 9's `interpolation/easing.ts` exports (Phase 70 additively
+ * extends this with the `Bounce` family), plus `'hold'`.
  *
  * `'hold'` is not a continuous curve like the others: it is a step function
  * (stay at the starting keyframe's value for the whole segment, then jump at
@@ -38,6 +42,9 @@ export type Easing =
   | "easeInElastic"
   | "easeOutElastic"
   | "easeInOutElastic"
+  | "easeInBounce"
+  | "easeOutBounce"
+  | "easeInOutBounce"
   | "hold";
 
 /** An easing curve name that maps to a real `(t: number) => number` function (every `Easing` except `'hold'`). */
@@ -64,4 +71,7 @@ export const EASING_FUNCTIONS: Record<ContinuousEasing, (t: number) => number> =
   easeInElastic,
   easeOutElastic,
   easeInOutElastic,
+  easeInBounce,
+  easeOutBounce,
+  easeInOutBounce,
 };

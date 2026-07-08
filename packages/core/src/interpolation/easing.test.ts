@@ -3,14 +3,17 @@ import { describe, expect, it } from "vitest";
 import {
   cubicBezier,
   easeInBack,
+  easeInBounce,
   easeInCubic,
   easeInElastic,
   easeInExpo,
   easeInOutBack,
+  easeInOutBounce,
   easeInOutCubic,
   easeInOutElastic,
   easeInOutExpo,
   easeOutBack,
+  easeOutBounce,
   easeOutCubic,
   easeOutElastic,
   easeOutExpo,
@@ -31,6 +34,9 @@ const EASING_FUNCTIONS: Array<{ name: string; fn: (t: number) => number }> = [
   { name: "easeInElastic", fn: easeInElastic },
   { name: "easeOutElastic", fn: easeOutElastic },
   { name: "easeInOutElastic", fn: easeInOutElastic },
+  { name: "easeInBounce", fn: easeInBounce },
+  { name: "easeOutBounce", fn: easeOutBounce },
+  { name: "easeInOutBounce", fn: easeInOutBounce },
 ];
 
 describe("easing functions", () => {
@@ -93,6 +99,34 @@ describe("easing functions", () => {
     }
     expect(increases).toBeGreaterThan(0);
     expect(decreases).toBeGreaterThan(0);
+  });
+
+  it("easeOutBounce never exceeds 1 (settles onto it from below, unlike back/elastic's overshoot)", () => {
+    for (let i = 0; i <= 20; i += 1) {
+      expect(easeOutBounce(i / 20)).toBeLessThanOrEqual(1 + 1e-9);
+    }
+  });
+
+  it("easeOutBounce is not monotonic (each bounce dips down before rising again)", () => {
+    const values = Array.from({ length: 40 }, (_, i) => easeOutBounce(i / 39));
+    let decreases = 0;
+    for (let i = 1; i < values.length; i += 1) {
+      const prev = values[i - 1];
+      const curr = values[i];
+      if (prev === undefined || curr === undefined) continue;
+      if (curr < prev) decreases += 1;
+    }
+    expect(decreases).toBeGreaterThan(0);
+  });
+
+  it("easeInBounce and easeOutBounce are mirror images of each other", () => {
+    for (const t of [0.1, 0.25, 0.5, 0.75, 0.9]) {
+      expect(easeInBounce(t)).toBeCloseTo(1 - easeOutBounce(1 - t), 9);
+    }
+  });
+
+  it("easeInOutBounce is symmetric around its midpoint (0.5 maps to 0.5)", () => {
+    expect(easeInOutBounce(0.5)).toBeCloseTo(0.5, 10);
   });
 });
 

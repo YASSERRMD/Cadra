@@ -36,7 +36,7 @@ describe("describeCadraContract", () => {
   it("includes capabilities with every scene node primitive and every easing", () => {
     const contract = describeCadraContract();
     expect(contract.capabilities.primitives.length).toBe(12);
-    expect(contract.capabilities.easings.length).toBe(14);
+    expect(contract.capabilities.easings.length).toBe(17);
   });
 
   it("leaves capabilities.codecs undefined, the documented extension point for a higher-level consumer", () => {
