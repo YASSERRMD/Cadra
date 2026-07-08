@@ -15,6 +15,7 @@ import { bloom as createBloomNode } from "three/addons/tsl/display/BloomNode.js"
 import { chromaticAberration as createChromaticAberrationNode } from "three/addons/tsl/display/ChromaticAberrationNode.js";
 import { dof as createDofNode } from "three/addons/tsl/display/DepthOfFieldNode.js";
 import { ao as createGtaoNode } from "three/addons/tsl/display/GTAONode.js";
+import { motionBlur as createMotionBlurNode } from "three/addons/tsl/display/MotionBlur.js";
 import {
   clamp,
   convertToTexture,
@@ -34,10 +35,12 @@ import {
   vec2,
   vec3,
   vec4,
+  velocity,
 } from "three/tsl";
 import { RenderPipeline, type WebGPURenderer } from "three/webgpu";
 
 import { computeFilmGrainSeed } from "./film-grain.js";
+import { computeMotionBlurVelocityScale } from "./motion-blur.js";
 import { computeSharpenKernelWeights, SharpenShader, updateSharpenUniforms } from "./sharpen.js";
 import type { AnyTslNode } from "./tsl-node.js";
 
@@ -131,6 +134,7 @@ function isPreTonemapEffect(effect: PostEffectConfig): boolean {
   switch (effect.type) {
     case "bloom":
     case "depthOfField":
+    case "motionBlur":
       return true;
     case "sharpen":
     case "chromaticAberration":
@@ -250,12 +254,14 @@ const LensDistortionShader = {
 
 /**
  * Builds one `Pass` for `effect`, sized to the composer's own current pixel
- * dimensions. `scene`/`camera` are needed by `depthOfField` (`BokehPass`
- * renders its own internal depth pass from them); `registerFrameUpdate` is
- * called, at most once, by any effect whose own uniforms depend on the
- * current frame (currently: `filmGrain`'s seed, from
- * `computeFilmGrainSeed`) - see `BuiltPipeline.updateFrame`'s own doc for why
- * this is a callback rather than a full rebuild.
+ * dimensions, or `undefined` for an effect with no WebGL2 implementation
+ * (currently: `motionBlur`, WebGPU-backend only - see
+ * `MotionBlurEffectConfig`'s own doc for why). `scene`/`camera` are needed by
+ * `depthOfField` (`BokehPass` renders its own internal depth pass from
+ * them); `registerFrameUpdate` is called, at most once, by any effect whose
+ * own uniforms depend on the current frame (currently: `filmGrain`'s seed,
+ * from `computeFilmGrainSeed`) - see `BuiltPipeline.updateFrame`'s own doc
+ * for why this is a callback rather than a full rebuild.
  */
 function buildWebGl2EffectPass(
   effect: PostEffectConfig,
@@ -264,7 +270,7 @@ function buildWebGl2EffectPass(
   width: number,
   height: number,
   registerFrameUpdate: (update: (frame: number) => void) => void,
-): Pass {
+): Pass | undefined {
   switch (effect.type) {
     case "sharpen": {
       const shaderPass = new ShaderPass(SharpenShader);
@@ -317,6 +323,9 @@ function buildWebGl2EffectPass(
       uniforms.amount.value = effect.amount ?? 0;
       return shaderPass;
     }
+    case "motionBlur": {
+      return undefined;
+    }
   }
 }
 
@@ -359,13 +368,19 @@ export function buildWebGl2Pipeline(
 
   const { preTonemap, postTonemap } = partitionEffectsByStage(config.postProcessing?.effects ?? []);
   for (const effect of preTonemap) {
-    composer.addPass(buildWebGl2EffectPass(effect, scene, camera, width, height, registerFrameUpdate));
+    const effectPass = buildWebGl2EffectPass(effect, scene, camera, width, height, registerFrameUpdate);
+    if (effectPass !== undefined) {
+      composer.addPass(effectPass);
+    }
   }
 
   composer.addPass(new OutputPass());
 
   for (const effect of postTonemap) {
-    composer.addPass(buildWebGl2EffectPass(effect, scene, camera, width, height, registerFrameUpdate));
+    const effectPass = buildWebGl2EffectPass(effect, scene, camera, width, height, registerFrameUpdate);
+    if (effectPass !== undefined) {
+      composer.addPass(effectPass);
+    }
   }
 
   return {
@@ -397,9 +412,16 @@ export function buildWebGpuPipeline(
   camera: THREE.Camera,
   config: RenderPassConfig,
 ): BuiltPipeline<RenderPipeline> {
+  const effects = config.postProcessing?.effects ?? [];
+  const hasMotionBlur = effects.some((effect) => effect.type === "motionBlur");
+
   const scenePass = pass(scene, camera);
-  if (config.ambientOcclusion !== undefined) {
+  if (config.ambientOcclusion !== undefined && hasMotionBlur) {
+    scenePass.setMRT(mrt({ output, normal: normalView, velocity }));
+  } else if (config.ambientOcclusion !== undefined) {
     scenePass.setMRT(mrt({ output, normal: normalView }));
+  } else if (hasMotionBlur) {
+    scenePass.setMRT(mrt({ output, velocity }));
   }
 
   let node: AnyTslNode = scenePass.getTextureNode("output");
@@ -421,7 +443,7 @@ export function buildWebGpuPipeline(
     frameUpdates.push(update);
   };
 
-  const { preTonemap, postTonemap } = partitionEffectsByStage(config.postProcessing?.effects ?? []);
+  const { preTonemap, postTonemap } = partitionEffectsByStage(effects);
 
   for (const effect of preTonemap) {
     node = applyWebGpuEffect(node, effect, scenePass, camera, registerFrameUpdate);
@@ -559,6 +581,19 @@ function applyWebGpuEffect(
       const r2 = centered.dot(centered);
       const distortedUv = vec2(0.5, 0.5).add(centered.mul(float(1).add(r2.mul(float(amount)))));
       return sampleable.sample(distortedUv);
+    }
+    case "motionBlur": {
+      // velocity is Three.js's own per-object motion vector (see
+      // VelocityNode in this project's installed three@0.185.1 source): an
+      // NDC-space (-1 to 1) delta between this frame's and the previous
+      // frame's clip-space position, covering the whole frame interval
+      // (implicitly a 360-degree shutter). Scaled here to UV space (0 to 1,
+      // hence the extra 0.5) and to shutterAngle's own fraction of that
+      // interval - motionBlur's own sampling below adds this directly to a
+      // uv() coordinate.
+      const velocityTexture: AnyTslNode = scenePass.getTextureNode("velocity");
+      const scaledVelocity = velocityTexture.mul(float(computeMotionBlurVelocityScale(effect.shutterAngle ?? 180)));
+      return createMotionBlurNode(convertToTexture(colorTexture), scaledVelocity, int(effect.samples ?? 16));
     }
   }
 }
