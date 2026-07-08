@@ -10,6 +10,13 @@ import type {
   LightType,
   MeshMaterialConfig,
   MeshNode,
+  ParticleBlendMode,
+  ParticleColliderConfig,
+  ParticleColorStop,
+  ParticleEmitterShape,
+  ParticleForceConfig,
+  ParticleSizeStop,
+  ParticleSystemNode,
   RigidBodyConfig,
   SatoriElementKeyframes,
   SatoriLayerFontRef,
@@ -85,7 +92,18 @@ type AssertTrue<T extends true> = T;
 
 /** Every kind of node the scene graph can represent, mirroring `SceneNodeKind`. */
 export const sceneNodeKindSchema = z
-  .enum(["group", "mesh", "camera", "light", "text", "image", "video", "compositionRef", "satori"])
+  .enum([
+    "group",
+    "mesh",
+    "camera",
+    "light",
+    "text",
+    "image",
+    "video",
+    "compositionRef",
+    "satori",
+    "particles",
+  ])
   .describe("Which of the fixed set of scene node kinds this node is.");
 
 type _CheckSceneNodeKind = AssertTrue<
@@ -1168,11 +1186,199 @@ export const satoriNodeSchema = z.strictObject({
 
 type _CheckSatoriNode = AssertTrue<AssertEqual<z.infer<typeof satoriNodeSchema>, SatoriNode>>;
 
+/** Where new particles spawn in a particle node's own local space, mirroring `ParticleEmitterShape`. */
+export const particleEmitterShapeSchema = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("point") }),
+  z.strictObject({
+    type: z.literal("box"),
+    halfExtents: vector3Schema.describe("Half-width, half-height, half-depth of the box, in the node's own local units."),
+  }),
+  z.strictObject({
+    type: z.literal("sphere"),
+    radius: z.number().positive(),
+  }),
+  z.strictObject({
+    type: z.literal("cone"),
+    radius: z.number().positive(),
+    angle: z.number().min(0).describe("Half-angle of the cone, in radians."),
+  }),
+]);
+
+type _CheckParticleEmitterShape = AssertTrue<
+  AssertEqual<z.infer<typeof particleEmitterShapeSchema>, ParticleEmitterShape>
+>;
+
+/** A continuous force applied to every live particle each simulated step, mirroring `ParticleForceConfig`. */
+export const particleForceConfigSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.literal("gravity"),
+    acceleration: vector3Schema,
+  }),
+  z.strictObject({
+    type: z.literal("drag"),
+    coefficient: z.number().min(0),
+  }),
+  z.strictObject({
+    type: z.literal("curlNoise"),
+    strength: z.number(),
+    frequency: z.number().positive(),
+    speed: z.number().optional(),
+  }),
+  z.strictObject({
+    type: z.literal("vortex"),
+    origin: vector3Schema,
+    axis: vector3Schema,
+    strength: z.number(),
+  }),
+]);
+
+type _CheckParticleForceConfig = AssertTrue<
+  AssertEqual<z.infer<typeof particleForceConfigSchema>, ParticleForceConfig>
+>;
+
+/** A simple analytic collision surface live particles bounce or slide off, mirroring `ParticleColliderConfig`. */
+export const particleColliderConfigSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.literal("groundPlane"),
+    y: z.number(),
+    bounce: z.number().min(0).max(1).optional(),
+  }),
+  z.strictObject({
+    type: z.literal("sphere"),
+    center: vector3Schema,
+    radius: z.number().positive(),
+    bounce: z.number().min(0).max(1).optional(),
+  }),
+]);
+
+type _CheckParticleColliderConfig = AssertTrue<
+  AssertEqual<z.infer<typeof particleColliderConfigSchema>, ParticleColliderConfig>
+>;
+
+/** One stop in a particle node's `colorOverLife` gradient, mirroring `ParticleColorStop`. */
+export const particleColorStopSchema = z.strictObject({
+  time: z.number().min(0).max(1).describe("Position within the particle's own lifetime, 0 (birth) to 1 (death)."),
+  color: colorRgbaSchema,
+});
+
+type _CheckParticleColorStop = AssertTrue<
+  AssertEqual<z.infer<typeof particleColorStopSchema>, ParticleColorStop>
+>;
+
+/** One stop in a particle node's `sizeOverLife` curve, mirroring `ParticleSizeStop`. */
+export const particleSizeStopSchema = z.strictObject({
+  time: z.number().min(0).max(1).describe("Position within the particle's own lifetime, 0 (birth) to 1 (death)."),
+  size: z.number().min(0).describe("Size multiplier at this point in the particle's lifetime."),
+});
+
+type _CheckParticleSizeStop = AssertTrue<
+  AssertEqual<z.infer<typeof particleSizeStopSchema>, ParticleSizeStop>
+>;
+
+/** How a particle's own pixels combine with whatever is composited beneath it, mirroring `ParticleBlendMode`. */
+export const particleBlendModeSchema = z
+  .enum(["normal", "additive"])
+  .describe("How a particle's own pixels combine with whatever is composited beneath it. Defaults to 'normal'.");
+
+type _CheckParticleBlendMode = AssertTrue<
+  AssertEqual<z.infer<typeof particleBlendModeSchema>, ParticleBlendMode>
+>;
+
+/**
+ * A GPU-simulated particle emitter (Phase 67), mirroring `ParticleSystemNode`.
+ * All stochastic behavior is seeded deterministically from the composition's
+ * own frame seed, this node's own `id` and `seed`, and each particle's own
+ * slot index.
+ */
+export const particleSystemNodeSchema = z.strictObject({
+  id: z.string().describe("Unique identifier for this scene node within the project."),
+  kind: z.literal("particles").describe("Discriminant identifying this node as a particle system."),
+  name: z
+    .string()
+    .optional()
+    .describe("Optional human-readable label, purely for authoring and debugging."),
+  transform: animatableTransformSchema.describe(
+    "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track.",
+  ),
+  visible: propertySchema(z.boolean()).describe(
+    "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track.",
+  ),
+  maxParticles: z
+    .number()
+    .int()
+    .positive()
+    .describe("Fixed size of this emitter's particle pool. Never exceeded regardless of emissionRate."),
+  emissionRate: z.number().min(0).describe("Average number of particles spawned per second, while this node is visible."),
+  shape: particleEmitterShapeSchema.describe("Where within this node's own local space newly spawned particles appear."),
+  lifetimeSeconds: z.number().positive().describe("How long a particle lives after spawning, in seconds, before it is recycled."),
+  lifetimeVarianceSeconds: z
+    .number()
+    .min(0)
+    .optional()
+    .describe("Randomizes lifetimeSeconds by up to this many seconds, applied symmetrically. Defaults to 0."),
+  initialSpeed: z.number().describe("Speed newly spawned particles move at, in scene units per second, along direction."),
+  initialSpeedVariance: z
+    .number()
+    .min(0)
+    .max(1)
+    .optional()
+    .describe("Randomizes initialSpeed by up to this fraction of its own value. Defaults to 0."),
+  direction: vector3Schema.describe("The nominal direction newly spawned particles move in, in this node's own local space."),
+  spreadAngle: z
+    .number()
+    .min(0)
+    .optional()
+    .describe("Half-angle, in radians, of the cone around direction initial velocity is randomized within. Defaults to 0."),
+  startSize: z.number().positive().describe("Sprite size a particle spawns at, in scene units, before sizeOverLife is applied."),
+  sizeVariance: z
+    .number()
+    .min(0)
+    .max(1)
+    .optional()
+    .describe("Randomizes startSize by up to this fraction of its own value. Defaults to 0."),
+  forces: z
+    .array(particleForceConfigSchema)
+    .readonly()
+    .optional()
+    .describe("Forces applied to every live particle each simulated step. Defaults to none."),
+  colliders: z
+    .array(particleColliderConfigSchema)
+    .readonly()
+    .optional()
+    .describe("Simple analytic colliders live particles test against each simulated step. Defaults to none."),
+  colorOverLife: z
+    .array(particleColorStopSchema)
+    .readonly()
+    .optional()
+    .describe("Color across a particle's own lifetime, interpolated linearly between stops sorted by time."),
+  sizeOverLife: z
+    .array(particleSizeStopSchema)
+    .readonly()
+    .optional()
+    .describe("Size multiplier across a particle's own lifetime, interpolated linearly between stops sorted by time."),
+  textureRef: z
+    .string()
+    .optional()
+    .describe("Id of a texture asset resolved against a texture registry by the renderer. Omitted means a plain soft circular sprite."),
+  blendMode: particleBlendModeSchema.optional(),
+  seed: z
+    .number()
+    .optional()
+    .describe("Combined with the composition's own frame seed and this node's own id to derive this emitter's deterministic stochastic stream."),
+  get children(): z.ZodArray<typeof sceneNodeSchema> {
+    return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
+  },
+});
+
+type _CheckParticleSystemNode = AssertTrue<
+  AssertEqual<z.infer<typeof particleSystemNodeSchema>, ParticleSystemNode>
+>;
+
 /**
  * A node in the scene graph, discriminated on `kind`. Mirrors the `SceneNode`
  * union in `@cadra/core` exactly: every variant is a strict, closed shape,
- * and an object whose `kind` does not match one of the nine known literals
- * is rejected rather than coerced into the closest variant.
+ * and an object whose `kind` does not match one of the ten known literals is
+ * rejected rather than coerced into the closest variant.
  */
 export const sceneNodeSchema: z.ZodDiscriminatedUnion<
   [
@@ -1185,6 +1391,7 @@ export const sceneNodeSchema: z.ZodDiscriminatedUnion<
     typeof videoNodeSchema,
     typeof compositionRefNodeSchema,
     typeof satoriNodeSchema,
+    typeof particleSystemNodeSchema,
   ]
 > = z.discriminatedUnion("kind", [
   groupNodeSchema,
@@ -1196,6 +1403,7 @@ export const sceneNodeSchema: z.ZodDiscriminatedUnion<
   videoNodeSchema,
   compositionRefNodeSchema,
   satoriNodeSchema,
+  particleSystemNodeSchema,
 ]);
 
 type _CheckSceneNode = AssertTrue<AssertEqual<z.infer<typeof sceneNodeSchema>, SceneNode>>;

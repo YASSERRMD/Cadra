@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createFrameRandom } from "./prng.js";
+import { createFrameRandom, toNumericSeed } from "./prng.js";
 
 /** How many values to draw from a single generator in each trial below. */
 const VALUES_PER_TRIAL = 50;
@@ -101,5 +101,29 @@ describe("createFrameRandom", () => {
     const stringSequence = drawSequence("1234", 0, VALUES_PER_TRIAL);
 
     expect(numericSequence).not.toEqual(stringSequence);
+  });
+});
+
+describe("toNumericSeed", () => {
+  it("passes an already-numeric seed through, truncated to a 32-bit unsigned integer", () => {
+    expect(toNumericSeed(42)).toBe(42);
+    expect(toNumericSeed(0)).toBe(0);
+  });
+
+  it("hashes a string seed to the same numeric value every time", () => {
+    expect(toNumericSeed("phase-67")).toBe(toNumericSeed("phase-67"));
+  });
+
+  it("hashes different string seeds to different numeric values", () => {
+    expect(toNumericSeed("emitter-a")).not.toBe(toNumericSeed("emitter-b"));
+  });
+
+  it("always returns a 32-bit unsigned integer", () => {
+    for (const seed of [42, -1, "phase-67", "", "a very long emitter identifier string"]) {
+      const numeric = toNumericSeed(seed);
+      expect(Number.isInteger(numeric)).toBe(true);
+      expect(numeric).toBeGreaterThanOrEqual(0);
+      expect(numeric).toBeLessThanOrEqual(0xffffffff);
+    }
   });
 });

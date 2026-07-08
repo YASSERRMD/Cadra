@@ -37,6 +37,15 @@ export const TEXT_ANIMATABLE_PROPERTIES = [
 /** `Image` (`ImageNode`) animatable props: transform and visibility. */
 export const IMAGE_ANIMATABLE_PROPERTIES = [...TRANSFORM_ANIMATABLE_PROPERTIES, "visible"] as const;
 
+/**
+ * `Particles` (`ParticleSystemNode`) animatable props: transform and
+ * visibility only. Every emitter-specific field (`emissionRate`,
+ * `lifetimeSeconds`, `forces`, and so on) is a plain, structural value, not
+ * `Property<T>` - mirroring `RigidBodyConfig`'s own precedent that physics-
+ * and simulation-adjacent configuration is authored once, not keyframed.
+ */
+export const PARTICLES_ANIMATABLE_PROPERTIES = [...TRANSFORM_ANIMATABLE_PROPERTIES, "visible"] as const;
+
 /** `Video` (`VideoNode`) animatable props: transform, visibility, and opacity. */
 export const VIDEO_ANIMATABLE_PROPERTIES = [
   ...TRANSFORM_ANIMATABLE_PROPERTIES,

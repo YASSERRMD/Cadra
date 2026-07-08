@@ -36,8 +36,14 @@ function hashStringSeed(seed: string): number {
 
 /**
  * Normalizes a `string | number` seed to a 32-bit unsigned integer.
+ *
+ * Exported so other deterministic subsystems (e.g. `@cadra/particles`'s GPU
+ * hash, Phase 67) can turn a composition's `string | number` seed into a
+ * single number once, on the CPU, and pass that number on as the base for
+ * their own derived hashing (a TSL/GLSL compute shader has no use for a
+ * `string`, only for the numeric seed it normalizes to).
  */
-function toNumericSeed(seed: string | number): number {
+export function toNumericSeed(seed: string | number): number {
   return typeof seed === "string" ? hashStringSeed(seed) : seed >>> 0;
 }
 

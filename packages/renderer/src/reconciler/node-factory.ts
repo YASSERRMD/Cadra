@@ -124,6 +124,23 @@ export interface NodeFactoryContext {
    * differently than it did before Phase 66.
    */
   physicsTransforms?: ReadonlyMap<string, PhysicsTransform>;
+  /**
+   * This frame's own resolved particle systems (`@cadra/particles`'s own
+   * `ParticleRuntime.resolve`), by node id: the fully-constructed,
+   * already-simulated-to-this-frame `THREE.Object3D` each `"particles"` node
+   * renders as (a GPU-compute-driven `THREE.Sprite` or a CPU-simulated
+   * `THREE.Points`; see that package's own doc for the WebGPU/WebGL2 split).
+   * Mutated in place by `reconciler.ts`'s own `reconcile` at the start of
+   * every call, mirroring `physicsTransforms`'s own "fresh per call, not
+   * fixed at `createReconciler` time" treatment. `undefined`/omitted, or no
+   * entry for a given node id, falls back to an empty group (the same
+   * "resource not ready yet" placeholder every other node kind's own
+   * registry-miss case already uses) - this should not happen in practice,
+   * since `ParticleRuntime.resolve` is called against the same tree just
+   * before `reconcile`, but mirrors this file's existing defensive style
+   * elsewhere rather than assuming it.
+   */
+  particleObjects?: ReadonlyMap<string, THREE.Object3D>;
 }
 
 /**
@@ -273,6 +290,15 @@ function buildThreeObject(node: SceneNode, ctx: NodeFactoryContext): BuiltObject
       const geometry = new THREE.PlaneGeometry(node.width, node.height);
       return { object3D: group, owned: { satori: { group, geometry } } };
     }
+
+    case "particles":
+      // The real object (a GPU-compute-driven THREE.Sprite or a
+      // CPU-simulated THREE.Points) is built and owned entirely by
+      // @cadra/particles's own ParticleRuntime, not by this reconciler:
+      // ownership/disposal already lives there, mirroring how
+      // collectPhysicsMeshNodes walks the same tree independently of this
+      // reconciler's own walk for Phase 66's physics.
+      return { object3D: ctx.particleObjects?.get(node.id) ?? new THREE.Group(), owned: undefined };
   }
 }
 
@@ -459,6 +485,14 @@ export function applyNodeProperties(
       applySatoriLayerProperties(node, ctx, frame, owned?.satori);
       return;
     }
+
+    case "particles":
+      // Nothing to do here: ctx.particleObjects already reflects this exact
+      // frame's simulated state (position/color/size buffers), advanced by
+      // ThreeRenderer before reconcile runs at all; only the shared
+      // transform/visible prefix above (this node's own authored pose)
+      // applies to a particles node.
+      return;
   }
 }
 

@@ -73,12 +73,18 @@ export interface Reconciler {
    * `NodeFactoryContext.physicsTransforms`'s own doc), supplied fresh each
    * call for the same reason `whiteBalanceGain` is. Defaults to no override
    * at all when omitted, matching every mesh's pre-Phase-66 behavior.
+   *
+   * `particleObjects` is this call's own resolved particle systems (see
+   * `NodeFactoryContext.particleObjects`'s own doc), supplied fresh each
+   * call for the same reason. Defaults to every `"particles"` node
+   * rendering as an empty group when omitted.
    */
   reconcile(
     nextRoot: SceneNode | null,
     frame: number,
     whiteBalanceGain?: WhiteBalanceGain,
     physicsTransforms?: ReadonlyMap<string, PhysicsTransform>,
+    particleObjects?: ReadonlyMap<string, THREE.Object3D>,
   ): THREE.Object3D | null;
 }
 
@@ -122,9 +128,11 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
     frame: number,
     whiteBalanceGain?: WhiteBalanceGain,
     physicsTransforms?: ReadonlyMap<string, PhysicsTransform>,
+    particleObjects?: ReadonlyMap<string, THREE.Object3D>,
   ): THREE.Object3D | null {
     ctx.whiteBalanceGain = whiteBalanceGain ?? [1, 1, 1];
     ctx.physicsTransforms = physicsTransforms;
+    ctx.particleObjects = particleObjects;
 
     if (nextRoot === null) {
       teardownAll();

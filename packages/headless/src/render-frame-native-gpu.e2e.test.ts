@@ -1,7 +1,9 @@
 import {
+  Camera,
   createComposition,
   createFrameContext,
   createProject,
+  Particles,
   resolveSceneAtFrame,
   Sequence,
   Shape,
@@ -150,4 +152,160 @@ describe("createNativeGpuHeadlessRenderer: real end-to-end native GPU render (no
       }),
     ).rejects.toBeInstanceOf(NativeGpuAdapterUnavailableError);
   });
+
+  /**
+   * Phase 67's own explicit acceptance criterion: "a large emitter produces
+   * identical particle state for a given frame across runs". Unlike
+   * `@cadra/encode`'s own Playwright-based e2e tests, this genuinely
+   * exercises the real WebGPU compute path: `renderCompositionHeadlessServer`'s
+   * default browser launcher never resolves `navigator.gpu` in this
+   * repository's pinned headless Chromium build (see `browser-launcher.ts`'s
+   * own `DEFAULT_GPU_LAUNCH_ARGS` doc), so a particle system rendered that
+   * way would silently take the CPU-simulated WebGL2 fallback instead of the
+   * TSL storage-buffer compute kernel this test actually needs to prove
+   * deterministic. `createNativeGpuHeadlessRenderer` forces a real native
+   * `GPUDevice` (Dawn, via the `webgpu` npm package) with no browser
+   * involved, exactly like this file's own first test, so `renderer.backend`
+   * asserting `"webgpu"` below is a real, not incidental, guarantee.
+   *
+   * Reading back raw pixels (no MP4 encode/mux step in between, unlike
+   * `render-composition-headless-server.e2e.test.ts`'s own determinism
+   * tests) means two independent renders of the same seed/frame can be
+   * asserted byte-identical outright, with no tolerance needed for an
+   * unrelated container-timestamp field.
+   */
+  it(
+    "a large particle emitter produces identical particle state for a given frame across two independent real native-GPU renders (Phase 67)",
+    async () => {
+      let device;
+      try {
+        device = await createNativeGpuDevice();
+      } catch (error) {
+        console.log(
+          "createNativeGpuHeadlessRenderer particles e2e test: skipping, a real native WebGPU device " +
+            `could not be acquired on this machine (${String(error)}).`,
+        );
+        return;
+      }
+      device.destroy();
+
+      const width = 64;
+      const height = 64;
+      const fps = 30;
+      const targetFrame = 20;
+
+      function buildParticlesProject() {
+        const particles = Particles({
+          id: "particles-1",
+          maxParticles: 500,
+          emissionRate: 500,
+          shape: { type: "sphere", radius: 0.3 },
+          lifetimeSeconds: 5,
+          initialSpeed: 0.5,
+          direction: [0, 1, 0],
+          spreadAngle: Math.PI,
+          startSize: 0.4,
+          blendMode: "additive",
+          colorOverLife: [
+            { time: 0, color: [1, 1, 1, 1] },
+            { time: 1, color: [1, 1, 1, 1] },
+          ],
+        });
+        const camera = Camera({
+          id: "camera-1",
+          transform: { position: [0, 0, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        });
+        const composition = createComposition({
+          id: "comp-1",
+          name: "Main",
+          fps,
+          durationInFrames: targetFrame + 1,
+          width,
+          height,
+          tracks: [
+            {
+              id: "track-particles",
+              clips: [
+                Sequence({
+                  id: "clip-particles",
+                  from: 0,
+                  durationInFrames: targetFrame + 1,
+                  content: particles,
+                }),
+              ],
+            },
+            {
+              id: "track-camera",
+              clips: [
+                Sequence({ id: "clip-camera", from: 0, durationInFrames: targetFrame + 1, content: camera }),
+              ],
+            },
+          ],
+        });
+        const withActiveCameraTrack = {
+          ...composition,
+          activeCameraTrack: [
+            { startFrame: 0, durationInFrames: targetFrame + 1, cameraNodeId: "camera-1" },
+          ],
+        };
+        return createProject({ id: "p1", name: "Project", compositions: [withActiveCameraTrack] });
+      }
+
+      async function renderThroughTargetFrame(): Promise<{
+        width: number;
+        height: number;
+        data: Uint8ClampedArray;
+      }> {
+        const project = buildParticlesProject();
+        const renderer = createNativeGpuHeadlessRenderer();
+        try {
+          await renderer.init({} as never, { width, height });
+          expect(renderer.backend).toBe("webgpu");
+
+          let pixels: { width: number; height: number; data: Uint8ClampedArray } | undefined;
+          for (let frame = 0; frame <= targetFrame; frame += 1) {
+            const sceneState = resolveSceneAtFrame(project, "comp-1", frame);
+            const frameContext = createFrameContext({
+              frame,
+              fps,
+              durationInFrames: targetFrame + 1,
+              seed: "e2e-particles-seed",
+            });
+            renderer.renderFrame(sceneState, frameContext);
+            pixels = await renderer.readPixels();
+          }
+          if (pixels === undefined) {
+            throw new Error("expected at least one rendered frame");
+          }
+          return pixels;
+        } finally {
+          renderer.dispose();
+        }
+      }
+
+      const first = await renderThroughTargetFrame();
+      const second = await renderThroughTargetFrame();
+
+      expect(second.width).toBe(first.width);
+      expect(second.height).toBe(first.height);
+      expect(second.data.length).toBe(first.data.length);
+      expect(Array.from(second.data)).toEqual(Array.from(first.data));
+
+      // Non-blank sanity check: proves the emitter actually rendered
+      // something (additive-blended opaque-white sprites over a black
+      // background), not a degenerate all-black frame that would trivially
+      // satisfy the equality assertion above.
+      let nonBlankPixelCount = 0;
+      for (let i = 0; i < first.data.length; i += 4) {
+        const r = first.data[i] ?? 0;
+        const g = first.data[i + 1] ?? 0;
+        const b = first.data[i + 2] ?? 0;
+        if (r > 0 || g > 0 || b > 0) {
+          nonBlankPixelCount += 1;
+        }
+      }
+      expect(nonBlankPixelCount).toBeGreaterThan(0);
+    },
+    60_000,
+  );
 });

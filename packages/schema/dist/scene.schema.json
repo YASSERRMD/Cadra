@@ -9673,6 +9673,867 @@
             "children"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Unique identifier for this scene node within the project."
+            },
+            "kind": {
+              "type": "string",
+              "const": "particles",
+              "description": "Discriminant identifying this node as a particle system."
+            },
+            "name": {
+              "description": "Optional human-readable label, purely for authoring and debugging.",
+              "type": "string"
+            },
+            "transform": {
+              "type": "object",
+              "properties": {
+                "position": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "World-space translation of the node. A plain Vector3 or a keyframe track."
+                },
+                "rotation": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "Euler rotation in radians, applied in intrinsic XYZ order. A plain Vector3 or a keyframe track."
+                },
+                "scale": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "A 3-component numeric tuple, typically a world-space position or axis."
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "keyframeTrack",
+                          "description": "Discriminant identifying this value as a keyframe track."
+                        },
+                        "keyframes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "frame": {
+                                "type": "number",
+                                "description": "The integer frame this keyframe's value applies at."
+                              },
+                              "value": {
+                                "type": "array",
+                                "prefixItems": [
+                                  {
+                                    "type": "number",
+                                    "description": "The x component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The y component of the vector."
+                                  },
+                                  {
+                                    "type": "number",
+                                    "description": "The z component of the vector."
+                                  }
+                                ],
+                                "description": "The value at `frame`."
+                              },
+                              "easing": {
+                                "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                                "type": "string",
+                                "enum": [
+                                  "linear",
+                                  "easeInCubic",
+                                  "easeOutCubic",
+                                  "easeInOutCubic",
+                                  "easeInExpo",
+                                  "easeOutExpo",
+                                  "easeInOutExpo",
+                                  "easeInBack",
+                                  "easeOutBack",
+                                  "easeInOutBack",
+                                  "easeInElastic",
+                                  "easeOutElastic",
+                                  "easeInOutElastic",
+                                  "hold"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "frame",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "The ordered keyframes describing how this property varies over time."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "keyframes"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ],
+                  "description": "Per-axis scale factor of the node. A plain Vector3 or a keyframe track."
+                }
+              },
+              "required": [
+                "position",
+                "rotation",
+                "scale"
+              ],
+              "additionalProperties": false,
+              "description": "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track."
+            },
+            "visible": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "keyframeTrack",
+                      "description": "Discriminant identifying this value as a keyframe track."
+                    },
+                    "keyframes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "frame": {
+                            "type": "number",
+                            "description": "The integer frame this keyframe's value applies at."
+                          },
+                          "value": {
+                            "type": "boolean",
+                            "description": "The value at `frame`."
+                          },
+                          "easing": {
+                            "description": "How this keyframe blends into the next one. Defaults to 'linear'.",
+                            "type": "string",
+                            "enum": [
+                              "linear",
+                              "easeInCubic",
+                              "easeOutCubic",
+                              "easeInOutCubic",
+                              "easeInExpo",
+                              "easeOutExpo",
+                              "easeInOutExpo",
+                              "easeInBack",
+                              "easeOutBack",
+                              "easeInOutBack",
+                              "easeInElastic",
+                              "easeOutElastic",
+                              "easeInOutElastic",
+                              "hold"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "frame",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The ordered keyframes describing how this property varies over time."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "keyframes"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track."
+            },
+            "maxParticles": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "description": "Fixed size of this emitter's particle pool. Never exceeded regardless of emissionRate."
+            },
+            "emissionRate": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Average number of particles spawned per second, while this node is visible."
+            },
+            "shape": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "point"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "box"
+                    },
+                    "halfExtents": {
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number",
+                          "description": "The x component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The y component of the vector."
+                        },
+                        {
+                          "type": "number",
+                          "description": "The z component of the vector."
+                        }
+                      ],
+                      "description": "Half-width, half-height, half-depth of the box, in the node's own local units."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "halfExtents"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "sphere"
+                    },
+                    "radius": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "radius"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "cone"
+                    },
+                    "radius": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "angle": {
+                      "type": "number",
+                      "minimum": 0,
+                      "description": "Half-angle of the cone, in radians."
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "radius",
+                    "angle"
+                  ],
+                  "additionalProperties": false
+                }
+              ],
+              "description": "Where within this node's own local space newly spawned particles appear."
+            },
+            "lifetimeSeconds": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "How long a particle lives after spawning, in seconds, before it is recycled."
+            },
+            "lifetimeVarianceSeconds": {
+              "description": "Randomizes lifetimeSeconds by up to this many seconds, applied symmetrically. Defaults to 0.",
+              "type": "number",
+              "minimum": 0
+            },
+            "initialSpeed": {
+              "type": "number",
+              "description": "Speed newly spawned particles move at, in scene units per second, along direction."
+            },
+            "initialSpeedVariance": {
+              "description": "Randomizes initialSpeed by up to this fraction of its own value. Defaults to 0.",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "direction": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "number",
+                  "description": "The x component of the vector."
+                },
+                {
+                  "type": "number",
+                  "description": "The y component of the vector."
+                },
+                {
+                  "type": "number",
+                  "description": "The z component of the vector."
+                }
+              ],
+              "description": "The nominal direction newly spawned particles move in, in this node's own local space."
+            },
+            "spreadAngle": {
+              "description": "Half-angle, in radians, of the cone around direction initial velocity is randomized within. Defaults to 0.",
+              "type": "number",
+              "minimum": 0
+            },
+            "startSize": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Sprite size a particle spawns at, in scene units, before sizeOverLife is applied."
+            },
+            "sizeVariance": {
+              "description": "Randomizes startSize by up to this fraction of its own value. Defaults to 0.",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "forces": {
+              "description": "Forces applied to every live particle each simulated step. Defaults to none.",
+              "readOnly": true,
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "gravity"
+                      },
+                      "acceleration": {
+                        "type": "array",
+                        "prefixItems": [
+                          {
+                            "type": "number",
+                            "description": "The x component of the vector."
+                          },
+                          {
+                            "type": "number",
+                            "description": "The y component of the vector."
+                          },
+                          {
+                            "type": "number",
+                            "description": "The z component of the vector."
+                          }
+                        ],
+                        "description": "A 3-component numeric tuple, typically a world-space position or axis."
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "acceleration"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "drag"
+                      },
+                      "coefficient": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "coefficient"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "curlNoise"
+                      },
+                      "strength": {
+                        "type": "number"
+                      },
+                      "frequency": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      },
+                      "speed": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "strength",
+                      "frequency"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "vortex"
+                      },
+                      "origin": {
+                        "type": "array",
+                        "prefixItems": [
+                          {
+                            "type": "number",
+                            "description": "The x component of the vector."
+                          },
+                          {
+                            "type": "number",
+                            "description": "The y component of the vector."
+                          },
+                          {
+                            "type": "number",
+                            "description": "The z component of the vector."
+                          }
+                        ],
+                        "description": "A 3-component numeric tuple, typically a world-space position or axis."
+                      },
+                      "axis": {
+                        "type": "array",
+                        "prefixItems": [
+                          {
+                            "type": "number",
+                            "description": "The x component of the vector."
+                          },
+                          {
+                            "type": "number",
+                            "description": "The y component of the vector."
+                          },
+                          {
+                            "type": "number",
+                            "description": "The z component of the vector."
+                          }
+                        ],
+                        "description": "A 3-component numeric tuple, typically a world-space position or axis."
+                      },
+                      "strength": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "origin",
+                      "axis",
+                      "strength"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "colliders": {
+              "description": "Simple analytic colliders live particles test against each simulated step. Defaults to none.",
+              "readOnly": true,
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "groundPlane"
+                      },
+                      "y": {
+                        "type": "number"
+                      },
+                      "bounce": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "y"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "sphere"
+                      },
+                      "center": {
+                        "type": "array",
+                        "prefixItems": [
+                          {
+                            "type": "number",
+                            "description": "The x component of the vector."
+                          },
+                          {
+                            "type": "number",
+                            "description": "The y component of the vector."
+                          },
+                          {
+                            "type": "number",
+                            "description": "The z component of the vector."
+                          }
+                        ],
+                        "description": "A 3-component numeric tuple, typically a world-space position or axis."
+                      },
+                      "radius": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      },
+                      "bounce": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "center",
+                      "radius"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "colorOverLife": {
+              "description": "Color across a particle's own lifetime, interpolated linearly between stops sorted by time.",
+              "readOnly": true,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "time": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "Position within the particle's own lifetime, 0 (birth) to 1 (death)."
+                  },
+                  "color": {
+                    "type": "array",
+                    "prefixItems": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "The red channel, in the inclusive range 0 to 1."
+                      },
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "The green channel, in the inclusive range 0 to 1."
+                      },
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "The blue channel, in the inclusive range 0 to 1."
+                      },
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "The alpha channel, in the inclusive range 0 to 1."
+                      }
+                    ],
+                    "description": "A straight (non-premultiplied) RGBA color. Each channel is a number in the inclusive range 0 to 1, not 0 to 255."
+                  }
+                },
+                "required": [
+                  "time",
+                  "color"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "sizeOverLife": {
+              "description": "Size multiplier across a particle's own lifetime, interpolated linearly between stops sorted by time.",
+              "readOnly": true,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "time": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "Position within the particle's own lifetime, 0 (birth) to 1 (death)."
+                  },
+                  "size": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Size multiplier at this point in the particle's lifetime."
+                  }
+                },
+                "required": [
+                  "time",
+                  "size"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "textureRef": {
+              "description": "Id of a texture asset resolved against a texture registry by the renderer. Omitted means a plain soft circular sprite.",
+              "type": "string"
+            },
+            "blendMode": {
+              "type": "string",
+              "enum": [
+                "normal",
+                "additive"
+              ],
+              "description": "How a particle's own pixels combine with whatever is composited beneath it. Defaults to 'normal'."
+            },
+            "seed": {
+              "description": "Combined with the composition's own frame seed and this node's own id to derive this emitter's deterministic stochastic stream.",
+              "type": "number"
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "description": "Child scene nodes nested under this node."
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "transform",
+            "visible",
+            "maxParticles",
+            "emissionRate",
+            "shape",
+            "lifetimeSeconds",
+            "initialSpeed",
+            "direction",
+            "startSize",
+            "children"
+          ],
+          "additionalProperties": false
         }
       ]
     },

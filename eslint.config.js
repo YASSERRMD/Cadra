@@ -116,6 +116,7 @@ export default tseslint.config(
       "packages/svg-raster/src/**/*.ts",
       "packages/pathtracer/src/**/*.ts",
       "packages/physics/src/**/*.ts",
+      "packages/particles/src/**/*.ts",
     ],
     ignores: ["**/*.test.ts"],
     rules: {

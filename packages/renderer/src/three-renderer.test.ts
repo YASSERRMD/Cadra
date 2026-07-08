@@ -45,6 +45,14 @@ function createFakePhysicsBake() {
   };
 }
 
+/** A minimal fake standing in for a real `ParticleRuntime`: records calls, touches no real GPU/TSL. */
+function createFakeParticleRuntime() {
+  return {
+    resolve: vi.fn(() => new Map()),
+    dispose: vi.fn(),
+  };
+}
+
 /** Builds a `ThreeRendererDependencies` set from fakes, defaulting WebGPU to "available". */
 function createFakeDeps(overrides: Partial<ThreeRendererDependencies> = {}): {
   deps: ThreeRendererDependencies;
@@ -60,6 +68,9 @@ function createFakeDeps(overrides: Partial<ThreeRendererDependencies> = {}): {
     createWebGl2Renderer: vi.fn(() => webGl2Renderer) as ThreeRendererFactory,
     initPhysics: vi.fn().mockResolvedValue(undefined),
     createPhysicsBake: vi.fn(() => createFakePhysicsBake()) as unknown as ThreeRendererDependencies["createPhysicsBake"],
+    createParticleRuntime: vi.fn(
+      () => createFakeParticleRuntime(),
+    ) as unknown as ThreeRendererDependencies["createParticleRuntime"],
     ...overrides,
   };
 
