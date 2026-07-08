@@ -23,8 +23,20 @@ describe("LOOK_PRESETS", () => {
     }
   });
 
-  it("ships the cinematic and product presets", () => {
-    expect(Object.keys(LOOK_PRESETS).sort()).toEqual(["cinematic", "product"]);
+  it("ships the full curated library: cinematic, product, documentary, boldSocial, elegantTitle", () => {
+    expect(Object.keys(LOOK_PRESETS).sort()).toEqual([
+      "boldSocial",
+      "cinematic",
+      "documentary",
+      "elegantTitle",
+      "product",
+    ]);
+  });
+
+  it("gives every preset at least one postProcessing effect", () => {
+    for (const [name, preset] of Object.entries(LOOK_PRESETS)) {
+      expect(preset.postProcessing?.effects.length ?? 0, name).toBeGreaterThan(0);
+    }
   });
 });
 
