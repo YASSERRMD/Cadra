@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import { encodePixelBufferToPng } from "./png-codec.js";
 import { renderRasterGoldenScene } from "./render-raster-scene.js";
-import { lightingScene, materialsScene, postProcessingScene, textFontkitScene, textOpentypeScene } from "./scenes/index.js";
+import {
+  lightingScene,
+  materialsScene,
+  motionBlurScene,
+  postProcessingScene,
+  textFontkitScene,
+  textOpentypeScene,
+} from "./scenes/index.js";
 
 /** How many of a `PixelBuffer`'s pixels have any non-zero color/alpha channel at all. */
 function countNonBlankPixels(data: Uint8ClampedArray): number {
@@ -24,19 +31,20 @@ function countNonBlankPixels(data: Uint8ClampedArray): number {
  * "renders a real scene" coverage, just driven through this harness's own
  * curated scene registry instead of a one-off inline scene.
  *
- * `motionBlurScene`/`pathTracedScene` are deliberately not covered here:
- * both are `driver: "browser"` (see `GoldenSceneDriver`'s own doc for why),
- * so their real-render coverage lives in `render-browser-scene.e2e.test.ts`
- * instead - passing either through this driver would either silently
- * render `motionBlur` with zero effect (a real, verified gap) or throw
- * outright (`renderMode: "pathTraced"` has no native-GPU-headless path at
- * all).
+ * `pathTracedScene` is deliberately not covered here: it is `driver:
+ * "browser"` (see `GoldenSceneDriver`'s own doc for why - path tracing has
+ * no native-GPU-headless path at all), so its real-render coverage lives in
+ * `render-browser-scene.e2e.test.ts` instead. `motionBlurScene` *is*
+ * covered here like any other `nativeGpuHeadless` scene (it renders
+ * successfully and deterministically; see that scene's own doc for the
+ * separately-tracked, currently-invisible `motionBlur` effect itself).
  */
 describe("renderRasterGoldenScene: real native GPU renders (no browser)", () => {
   it.each([
     ["materials", materialsScene],
     ["lighting", lightingScene],
     ["post-processing", postProcessingScene],
+    ["motion-blur", motionBlurScene],
   ] as const)("renders %s to a non-blank PixelBuffer at the scene's own size", async (_label, scene) => {
     const pixels = await renderRasterGoldenScene(scene);
 

@@ -7,29 +7,38 @@ const FPS = 10;
 const DURATION_IN_FRAMES = 5;
 const WIDTH = 256;
 const HEIGHT = 256;
-/** The frame this scene renders: mid-sweep, comfortably after the box's own first on-screen frame (see `buildProject`'s own doc for why that matters). */
+/** The frame this scene renders: mid-sweep, comfortably after the box's own first on-screen frame. */
 const TARGET_FRAME = 1;
 
 /**
- * A box sweeping across five frames, staying on-screen for the whole sweep
- * (unlike an earlier draft of this scene, which swept from far off-screen
- * left to far off-screen right): Three.js's own per-object motion-vector
- * tracking (`VelocityNode`, what `motionBlur` reads) seeds a *newly
- * first-drawn* object's own "previous transform" to its current one, i.e.
- * zero velocity, so an object whose first real on-screen draw lands on the
- * very frame this scene targets would render with no blur at all no matter
- * how fast it is actually moving - verified directly while building this
- * scene. Keeping the box on-screen (and this harness's own render driver
- * walking every frame from `0` up to the target in order; see
- * `render-raster-scene.ts`/`render-browser-scene.ts`) ensures the box has
- * already been drawn, moving, at least once before the frame this scene
- * actually captures.
+ * A box sweeping across five frames, staying on-screen for the whole sweep,
+ * with `motionBlur` configured at a high shutter angle.
  *
- * `motionBlur` at a high shutter angle so any wiring regression in
- * `buildWebGpuPipeline`'s own velocity-MRT setup is maximally visible as a
- * missing or wrong-direction streak, mirroring `buildProjectWithMotionBlur`
- * (`@cadra/encode`'s own e2e suite, which exercises this exact effect
- * through a real browser).
+ * **Known gap, not yet fixed (tracked separately, out of this phase's own
+ * scope):** verified directly while building this harness, with a real
+ * pixel-level A/B comparison (this same scene rendered with `motionBlur`
+ * left in vs. stripped out) via *both* `createNativeGpuHeadlessRenderer`
+ * and a real headless-Chromium page, that `motionBlur` currently produces
+ * *zero* pixel difference either way. The wiring this scene exercises
+ * (`isPreTonemapEffect`/`buildWebGpuPipeline`'s velocity-MRT setup in
+ * `@cadra/renderer`, `computeMotionBlurVelocityScale`) all checks out
+ * structurally; no existing test anywhere in this codebase (including
+ * `buildProjectWithMotionBlur` in `@cadra/encode`'s own e2e suite) actually
+ * asserts a visible blur streak - every one only asserts the render
+ * completes and produces validly-shaped output, which is exactly why this
+ * gap went unnoticed until this harness's own rigorous same-scene
+ * with/without comparison. Root-causing this needs deeper runtime
+ * instrumentation of Three.js's own WebGPU node-update scheduling
+ * (`VelocityNode`'s `update`/`updateAfter` hooks), out of scope for this
+ * harness itself to fix.
+ *
+ * This scene is kept in the curated set anyway (as `driver:
+ * "nativeGpuHeadless"`, the simpler/faster of the two drivers, since
+ * neither shows the effect): it still renders a real, deterministic frame
+ * worth protecting from *further* regression (a crash, a blank frame, or
+ * `postProcessing` silently getting dropped entirely), and its own
+ * reference will need to be regenerated the moment this known gap is
+ * actually fixed.
  */
 function buildProject() {
   const camera = Camera({
@@ -86,11 +95,7 @@ function buildProject() {
 
 export const motionBlurScene: GoldenScene = {
   name: "motion-blur",
-  // "browser", not "nativeGpuHeadless": see GoldenSceneDriver's own doc for
-  // the real, verified gap this works around (motionBlur produces zero
-  // pixel difference through createNativeGpuHeadlessRenderer, unlike a
-  // real browser's own WebGPU implementation).
-  driver: "browser",
+  driver: "nativeGpuHeadless",
   buildProject,
   compositionId: "comp-motion-blur",
   frame: TARGET_FRAME,

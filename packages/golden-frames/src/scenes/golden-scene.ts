@@ -26,15 +26,14 @@ export interface GoldenSceneTextRequirement {
  *   Playwright bridge (`render-browser-scene.ts`). Required for
  *   `renderMode: "pathTraced"` scenes (path tracing needs a real
  *   `THREE.WebGLRenderer`, which the native-GPU-headless path cannot
- *   construct at all - see `PathTracedFrameRenderer`'s own doc). Also
- *   required for `motionBlur` specifically: verified directly while
- *   building this harness that `createNativeGpuHeadlessRenderer` renders a
- *   `motionBlur`-configured scene with *zero* pixel difference from the
- *   exact same scene with `motionBlur` removed (a real, narrow gap in that
- *   experimental renderer's WebGPU velocity-MRT support, not a Cadra
- *   scene-graph or `buildWebGpuPipeline` bug - the identical scene/effect
- *   combination already passes through a real browser in `@cadra/encode`'s
- *   own `render-composition-headless-server.e2e.test.ts`).
+ *   construct at all - see `PathTracedFrameRenderer`'s own doc).
+ *
+ * `motionBlur`-configured scenes use `"nativeGpuHeadless"` (the simpler,
+ * faster driver): verified directly while building this harness, via a
+ * real pixel-level A/B comparison, that `motionBlur` currently produces
+ * *zero* visible difference through *either* driver (a real, pre-existing
+ * gap in `motionBlur` itself, not something switching drivers works around
+ * - see `motion-blur-scene.ts`'s own doc for the full finding).
  */
 export type GoldenSceneDriver = "nativeGpuHeadless" | "browser";
 

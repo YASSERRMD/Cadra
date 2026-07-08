@@ -28,6 +28,8 @@ export {
   PixelBufferSizeMismatchError,
 } from "./perceptual-diff.js";
 export { decodePngToPixelBuffer, encodePixelBufferToPng } from "./png-codec.js";
+export { renderBrowserGoldenScene } from "./render-browser-scene.js";
+export { GoldenSceneCompositionNotFoundError, renderRasterGoldenScene } from "./render-raster-scene.js";
 export type { GoldenScene, GoldenSceneDriver, GoldenSceneTextRequirement } from "./scenes/index.js";
 export {
   GOLDEN_SCENES,

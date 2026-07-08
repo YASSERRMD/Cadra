@@ -81,13 +81,11 @@ async function buildTextRenderRegistry(scene: GoldenScene): Promise<TextRenderRe
  * one `renderFrame` call: this matches `renderComposition`'s own
  * documented contract (it "walks every integer frame ... in order"), which
  * every other real render path in this codebase (the headless server, the
- * native-GPU e2e suite) already follows. This is not pure ceremony for
- * every effect that reads a node's *previous* rendered state (not just
- * `motionBlur`, which - through this specific driver - was verified while
- * building this harness to need the browser driver regardless; see
- * `GoldenSceneDriver`'s own doc), so this loop stays in place as this
- * driver's own general contract, matching how every other real render path
- * in this codebase already walks frames in order.
+ * native-GPU e2e suite) already follows. Kept as this driver's own general
+ * contract for any future effect that reads a node's *previous* rendered
+ * state, even though the one such effect this harness currently exercises
+ * (`motionBlur`) was verified to need more than this alone - see
+ * `motion-blur-scene.ts`'s own doc for that separately-tracked finding.
  */
 export async function renderRasterGoldenScene(scene: GoldenScene): Promise<PixelBuffer> {
   const textRenderRegistry = await buildTextRenderRegistry(scene);
