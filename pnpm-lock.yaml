@@ -270,6 +270,22 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@26.1.0)(jsdom@25.0.1)(lightningcss@1.32.0)
 
+  packages/physics:
+    dependencies:
+      '@cadra/core':
+        specifier: workspace:*
+        version: link:../core
+      '@dimforge/rapier3d-compat':
+        specifier: ^0.19.3
+        version: 0.19.3
+    devDependencies:
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@26.1.0)(jsdom@25.0.1)(lightningcss@1.32.0)
+
   packages/player:
     dependencies:
       '@cadra/core':
@@ -310,6 +326,9 @@ importers:
       '@cadra/pathtracer':
         specifier: workspace:*
         version: link:../pathtracer
+      '@cadra/physics':
+        specifier: workspace:*
+        version: link:../physics
       '@cadra/satori-layer':
         specifier: workspace:*
         version: link:../satori-layer
@@ -541,6 +560,9 @@ packages:
 
   '@dimforge/rapier3d-compat@0.12.0':
     resolution: {integrity: sha512-uekIGetywIgopfD97oDL5PfeezkFpNhwlzlaEYNOA0N6ghdsOvh/HYjSMek5Q2O1PYvRSDFcqFVJl4r4ZBwOow==}
+
+  '@dimforge/rapier3d-compat@0.19.3':
+    resolution: {integrity: sha512-mMVdSj1PRTT108s9Swbu2GQOmHbn8kbJANRV5xfczL3s0T4vkgZAuoMRgvBzQcHanpKusbC0ZJj6z3mC3aj3vg==}
 
   '@discordapp/twemoji@16.0.1':
     resolution: {integrity: sha512-figLiBWzjS5cyrAjLaGjM8AAaowO3qvK8rg5bA2dElB4qsaPMvBVlFDMO2d3x+nC1igt7kgWH4dvNmvvUHUF8w==}
@@ -3399,6 +3421,8 @@ snapshots:
   '@csstools/css-tokenizer@3.0.4': {}
 
   '@dimforge/rapier3d-compat@0.12.0': {}
+
+  '@dimforge/rapier3d-compat@0.19.3': {}
 
   '@discordapp/twemoji@16.0.1':
     dependencies:

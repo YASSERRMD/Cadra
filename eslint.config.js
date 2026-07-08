@@ -115,6 +115,7 @@ export default tseslint.config(
       "packages/satori-layer/src/**/*.ts",
       "packages/svg-raster/src/**/*.ts",
       "packages/pathtracer/src/**/*.ts",
+      "packages/physics/src/**/*.ts",
     ],
     ignores: ["**/*.test.ts"],
     rules: {
