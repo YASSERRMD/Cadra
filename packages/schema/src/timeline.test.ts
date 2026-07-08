@@ -666,6 +666,36 @@ describe("compositionSchema", () => {
         .success,
     ).toBe(false);
   });
+
+  it("accepts a composition with renderMode 'pathTraced' and a pathTracing config", () => {
+    const result = compositionSchema.safeParse({
+      ...validComposition(),
+      renderMode: "pathTraced",
+      pathTracing: { tier: "final", samples: 256, bounces: 6 },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a composition with renderMode omitted (defaults to raster elsewhere)", () => {
+    expect(compositionSchema.safeParse(validComposition()).success).toBe(true);
+  });
+
+  it("rejects an unrecognized renderMode", () => {
+    const result = compositionSchema.safeParse({ ...validComposition(), renderMode: "rayTraced" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a non-integer or non-positive pathTracing.samples or pathTracing.bounces", () => {
+    expect(
+      compositionSchema.safeParse({ ...validComposition(), pathTracing: { samples: 10.5 } }).success,
+    ).toBe(false);
+    expect(compositionSchema.safeParse({ ...validComposition(), pathTracing: { samples: 0 } }).success).toBe(
+      false,
+    );
+    expect(compositionSchema.safeParse({ ...validComposition(), pathTracing: { bounces: -1 } }).success).toBe(
+      false,
+    );
+  });
 });
 
 describe("projectSchema", () => {

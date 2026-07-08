@@ -13,6 +13,7 @@ import type {
   CompositionColorGrading,
   CompositionEnvironment,
   CompositionPostProcessing,
+  CompositionRenderMode,
   CompositionShadowQuality,
   ContactShadowConfig,
   DepthOfFieldEffectConfig,
@@ -21,6 +22,7 @@ import type {
   LensDistortionEffectConfig,
   LutEffectConfig,
   MotionBlurEffectConfig,
+  PathTracingConfig,
   PostEffectConfig,
   Project,
   RenderQualityTier,
@@ -623,6 +625,34 @@ type _CheckCompositionPostProcessing = AssertTrue<
   AssertEqual<z.infer<typeof compositionPostProcessingSchema>, CompositionPostProcessing>
 >;
 
+/** Which renderer produces a composition's own final output, mirroring `CompositionRenderMode`. */
+export const compositionRenderModeSchema = z
+  .enum(["raster", "pathTraced"])
+  .describe("Which renderer produces this composition's own final output. Preview always uses raster regardless of this field. Defaults to 'raster'.");
+
+type _CheckCompositionRenderMode = AssertTrue<
+  AssertEqual<z.infer<typeof compositionRenderModeSchema>, CompositionRenderMode>
+>;
+
+/** Path-traced render tuning, mirroring `PathTracingConfig`. Read only when `renderMode` is `"pathTraced"`. */
+export const pathTracingConfigSchema = z.strictObject({
+  tier: renderQualityTierSchema.optional().describe("Trades render cost against fidelity for samples's own default. Defaults to 'final'."),
+  samples: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Samples accumulated per output frame. Higher is cleaner and slower. Tier-dependent default when omitted."),
+  bounces: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Maximum light bounce depth. Higher resolves more indirect light and reflections at a higher cost. Defaults to 5."),
+});
+
+type _CheckPathTracingConfig = AssertTrue<AssertEqual<z.infer<typeof pathTracingConfigSchema>, PathTracingConfig>>;
+
 /**
  * A single renderable timeline: a fixed frame rate, a fixed integer duration,
  * a fixed output size, and the tracks of clips that populate it.
@@ -659,6 +689,10 @@ export const compositionSchema = z.strictObject({
   postProcessing: compositionPostProcessingSchema
     .optional()
     .describe("Optional whole-composition post-processing effect stack."),
+  renderMode: compositionRenderModeSchema.optional().describe("Optional render mode override. Defaults to 'raster'."),
+  pathTracing: pathTracingConfigSchema
+    .optional()
+    .describe("Optional path-traced render tuning, read only when renderMode is 'pathTraced'."),
 });
 
 type _CheckComposition = AssertTrue<AssertEqual<z.infer<typeof compositionSchema>, Composition>>;
