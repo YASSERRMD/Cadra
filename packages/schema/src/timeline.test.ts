@@ -112,6 +112,54 @@ describe("postEffectConfigSchema", () => {
     const result = postEffectConfigSchema.safeParse({ type: "sharpen", amount: 0.5, radius: 3 });
     expect(result.success).toBe(false);
   });
+
+  it("accepts a bloom effect with all fields, and with none", () => {
+    expect(
+      postEffectConfigSchema.safeParse({ type: "bloom", threshold: 0.9, intensity: 1.2, radius: 0.5 }).success,
+    ).toBe(true);
+    expect(postEffectConfigSchema.safeParse({ type: "bloom" }).success).toBe(true);
+  });
+
+  it("accepts a depthOfField effect with all fields, and with none", () => {
+    expect(
+      postEffectConfigSchema.safeParse({
+        type: "depthOfField",
+        focusDistance: 12,
+        aperture: 0.04,
+        maxBlur: 2,
+      }).success,
+    ).toBe(true);
+    expect(postEffectConfigSchema.safeParse({ type: "depthOfField" }).success).toBe(true);
+  });
+
+  it("accepts a chromaticAberration effect with and without intensity", () => {
+    expect(postEffectConfigSchema.safeParse({ type: "chromaticAberration", intensity: 0.4 }).success).toBe(true);
+    expect(postEffectConfigSchema.safeParse({ type: "chromaticAberration" }).success).toBe(true);
+  });
+
+  it("accepts a vignette effect with darkness and offset, and with neither", () => {
+    expect(postEffectConfigSchema.safeParse({ type: "vignette", darkness: 0.6, offset: 1.2 }).success).toBe(
+      true,
+    );
+    expect(postEffectConfigSchema.safeParse({ type: "vignette" }).success).toBe(true);
+  });
+
+  it("accepts a filmGrain effect with and without intensity", () => {
+    expect(postEffectConfigSchema.safeParse({ type: "filmGrain", intensity: 0.3 }).success).toBe(true);
+    expect(postEffectConfigSchema.safeParse({ type: "filmGrain" }).success).toBe(true);
+  });
+
+  it("accepts a lensDistortion effect with a positive (barrel) and negative (pincushion) amount", () => {
+    expect(postEffectConfigSchema.safeParse({ type: "lensDistortion", amount: 0.1 }).success).toBe(true);
+    expect(postEffectConfigSchema.safeParse({ type: "lensDistortion", amount: -0.1 }).success).toBe(true);
+    expect(postEffectConfigSchema.safeParse({ type: "lensDistortion" }).success).toBe(true);
+  });
+
+  it("rejects each new effect type with an extra, unrecognized field", () => {
+    expect(postEffectConfigSchema.safeParse({ type: "bloom", glow: true }).success).toBe(false);
+    expect(postEffectConfigSchema.safeParse({ type: "depthOfField", blurriness: 1 }).success).toBe(false);
+    expect(postEffectConfigSchema.safeParse({ type: "vignette", radius: 1 }).success).toBe(false);
+  });
 });
 
 describe("clipSchema", () => {

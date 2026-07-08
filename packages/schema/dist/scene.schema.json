@@ -446,6 +446,128 @@
                             "type"
                           ],
                           "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "bloom"
+                            },
+                            "threshold": {
+                              "description": "Luminance level above which a pixel starts contributing to the glow, in linear scene-referred HDR. Defaults to 0.85.",
+                              "type": "number"
+                            },
+                            "intensity": {
+                              "description": "Multiplies the glow's own brightness once added back over the scene. Defaults to 1.",
+                              "type": "number"
+                            },
+                            "radius": {
+                              "description": "How far the glow spreads from a bright pixel, roughly in screen-relative units. Defaults to 0.4.",
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "depthOfField"
+                            },
+                            "focusDistance": {
+                              "description": "Distance from the camera, in scene units, that stays in sharp focus. Defaults to 10.",
+                              "type": "number"
+                            },
+                            "aperture": {
+                              "description": "How wide the lens opening is: larger values blur out-of-focus regions more strongly. Defaults to 0.025.",
+                              "type": "number"
+                            },
+                            "maxBlur": {
+                              "description": "Caps how far the blur can spread, independent of aperture. Defaults to 1.",
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "chromaticAberration"
+                            },
+                            "intensity": {
+                              "description": "Strength of the channel shift. 0 is a no-op. Defaults to 0.5.",
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "vignette"
+                            },
+                            "darkness": {
+                              "description": "How dark the corners get, 0 (no darkening) to 1 (fully black). Defaults to 1.",
+                              "type": "number"
+                            },
+                            "offset": {
+                              "description": "How far the darkening reaches in from the corners toward the center; larger values reach further. Defaults to 1.",
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "filmGrain"
+                            },
+                            "intensity": {
+                              "description": "Strength of the noise. 0 is a no-op. Defaults to 0.35.",
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "lensDistortion"
+                            },
+                            "amount": {
+                              "description": "Distortion strength: positive bulges outward (barrel), negative pinches inward (pincushion), 0 is a no-op. Defaults to 0.",
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ],
+                          "additionalProperties": false
                         }
                       ]
                     },
