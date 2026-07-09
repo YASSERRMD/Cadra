@@ -430,21 +430,52 @@ function withWebGpuPostProcessingSupport(
 }
 
 /**
+ * Applies every piece of "production" behavior a `WebGPURenderer` needs to
+ * satisfy `ThreeRendererLike` in full - tone mapping/color space/shadow
+ * defaults (`applyColorWorkflowDefaults`), image-based-lighting support
+ * (`withEnvironmentMapSupport`), and post-processing pipeline routing
+ * (`withWebGpuPostProcessingSupport`) - in one call, mutating `renderer` in
+ * place (`Object.assign`'s own established behavior throughout this file:
+ * every wrapper here extends the same instance rather than constructing a
+ * new one) rather than returning a `ThreeRendererLike`, since that type is
+ * deliberately never exported (see its own doc) and a `void`-returning,
+ * mutate-in-place function sidesteps ever needing to name it outside this
+ * module.
+ *
+ * Exported specifically so any other `ThreeRendererDependencies.createWebGpuRenderer`
+ * implementation - not just this module's own `createRealWebGpuRenderer`
+ * below - can reach the exact same production behavior a real browser gets,
+ * rather than reimplementing (and risking drifting from) any piece of it by
+ * hand. `@cadra/headless`'s own `createNativeGpuHeadlessRenderer` is exactly
+ * such a caller: its own hand-rolled `createWebGpuRenderer` previously
+ * skipped this entirely, silently no-op-ing `postProcessing` for every
+ * effect (not any one effect's own sampling logic - the whole pipeline
+ * never ran) on that experimental renderer.
+ */
+export function applyProductionWebGpuBehavior(
+  renderer: WebGPURenderer,
+  pmremGenerator: { fromEquirectangular(texture: THREE.Texture): { texture: THREE.Texture }; dispose(): void },
+): void {
+  applyColorWorkflowDefaults(renderer);
+  const withEnvironment = withEnvironmentMapSupport(renderer, pmremGenerator);
+  withWebGpuPostProcessingSupport(renderer, withEnvironment);
+}
+
+/**
  * The real WebGPU constructor path: `three/webgpu`'s `WebGPURenderer`,
  * canvas passed via `canvas`. No explicit `compute` wiring needed:
  * `WebGPURenderer.prototype.compute` already satisfies `ThreeRendererLike.compute`
  * exactly (see `WebGpuComputeNode`'s own doc), and `Object.assign(renderer,
- * {...})` (inside `withEnvironmentMapSupport`/`withWebGpuPostProcessingSupport`)
- * only ever adds/overrides `render`/`dispose`/`createEnvironmentMap` on the
- * same renderer instance, never touching `compute` at all.
+ * {...})` (inside `applyProductionWebGpuBehavior`'s own wrapping calls) only
+ * ever adds/overrides `render`/`dispose`/`createEnvironmentMap` on the same
+ * renderer instance, never touching `compute` at all.
  */
 function createRealWebGpuRenderer(target: RenderTarget, _size: RenderSize): ThreeRendererLike {
   ensureWebGpuAreaLightSupport();
   const parameters: WebGPURendererParameters = { canvas: target };
   const renderer = new WebGPURenderer(parameters);
-  applyColorWorkflowDefaults(renderer);
-  const withEnvironment = withEnvironmentMapSupport(renderer, new WebGPUPMREMGenerator(renderer));
-  return withWebGpuPostProcessingSupport(renderer, withEnvironment);
+  applyProductionWebGpuBehavior(renderer, new WebGPUPMREMGenerator(renderer));
+  return renderer as unknown as ThreeRendererLike;
 }
 
 /** The real WebGL2 fallback path: the classic `THREE.WebGLRenderer`, also driven off `canvas`. */

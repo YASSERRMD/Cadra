@@ -5,9 +5,14 @@ import type {
   RenderTarget,
   TextRenderRegistry,
   ThreeRendererDependencies,
+  ThreeRendererFactory,
 } from "@cadra/renderer";
-import { createDefaultModelRegistry, defaultThreeRendererDependencies, ThreeRenderer } from "@cadra/renderer";
-import type { Texture } from "three";
+import {
+  applyProductionWebGpuBehavior,
+  createDefaultModelRegistry,
+  defaultThreeRendererDependencies,
+  ThreeRenderer,
+} from "@cadra/renderer";
 import { PMREMGenerator, WebGPURenderer } from "three/webgpu";
 
 /**
@@ -474,20 +479,30 @@ export function createNativeGpuHeadlessRenderer(
       // renderer's own `init()` ignores whatever `target` a caller passes
       // in (see its own doc) and always draws into its own headless target.
       const renderer = new WebGPURenderer({ device, canvas: target, antialias: false });
-      // Minimal Phase 56 conformance: `ThreeRendererDependencies`'s
-      // `ThreeRendererLike` now requires `createEnvironmentMap` (PMREM
-      // prefiltering support), which no real Three.js renderer class
-      // provides natively. This experimental spike does not otherwise apply
-      // `@cadra/renderer`'s own `applyColorWorkflowDefaults`/area-light setup
-      // (both pre-existing, orthogonal gaps in this ADR-scoped research path,
-      // not introduced here), so this is scoped to exactly the one method
-      // needed to satisfy the type.
+      // applyProductionWebGpuBehavior applies exactly what createRealWebGpuRenderer
+      // (this same package's own real/browser path) applies: tone mapping/
+      // color space/shadow defaults, image-based-lighting (createEnvironmentMap)
+      // support, and post-processing pipeline routing - all three, mutating
+      // `renderer` in place. Before this call existed, this experimental
+      // renderer only ever added `createEnvironmentMap` by hand (the one
+      // property `ThreeRendererLike` requires that Three.js does not provide
+      // natively) and skipped the other two entirely, which silently no-op'd
+      // every `postProcessing` effect (not any one effect's own sampling
+      // logic - the whole pipeline never ran at all) and left tone mapping/
+      // shadows at Three.js's own un-configured defaults. Area-light support
+      // (`ensureWebGpuAreaLightSupport`) remains a separate, still-open gap -
+      // tracked, not fixed here, since it is unrelated to post-processing.
       const pmremGenerator = new PMREMGenerator(renderer);
-      return Object.assign(renderer, {
-        createEnvironmentMap(equirectangular: Texture): Texture {
-          return pmremGenerator.fromEquirectangular(equirectangular).texture;
-        },
-      });
+      applyProductionWebGpuBehavior(renderer, pmremGenerator);
+      // applyProductionWebGpuBehavior mutates `renderer` in place (adding
+      // createEnvironmentMap, wrapping render/dispose) but, being void-
+      // returning precisely so ThreeRendererLike (deliberately unexported
+      // from @cadra/renderer - see that type's own doc) never needs to be
+      // named here, gives TypeScript no static way to see that the local
+      // `renderer` binding now satisfies it. ReturnType<ThreeRendererFactory>
+      // names the same shape indirectly, through a type this package already
+      // imports, instead.
+      return renderer as unknown as ReturnType<ThreeRendererFactory>;
     },
     createWebGl2Renderer: () => {
       // Never actually reachable: detectWebGpuSupport always returns true
