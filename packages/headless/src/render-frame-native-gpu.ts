@@ -293,11 +293,29 @@ export function installNativeGpuGlobals(): void {
  * swapchain texture is consumed directly by the compositor and never needs
  * this, but a headless caller has no compositor, so reading the texture back
  * itself is the only way to ever see what was drawn.
+ *
+ * `getConfiguredFormat()` exposes whatever format `configure()` actually
+ * received (defaulting to `"bgra8unorm"` before the first `configure()`
+ * call, matching this polyfill's own initial `configuredFormat`, though in
+ * practice `WebGPUBackend` always calls `configure()` before the first
+ * `getCurrentTexture()`): `readNativeGpuTexturePixels` needs this to know
+ * whether the raw bytes it reads back are already RGBA or need their
+ * red/blue channels swapped. This is not a hypothetical: on every machine
+ * this was verified against, Three.js's own `WebGPUUtils.getPreferredCanvasFormat()`
+ * (which `WebGPUBackend` calls to build its own `configure()` descriptor;
+ * see `createDefaultNativeGpuRoot`'s own doc for why that reads the
+ * *global* `navigator.gpu`) resolves to `"bgra8unorm"`, not `"rgba8unorm"` -
+ * the same preferred-format convention most desktop compositors use for a
+ * real browser's own canvas swapchain.
  */
 function createHeadlessGpuCanvasTarget(
   device: GPUDevice,
   size: RenderSize,
-): { canvas: RenderTarget; getLastDrawnTexture: () => GPUTexture | undefined } {
+): {
+  canvas: RenderTarget;
+  getLastDrawnTexture: () => GPUTexture | undefined;
+  getConfiguredFormat: () => GPUTextureFormat;
+} {
   let currentTexture: GPUTexture | undefined;
   let configuredFormat: GPUTextureFormat = "bgra8unorm";
 
@@ -338,7 +356,25 @@ function createHeadlessGpuCanvasTarget(
     style: {},
   } as unknown as RenderTarget;
 
-  return { canvas, getLastDrawnTexture: () => currentTexture };
+  return { canvas, getLastDrawnTexture: () => currentTexture, getConfiguredFormat: () => configuredFormat };
+}
+
+/**
+ * Swaps the red and blue bytes of every pixel in `data` (a tightly-packed
+ * `width * height * 4`-byte RGBA-or-BGRA buffer) in place. `copyTextureToBuffer`
+ * hands back `texture`'s own raw bytes verbatim, in whatever channel order
+ * its *storage* format actually uses; `PixelBuffer.data`'s own documented
+ * contract is always RGBA, so a `"bgra8unorm"`-formatted texture (see
+ * `getConfiguredFormat`'s own doc for why that is, in practice, always the
+ * format actually used here) needs exactly this correction before its bytes
+ * are safe to hand back as a `PixelBuffer`.
+ */
+function swapRedAndBlueChannels(data: Uint8ClampedArray): void {
+  for (let i = 0; i < data.length; i += 4) {
+    const red = data[i]!;
+    data[i] = data[i + 2]!;
+    data[i + 2] = red;
+  }
 }
 
 /**
@@ -349,12 +385,33 @@ function createHeadlessGpuCanvasTarget(
  * rejects an unaligned `bytesPerRow`); the returned array has any such
  * padding stripped back out, so its length is always exactly
  * `width * height * 4`, matching `PixelBuffer`'s own documented contract.
+ *
+ * `format` must be `texture`'s own actual storage format (`getConfiguredFormat()`
+ * on the same `createHeadlessGpuCanvasTarget` that produced `texture`): a
+ * `"bgra8unorm"` texture (see that function's own doc for why this is, in
+ * practice, always what `texture` actually is here) has its red and blue
+ * bytes swapped relative to `PixelBuffer`'s documented RGBA contract, so
+ * this function corrects for that via `swapRedAndBlueChannels` before
+ * returning; a `"rgba8unorm"` texture needs no correction. Any other format
+ * throws rather than silently returning color-wrong pixels: this module has
+ * only ever verified these two 8-bit-per-channel formats against a real
+ * device, and a channel layout this function does not know how to correct
+ * for is a caller/environment gap worth surfacing immediately, not
+ * papering over.
  */
 async function readNativeGpuTexturePixels(
   device: GPUDevice,
   texture: GPUTexture,
   size: RenderSize,
+  format: GPUTextureFormat,
 ): Promise<Uint8ClampedArray> {
+  if (format !== "bgra8unorm" && format !== "rgba8unorm") {
+    throw new Error(
+      `readNativeGpuTexturePixels: unsupported canvas texture format "${format}" - only "bgra8unorm" and ` +
+        `"rgba8unorm" are known to correctly round-trip through this function's own channel-order correction.`,
+    );
+  }
+
   const bytesPerPixel = 4;
   const unalignedBytesPerRow = size.width * bytesPerPixel;
   const alignedBytesPerRow = Math.ceil(unalignedBytesPerRow / 256) * 256;
@@ -377,13 +434,28 @@ async function readNativeGpuTexturePixels(
   readBuffer.unmap();
   readBuffer.destroy();
 
-  if (alignedBytesPerRow === unalignedBytesPerRow) {
-    return new Uint8ClampedArray(padded.buffer, padded.byteOffset, padded.byteLength);
-  }
+  const pixels =
+    alignedBytesPerRow === unalignedBytesPerRow
+      ? new Uint8ClampedArray(padded.buffer, padded.byteOffset, padded.byteLength)
+      : stripRowPadding(padded, size, unalignedBytesPerRow, alignedBytesPerRow);
 
-  // Strip the per-row alignment padding: copy each row's real
-  // `unalignedBytesPerRow` bytes out, skipping the aligned padding at the
-  // end of every row.
+  if (format === "bgra8unorm") {
+    swapRedAndBlueChannels(pixels);
+  }
+  return pixels;
+}
+
+/**
+ * Strips `copyTextureToBuffer`'s required per-row 256-byte alignment
+ * padding: copies each row's real `unalignedBytesPerRow` bytes out,
+ * skipping the aligned padding at the end of every row.
+ */
+function stripRowPadding(
+  padded: Uint8Array,
+  size: RenderSize,
+  unalignedBytesPerRow: number,
+  alignedBytesPerRow: number,
+): Uint8ClampedArray {
   const unpadded = new Uint8ClampedArray(unalignedBytesPerRow * size.height);
   for (let row = 0; row < size.height; row += 1) {
     const paddedRowStart = row * alignedBytesPerRow;
@@ -565,7 +637,7 @@ export function createNativeGpuHeadlessRenderer(
       if (texture === undefined) {
         throw new NativeGpuRendererNotInitializedError();
       }
-      const data = await readNativeGpuTexturePixels(device, texture, currentSize);
+      const data = await readNativeGpuTexturePixels(device, texture, currentSize, headlessTarget.getConfiguredFormat());
       return { width: currentSize.width, height: currentSize.height, data };
     },
     get backend() {
