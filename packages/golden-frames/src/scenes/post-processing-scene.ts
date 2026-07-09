@@ -21,6 +21,36 @@ const HEIGHT = 256;
  * meaningfully act on, and its blur kernel is exactly the kind of
  * wide-spread effect most likely to amplify small cross-GPU floating-point
  * differences past this harness's tight tolerance for no visual benefit.
+ *
+ * `driver: "browser"`, not `"nativeGpuHeadless"`: verified directly while
+ * root-causing a separate, previously-undiscovered gap (`@cadra/renderer`'s
+ * `createNativeGpuHeadlessRenderer` never actually ran its own post-processing
+ * pipeline at all before that fix - see `applyProductionWebGpuBehavior`'s own
+ * doc) that once the pipeline genuinely runs, this scene's own `lut` effect
+ * still renders solid black through the experimental `webgpu` npm package's
+ * native Dawn binding specifically (bisected, post-fix: every other effect
+ * here, and ambient occlusion, renders correctly in isolation through that
+ * same native path; only `lut`'s own 3D-texture sampling does not) - a real
+ * headless-Chromium page renders every one of these effects, `lut` included,
+ * correctly. This is tracked as its own separate, narrower follow-up (a
+ * native-Dawn/TSL `Lut3DNode` texture-sampler compatibility gap), not fixed
+ * here.
+ *
+ * That same bisection also caught a second, unrelated, driver-*independent*
+ * bug along the way: `chromaticAberration` alone rendered solid black
+ * through *both* drivers, including a real browser - not a native-Dawn
+ * quirk at all, but three.js's own `ChromaticAberrationNode` (three/addons/
+ * tsl/display/ChromaticAberrationNode.js) silently degenerating when its
+ * `center` argument is left at its documented-but-unimplemented `null`
+ * default. This one *is* fixed, at the source: see
+ * `post-processing-pipeline.ts`'s own `"chromaticAberration"` case, which
+ * now passes an explicit `vec2(0.5, 0.5)`. Left in this scene's own effect
+ * list specifically so a regression here (either in Cadra's own call site or
+ * a future three.js upgrade reintroducing the same default) shows up as a
+ * real, checked reference-image diff instead of silently no-op'ing again;
+ * `render-browser-scene.e2e.test.ts`'s own `countNonBlackPixels` assertions
+ * guard the same regression independently of any one reference image's own
+ * tolerance.
  */
 function buildProject() {
   const camera = Camera({
@@ -95,7 +125,7 @@ function buildProject() {
 
 export const postProcessingScene: GoldenScene = {
   name: "post-processing",
-  driver: "nativeGpuHeadless",
+  driver: "browser",
   buildProject,
   compositionId: "comp-post-processing",
   frame: 0,

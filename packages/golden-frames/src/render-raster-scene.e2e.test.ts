@@ -1,22 +1,88 @@
+import { Camera, type Composition, Light, Shape } from "@cadra/core";
 import { describe, expect, it } from "vitest";
 
 import { encodePixelBufferToPng } from "./png-codec.js";
 import { renderRasterGoldenScene } from "./render-raster-scene.js";
-import {
-  lightingScene,
-  materialsScene,
-  minimalDefaultsScene,
-  postProcessingScene,
-  textFontkitScene,
-  textOpentypeScene,
-} from "./scenes/index.js";
+import type { GoldenScene } from "./scenes/golden-scene.js";
+import { lightingScene, materialsScene, minimalDefaultsScene, textFontkitScene, textOpentypeScene } from "./scenes/index.js";
+import { buildSingleTrackProject } from "./scenes/shared.js";
 import { isNativeGpuAvailable } from "./test-support/environment-checks.js";
+
+/**
+ * A minimal lit-box scene with no `postProcessing` of its own, so a caller
+ * can add exactly one effect and A/B against this same scene's own
+ * unmodified render - not through `postProcessingScene` (`driver: "browser"`
+ * now; see that scene's own doc), which stacks eight effects together and
+ * would not isolate a single one.
+ */
+function buildSharpenProbeScene(): GoldenScene {
+  function buildProject() {
+    const camera = Camera({
+      id: "camera-1",
+      transform: { position: [0, 0, 4.5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    });
+    const box = Shape({
+      id: "box-1",
+      geometryRef: "box",
+      transform: { position: [0, 0, 0], rotation: [0.3, 0.5, 0], scale: [1.6, 1.6, 1.6] },
+      material: { baseColor: [0.2, 0.25, 0.9, 1], metalness: 0.2, roughness: 0.4 },
+    });
+    const ambientLight = Light({ id: "light-ambient", lightType: "ambient", intensity: 1 });
+    const directionalLight = Light({
+      id: "light-directional",
+      transform: { position: [2, 3, 4], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      lightType: "directional",
+      intensity: 2,
+    });
+    const project = buildSingleTrackProject({
+      projectId: "p-sharpen-probe",
+      compositionId: "comp-sharpen-probe",
+      fps: 10,
+      durationInFrames: 1,
+      width: 256,
+      height: 256,
+      nodes: [camera, box, ambientLight, directionalLight],
+      activeCameraNodeId: "camera-1",
+    });
+    return project;
+  }
+  return {
+    name: "sharpen-probe",
+    driver: "nativeGpuHeadless",
+    buildProject,
+    compositionId: "comp-sharpen-probe",
+    frame: 0,
+    width: 256,
+    height: 256,
+    seed: "golden-sharpen-probe",
+  };
+}
 
 /** How many of a `PixelBuffer`'s pixels have any non-zero color/alpha channel at all. */
 function countNonBlankPixels(data: Uint8ClampedArray): number {
   let count = 0;
   for (let i = 0; i < data.length; i += 4) {
     if ((data[i] ?? 0) > 0 || (data[i + 1] ?? 0) > 0 || (data[i + 2] ?? 0) > 0 || (data[i + 3] ?? 0) > 0) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+/**
+ * How many of a `PixelBuffer`'s pixels have any non-zero *color* channel
+ * specifically - unlike `countNonBlankPixels`, an opaque-but-solid-black
+ * pixel (`[0, 0, 0, 255]`) does not count. A same-scene A/B diff test alone
+ * cannot distinguish "the effect renders correctly" from "the effect
+ * degenerates the whole frame to solid black" (a solid-black result still
+ * "differs" from a correctly-lit baseline by a large pixel count); see
+ * `render-browser-scene.e2e.test.ts`'s own identical helper for the real
+ * `chromaticAberration` bug this exact gap once let through undetected.
+ */
+function countNonBlackPixels(data: Uint8ClampedArray): number {
+  let count = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    if ((data[i] ?? 0) > 0 || (data[i + 1] ?? 0) > 0 || (data[i + 2] ?? 0) > 0) {
       count += 1;
     }
   }
@@ -32,12 +98,20 @@ function countNonBlankPixels(data: Uint8ClampedArray): number {
  * "renders a real scene" coverage, just driven through this harness's own
  * curated scene registry instead of a one-off inline scene.
  *
- * `pathTracedScene` and `motionBlurScene` are deliberately not covered here:
- * both are `driver: "browser"` (see `GoldenSceneDriver`'s own doc - path
- * tracing has no native-GPU-headless path at all, and `motionBlurScene`
- * needs a real browser for its own `.sample()`-at-an-offset post-processing
- * to actually take effect; see that scene's own doc), so their real-render
- * coverage lives in `render-browser-scene.e2e.test.ts` instead.
+ * `pathTracedScene`, `motionBlurScene`, and `postProcessingScene` are
+ * deliberately not covered here: all three are `driver: "browser"` (see
+ * `GoldenSceneDriver`'s own doc - path tracing has no native-GPU-headless
+ * path at all; `postProcessingScene`'s own `lut` effect does not render
+ * correctly through the experimental native Dawn binding specifically,
+ * unlike every other post-processing effect this harness exercises, and
+ * `motionBlurScene` stays on `"browser"` alongside it even though it does
+ * not strictly need to anymore - see both scenes' own doc comments), so
+ * their real-render coverage lives in `render-browser-scene.e2e.test.ts`
+ * instead. The "does postProcessing genuinely apply at all through
+ * `"nativeGpuHeadless"`" regression this file itself needs is covered below
+ * by a dedicated, reference-free A/B test (`sharpen` alone, not through
+ * `postProcessingScene`), independent of any effect's own driver-specific
+ * quirks.
  *
  * Every test below skips cleanly (an early `return` inside a passing test,
  * not `it.skip`) when no real native WebGPU device can be acquired at all,
@@ -51,7 +125,6 @@ describe("renderRasterGoldenScene: real native GPU renders (no browser)", () => 
   it.each([
     ["materials", materialsScene],
     ["lighting", lightingScene],
-    ["post-processing", postProcessingScene],
     ["minimal-defaults", minimalDefaultsScene],
   ] as const)("renders %s to a non-blank PixelBuffer at the scene's own size", async (_label, scene) => {
     if (!(await nativeGpuAvailable)) {
@@ -143,5 +216,55 @@ describe("renderRasterGoldenScene: real native GPU renders (no browser)", () => 
     // anything).
     expect(fontkitNonBlank).toBeGreaterThan(opentypeNonBlank * 0.5);
     expect(fontkitNonBlank).toBeLessThan(opentypeNonBlank * 2);
+  });
+
+  it("produces a real, visible postProcessing effect through this driver: a same-scene A/B render differs by more than a rounding-level amount", async () => {
+    if (!(await nativeGpuAvailable)) {
+      return;
+    }
+
+    const probe = buildSharpenProbeScene();
+    const withoutSharpen = await renderRasterGoldenScene(probe);
+
+    const withSharpen: GoldenScene = {
+      ...probe,
+      buildProject: () => {
+        const project = probe.buildProject();
+        return {
+          ...project,
+          compositions: project.compositions.map((composition): Composition =>
+            composition.id === probe.compositionId
+              ? { ...composition, postProcessing: { effects: [{ type: "sharpen", amount: 2 }] } }
+              : composition,
+          ),
+        };
+      },
+    };
+    const withSharpenPixels = await renderRasterGoldenScene(withSharpen);
+
+    // See countNonBlackPixels's own doc: an A/B diff alone would still pass
+    // on a degenerate solid-black withSharpenPixels, since that still
+    // "differs" from a correctly-lit baseline.
+    expect(countNonBlackPixels(withSharpenPixels.data)).toBeGreaterThan(500);
+
+    let diffPixelCount = 0;
+    for (let i = 0; i < withSharpenPixels.data.length; i += 4) {
+      const rDiff = Math.abs(withSharpenPixels.data[i]! - withoutSharpen.data[i]!);
+      const gDiff = Math.abs(withSharpenPixels.data[i + 1]! - withoutSharpen.data[i + 1]!);
+      const bDiff = Math.abs(withSharpenPixels.data[i + 2]! - withoutSharpen.data[i + 2]!);
+      if (rDiff > 2 || gDiff > 2 || bDiff > 2) {
+        diffPixelCount += 1;
+      }
+    }
+
+    // A regression guard for a real, previously-shipped bug: createNativeGpuHeadlessRenderer
+    // never actually ran its own post-processing pipeline at all (see
+    // applyProductionWebGpuBehavior in @cadra/renderer's own doc), so every
+    // postProcessing effect silently no-op'd through this driver - this
+    // scene's own sharpen kernel is a deliberately simple, single-effect
+    // probe for exactly that regression, independent of any one effect's
+    // own further quirks (see post-processing-scene.ts's own doc for why
+    // that richer scene stays on driver: "browser" instead).
+    expect(diffPixelCount).toBeGreaterThan(500);
   });
 });

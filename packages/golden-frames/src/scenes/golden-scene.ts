@@ -27,12 +27,15 @@ export interface GoldenSceneTextRequirement {
  *   `renderMode: "pathTraced"` scenes (path tracing needs a real
  *   `THREE.WebGLRenderer`, which the native-GPU-headless path cannot
  *   construct at all - see `PathTracedFrameRenderer`'s own doc), and also
- *   for any scene whose post-processing effect needs a `.sample()` call at
- *   an arbitrary (not just the current-pixel) UV: `"nativeGpuHeadless"`
- *   silently ignores such an offset (ANY offset, not just a
- *   velocity-derived one - see `motion-blur-scene.ts`'s own doc for the
- *   full finding), a limitation of that experimental renderer, not of
- *   `@cadra/renderer`'s own TSL pipeline.
+ *   for any scene whose own post-processing effect does not render
+ *   correctly through the experimental `webgpu` npm package's native Dawn
+ *   binding specifically - currently just `lut` (see
+ *   `post-processing-scene.ts`'s own doc for the full finding: every other
+ *   post-processing effect this harness exercises, `motionBlur` included,
+ *   renders correctly through `"nativeGpuHeadless"` as of
+ *   `applyProductionWebGpuBehavior` in `@cadra/renderer` - a genuinely
+ *   separate, narrower gap from what an earlier version of this doc
+ *   described here).
  */
 export type GoldenSceneDriver = "nativeGpuHeadless" | "browser";
 

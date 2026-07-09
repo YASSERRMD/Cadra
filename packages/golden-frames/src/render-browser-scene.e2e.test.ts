@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { encodePixelBufferToPng } from "./png-codec.js";
 import { renderBrowserGoldenScene } from "./render-browser-scene.js";
-import { motionBlurScene, pathTracedScene } from "./scenes/index.js";
+import { motionBlurScene, pathTracedScene, postProcessingScene } from "./scenes/index.js";
 import { isRealChromiumAvailable } from "./test-support/environment-checks.js";
 
 const chromiumAvailable = isRealChromiumAvailable();
@@ -13,6 +13,30 @@ function countNonBlankPixels(data: Uint8ClampedArray): number {
   let count = 0;
   for (let i = 0; i < data.length; i += 4) {
     if ((data[i] ?? 0) > 0 || (data[i + 1] ?? 0) > 0 || (data[i + 2] ?? 0) > 0 || (data[i + 3] ?? 0) > 0) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+/**
+ * How many of a `PixelBuffer`'s pixels have any non-zero *color* channel
+ * specifically - unlike `countNonBlankPixels`, an opaque-but-solid-black
+ * pixel (`[0, 0, 0, 255]`) does not count. A real regression (a broken
+ * post-processing node degenerating its whole output to solid black) still
+ * renders fully opaque, so `countNonBlankPixels` alone cannot catch it; this
+ * is exactly the gap that let a previous `chromaticAberration` bug (three.js's
+ * own `ChromaticAberrationNode` silently producing solid black when its
+ * `center` argument is left at its documented-but-unimplemented `null`
+ * default; see `post-processing-pipeline.ts`'s own `"chromaticAberration"`
+ * case) pass this file's own A/B test undetected: a solid-black `withEffects`
+ * still "differs" from a correctly-lit `withoutEffects` baseline by a large,
+ * threshold-clearing pixel count.
+ */
+function countNonBlackPixels(data: Uint8ClampedArray): number {
+  let count = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    if ((data[i] ?? 0) > 0 || (data[i + 1] ?? 0) > 0 || (data[i + 2] ?? 0) > 0) {
       count += 1;
     }
   }
@@ -116,6 +140,90 @@ describe("renderBrowserGoldenScene: real headless-Chromium renders", () => {
       // produces (see this scene's own doc) while still failing hard on the
       // previously-reported "zero difference" symptom.
       expect(diffPixelCount).toBeGreaterThan(500);
+    },
+    30_000,
+  );
+
+  it(
+    "renders the post-processing scene to a non-blank PixelBuffer at the scene's own size",
+    async () => {
+      if (!chromiumAvailable) {
+        return;
+      }
+
+      const pixels = await renderBrowserGoldenScene(postProcessingScene);
+
+      expect(pixels.width).toBe(postProcessingScene.width);
+      expect(pixels.height).toBe(postProcessingScene.height);
+      expect(pixels.data.length).toBe(postProcessingScene.width * postProcessingScene.height * 4);
+      expect(countNonBlankPixels(pixels.data)).toBeGreaterThan(0);
+      // countNonBlankPixels alone would still pass on a fully opaque, solid-
+      // black degenerate render (alpha > 0 everywhere): see
+      // countNonBlackPixels's own doc for the real bug this exact gap once
+      // let through undetected.
+      expect(countNonBlackPixels(pixels.data)).toBeGreaterThan(8000);
+
+      const pngBytes = encodePixelBufferToPng(pixels);
+      expect(pngBytes.length).toBeGreaterThan(0);
+    },
+    30_000,
+  );
+
+  it(
+    "produces a real, visible effect from the full post-processing stack (lut included): a same-scene A/B render differs by more than a rounding-level amount",
+    async () => {
+      if (!chromiumAvailable) {
+        return;
+      }
+
+      const withEffects = await renderBrowserGoldenScene(postProcessingScene);
+
+      // A same-scene A/B diff alone cannot distinguish "the effects render
+      // correctly" from "the effects degenerate the whole frame to solid
+      // black" (see countNonBlackPixels's own doc for the real bug this
+      // exact gap once let through undetected): assert directly that
+      // withEffects itself still has substantial real color content, not
+      // just that it differs from the baseline below.
+      expect(countNonBlackPixels(withEffects.data)).toBeGreaterThan(8000);
+
+      // The exact same scene, minus postProcessing/ambient-occlusion entirely:
+      // see post-processing-scene.ts's own doc for why this scene needs a
+      // real browser at all - its own lut effect (unlike every other effect
+      // it stacks) does not render correctly through the experimental
+      // native-Dawn nativeGpuHeadless driver.
+      const withoutEffectsScene = {
+        ...postProcessingScene,
+        buildProject: () => {
+          const project = postProcessingScene.buildProject();
+          return {
+            ...project,
+            compositions: project.compositions.map((composition): Composition =>
+              composition.id === postProcessingScene.compositionId
+                ? { ...composition, postProcessing: undefined, shadowQuality: undefined }
+                : composition,
+            ),
+          };
+        },
+      };
+      const withoutEffects = await renderBrowserGoldenScene(withoutEffectsScene);
+
+      let diffPixelCount = 0;
+      for (let i = 0; i < withEffects.data.length; i += 4) {
+        const rDiff = Math.abs(withEffects.data[i]! - withoutEffects.data[i]!);
+        const gDiff = Math.abs(withEffects.data[i + 1]! - withoutEffects.data[i + 1]!);
+        const bDiff = Math.abs(withEffects.data[i + 2]! - withoutEffects.data[i + 2]!);
+        if (rDiff > 2 || gDiff > 2 || bDiff > 2) {
+          diffPixelCount += 1;
+        }
+      }
+
+      // Eight stacked effects (bloom/sharpen/chromaticAberration/vignette/
+      // filmGrain/lensDistortion/colorGrade/lut) plus ambient occlusion
+      // reshape a large share of the frame (measured directly: ~15556/65536
+      // px, ~23.7%), not just a thin edge band; this threshold sits
+      // comfortably below that while still failing hard on a
+      // silently-reverted-to-no-op pipeline.
+      expect(diffPixelCount).toBeGreaterThan(8000);
     },
     30_000,
   );

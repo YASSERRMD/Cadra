@@ -14,43 +14,28 @@ const TARGET_FRAME = 1;
  * A box sweeping across five frames, staying on-screen for the whole sweep,
  * with `motionBlur` configured at a high shutter angle.
  *
- * **Root-caused and fixed.** An earlier version of this doc reported that a
- * real pixel-level A/B comparison (this same scene rendered with
- * `motionBlur` left in vs. stripped out) showed *zero* difference through
- * both this harness's drivers. That comparison was re-run with more direct
- * instrumentation (visualizing the raw velocity MRT buffer, then a
- * hardcoded, non-velocity UV offset on an unrelated effect as a control) and
- * the "through both drivers" half of that claim does not hold:
+ * **Root-caused and fixed, twice over.** An earlier version of this doc
+ * reported that a real pixel-level A/B comparison (this same scene rendered
+ * with `motionBlur` left in vs. stripped out) showed *zero* difference
+ * through both this harness's drivers, and diagnosed the `"nativeGpuHeadless"`
+ * half of that as "a `.sample()` call at any arbitrary UV offset silently
+ * samples as if no offset were given at all." That diagnosis was itself
+ * imprecise: the real defect (see `applyProductionWebGpuBehavior` in
+ * `@cadra/renderer`) was that `createNativeGpuHeadlessRenderer` never wired
+ * its own WebGPU renderer up to run the post-processing pipeline *at all* -
+ * every effect, not just ones sampling at an offset UV, silently no-op'd.
+ * Once that was fixed, `motionBlur` (and every other post-processing effect
+ * this harness exercises except `lut` - see `post-processing-scene.ts`'s
+ * own doc) renders correctly through `"nativeGpuHeadless"` too, verified via
+ * the exact same A/B comparison this doc originally used: a real,
+ * substantial difference (comparable in magnitude to the `"browser"` driver's
+ * own), not a rounding-level one.
  *
- * - The velocity MRT buffer itself is genuinely non-zero for this scene's
- *   moving box (`VelocityNode`'s per-object previous/current world-matrix
- *   tracking works correctly): confirmed by rendering `scaledVelocity`
- *   directly as the pipeline's own output.
- * - Through `driver: "browser"` (a real headless-Chromium page), the exact
- *   same unmodified `@cadra/renderer` pipeline code produces a real,
- *   substantial difference between this scene rendered with `motionBlur`
- *   left in vs. stripped out - a genuine blur streak, not a rounding-level
- *   difference. `motionBlur` was never broken in `@cadra/renderer` itself.
- * - Through `driver: "nativeGpuHeadless"` (`createNativeGpuHeadlessRenderer`,
- *   an experimental, opt-in, no-browser research spike - see that
- *   function's own doc in `@cadra/headless`), a `.sample()` call at *any*
- *   arbitrary UV offset - not just a velocity-derived one; a hardcoded,
- *   effect-unrelated offset on `sharpen`'s own sampling reproduces it
- *   identically - silently samples as if no offset were given at all. This
- *   is a limitation of that experimental renderer (or the native `webgpu`
- *   package's Dawn binding underneath it), not of this scene, `motionBlur`,
- *   or any other effect's own TSL logic.
- *
- * This scene now uses `driver: "browser"` (see `GoldenSceneDriver`'s own
- * doc), the driver proven to actually exercise `motionBlur` correctly; its
- * real-render coverage and blur-streak verification live in
- * `render-browser-scene.e2e.test.ts` alongside the path-traced scene's own.
- * The deeper `nativeGpuHeadless` arbitrary-UV-sampling limitation is tracked
- * separately (it may silently affect how much `post-processing-scene.ts`'s
- * own `nativeGpuHeadless`-driven effects are really proven to do, beyond
- * "renders something non-blank") - not blocking this fix, since that scene
- * was never relied on as its effects' own correctness proof in the first
- * place (see its own doc comment).
+ * This scene stays on `driver: "browser"` regardless - already proven
+ * reliable, and switching back would only add churn for a speed gain this
+ * scene does not need - with its real-render coverage and blur-streak
+ * verification in `render-browser-scene.e2e.test.ts` alongside the
+ * path-traced scene's own.
  */
 function buildProject() {
   const camera = Camera({
