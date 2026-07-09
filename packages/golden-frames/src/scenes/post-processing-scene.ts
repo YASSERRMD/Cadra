@@ -22,35 +22,47 @@ const HEIGHT = 256;
  * wide-spread effect most likely to amplify small cross-GPU floating-point
  * differences past this harness's tight tolerance for no visual benefit.
  *
- * `driver: "browser"`, not `"nativeGpuHeadless"`: verified directly while
- * root-causing a separate, previously-undiscovered gap (`@cadra/renderer`'s
- * `createNativeGpuHeadlessRenderer` never actually ran its own post-processing
- * pipeline at all before that fix - see `applyProductionWebGpuBehavior`'s own
- * doc) that once the pipeline genuinely runs, this scene's own `lut` effect
- * still renders solid black through the experimental `webgpu` npm package's
- * native Dawn binding specifically (bisected, post-fix: every other effect
- * here, and ambient occlusion, renders correctly in isolation through that
- * same native path; only `lut`'s own 3D-texture sampling does not) - a real
- * headless-Chromium page renders every one of these effects, `lut` included,
- * correctly. This is tracked as its own separate, narrower follow-up (a
- * native-Dawn/TSL `Lut3DNode` texture-sampler compatibility gap), not fixed
- * here.
+ * `driver: "nativeGpuHeadless"`, the default for a plain raster scene like
+ * this one - but getting there took three separate fixes, all found while
+ * investigating this exact scene, worth recording since a future regression
+ * in any one of them would silently reintroduce a broken reference image:
  *
- * That same bisection also caught a second, unrelated, driver-*independent*
- * bug along the way: `chromaticAberration` alone rendered solid black
- * through *both* drivers, including a real browser - not a native-Dawn
- * quirk at all, but three.js's own `ChromaticAberrationNode` (three/addons/
- * tsl/display/ChromaticAberrationNode.js) silently degenerating when its
- * `center` argument is left at its documented-but-unimplemented `null`
- * default. This one *is* fixed, at the source: see
- * `post-processing-pipeline.ts`'s own `"chromaticAberration"` case, which
- * now passes an explicit `vec2(0.5, 0.5)`. Left in this scene's own effect
- * list specifically so a regression here (either in Cadra's own call site or
- * a future three.js upgrade reintroducing the same default) shows up as a
- * real, checked reference-image diff instead of silently no-op'ing again;
- * `render-browser-scene.e2e.test.ts`'s own `countNonBlackPixels` assertions
- * guard the same regression independently of any one reference image's own
- * tolerance.
+ * 1. `@cadra/renderer`'s `createNativeGpuHeadlessRenderer` never actually
+ *    ran its own post-processing pipeline at all - every effect, not just
+ *    one, silently no-op'd. Fixed by `applyProductionWebGpuBehavior` (see
+ *    that function's own doc).
+ * 2. Once the pipeline genuinely ran, `chromaticAberration` alone rendered
+ *    solid black through *both* drivers, browser included - three.js's own
+ *    `ChromaticAberrationNode` (three/addons/tsl/display/
+ *    ChromaticAberrationNode.js) documents a `center: null` default as
+ *    "uses screen center (0.5, 0.5)" but never actually implements that
+ *    substitution. Fixed in `post-processing-pipeline.ts`'s own
+ *    `"chromaticAberration"` case by passing `vec2(0.5, 0.5)` explicitly.
+ * 3. `lut` alone then rendered solid black through `nativeGpuHeadless`
+ *    specifically (every other effect here, and ambient occlusion, already
+ *    rendered correctly in isolation) - a genuine WGSL texture-dimension
+ *    mismatch (`textureSample(texture_3d<f32>, sampler, vec2<f32>)`) that
+ *    real Chromium tolerates as a non-fatal warning but the experimental
+ *    native-Dawn `webgpu` npm package rejects outright. Root cause: this
+ *    file's own call site built the LUT's texture node with three/tsl's
+ *    generic `texture()` helper, which never auto-detects a
+ *    `THREE.Data3DTexture` and always emits a 2D-shaped UV; three.js's own
+ *    dedicated `texture3D()` helper (`Texture3DNode`) exists specifically
+ *    for this and correctly emits a vec3 coordinate. Fixed in
+ *    `post-processing-pipeline.ts`'s own `"lut"` case.
+ *
+ * Kept every one of these effects in this scene's own list (rather than
+ * trimming back to a "safe" subset) specifically so a regression in any of
+ * the three fixes above shows up as a real, checked reference-image diff;
+ * `render-raster-scene.e2e.test.ts`'s and `render-browser-scene.e2e.test.ts`'s
+ * own `countNonBlackPixels` assertions guard the same regressions
+ * independently of any one reference image's own tolerance, and across both
+ * drivers (this scene's real-render coverage now lives in
+ * `render-raster-scene.e2e.test.ts` alongside every other native-driver
+ * scene; `render-browser-scene.e2e.test.ts` additionally exercises it
+ * through the browser driver too, as a cross-driver regression guard for
+ * exactly the kind of driver-specific divergence all three bugs above
+ * turned out to be).
  */
 function buildProject() {
   const camera = Camera({
@@ -125,7 +137,7 @@ function buildProject() {
 
 export const postProcessingScene: GoldenScene = {
   name: "post-processing",
-  driver: "browser",
+  driver: "nativeGpuHeadless",
   buildProject,
   compositionId: "comp-post-processing",
   frame: 0,

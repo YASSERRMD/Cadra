@@ -49,6 +49,15 @@ function countNonBlackPixels(data: Uint8ClampedArray): number {
  * and produce real, non-blank pixel output - this package's own equivalent
  * of `render-composition-headless-server.e2e.test.ts`'s "renders a real
  * scene" coverage in `@cadra/encode`.
+ *
+ * `postProcessingScene` itself is `driver: "nativeGpuHeadless"` now (see
+ * that scene's own doc), but is deliberately still exercised here too,
+ * directly via `renderBrowserGoldenScene` (which, unlike the dispatcher
+ * `compare-references.e2e.test.ts` uses, ignores a scene's own `.driver`
+ * field): every bug this scene helped surface turned out to be a
+ * driver-specific divergence, so running its full effect stack through
+ * *both* drivers is exactly the kind of cross-driver regression guard that
+ * would have caught them.
  */
 describe("renderBrowserGoldenScene: real headless-Chromium renders", () => {
   it(
@@ -186,11 +195,9 @@ describe("renderBrowserGoldenScene: real headless-Chromium renders", () => {
       // just that it differs from the baseline below.
       expect(countNonBlackPixels(withEffects.data)).toBeGreaterThan(8000);
 
-      // The exact same scene, minus postProcessing/ambient-occlusion entirely:
-      // see post-processing-scene.ts's own doc for why this scene needs a
-      // real browser at all - its own lut effect (unlike every other effect
-      // it stacks) does not render correctly through the experimental
-      // native-Dawn nativeGpuHeadless driver.
+      // The exact same scene, minus postProcessing/ambient-occlusion entirely
+      // (see render-raster-scene.e2e.test.ts's own mirror of this exact test
+      // for the nativeGpuHeadless-driver equivalent):
       const withoutEffectsScene = {
         ...postProcessingScene,
         buildProject: () => {
