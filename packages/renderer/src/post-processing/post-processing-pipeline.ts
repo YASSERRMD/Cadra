@@ -641,7 +641,18 @@ function applyWebGpuEffect(
       );
     }
     case "chromaticAberration": {
-      return createChromaticAberrationNode(colorTexture, float((effect.intensity ?? 0.5) * 0.01));
+      // `center` must be passed explicitly: three.js's own ChromaticAberrationNode
+      // (three/addons/tsl/display/ChromaticAberrationNode.js) documents its
+      // default (`center = null`) as "uses screen center (0.5, 0.5)", but
+      // `ShaderNodeObject`/`nodeObject` never actually substitutes a real
+      // vec2 node for a literal `null` - it passes `null` straight through
+      // into the compiled shader's `uv.sub(center)`, which produces a fully
+      // degenerate (solid black) output. Verified directly: this addon call
+      // with only two arguments renders solid black through both this
+      // package's drivers; passing `vec2(0.5, 0.5)` explicitly here (the
+      // same screen-center convention already used by this file's own
+      // "vignette"/"lensDistortion" cases) works correctly.
+      return createChromaticAberrationNode(colorTexture, float((effect.intensity ?? 0.5) * 0.01), vec2(0.5, 0.5));
     }
     case "vignette": {
       const darkness = effect.darkness ?? 1;

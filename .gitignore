@@ -13,6 +13,10 @@ dist/
 # Test coverage
 coverage/
 
+# Golden-frame comparison diffs (compare-references.e2e.test.ts's own
+# per-failing-scene actual/expected/diff PNGs; a CI artifact, never checked in)
+diff-output/
+
 # Logs
 *.log
 npm-debug.log*

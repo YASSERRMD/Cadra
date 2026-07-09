@@ -160,6 +160,7 @@ export {
 } from "./text/text-render-registry.js";
 export type { ThreeRendererDependencies, ThreeRendererFactory } from "./three-renderer.js";
 export {
+  applyProductionWebGpuBehavior,
   defaultThreeRendererDependencies,
   RendererNotInitializedError,
   ThreeRenderer,
