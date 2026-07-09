@@ -26,16 +26,15 @@ export interface GoldenSceneTextRequirement {
  *   Playwright bridge (`render-browser-scene.ts`). Required for
  *   `renderMode: "pathTraced"` scenes (path tracing needs a real
  *   `THREE.WebGLRenderer`, which the native-GPU-headless path cannot
- *   construct at all - see `PathTracedFrameRenderer`'s own doc), and also
- *   for any scene whose own post-processing effect does not render
- *   correctly through the experimental `webgpu` npm package's native Dawn
- *   binding specifically - currently just `lut` (see
- *   `post-processing-scene.ts`'s own doc for the full finding: every other
- *   post-processing effect this harness exercises, `motionBlur` included,
- *   renders correctly through `"nativeGpuHeadless"` as of
- *   `applyProductionWebGpuBehavior` in `@cadra/renderer` - a genuinely
- *   separate, narrower gap from what an earlier version of this doc
- *   described here).
+ *   construct at all - see `PathTracedFrameRenderer`'s own doc). No curated
+ *   scene currently needs `"browser"` purely for a post-processing-effect
+ *   gap: every effect this harness exercises, `motionBlur` and `lut`
+ *   included, renders correctly through `"nativeGpuHeadless"` as of
+ *   `applyProductionWebGpuBehavior` in `@cadra/renderer` plus the
+ *   `chromaticAberration`/`lut` fixes documented in
+ *   `post-processing-scene.ts`'s own doc; `motionBlurScene` stays on
+ *   `"browser"` regardless (see that scene's own doc for why switching back
+ *   is not worth the churn), and `pathTracedScene` needs it structurally.
  */
 export type GoldenSceneDriver = "nativeGpuHeadless" | "browser";
 

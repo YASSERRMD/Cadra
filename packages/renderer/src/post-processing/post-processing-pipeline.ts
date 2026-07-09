@@ -33,7 +33,7 @@ import {
   output,
   pass,
   rand,
-  texture,
+  texture3D,
   textureSize,
   toneMappingExposure,
   uniform,
@@ -744,7 +744,20 @@ function applyWebGpuEffect(
         return colorTexture;
       }
       const lutSize = lutTexture.image.width;
-      const lutTextureNode = texture(lutTexture);
+      // texture3D, not the generic texture: the generic helper (three/tsl's
+      // `texture()`) always constructs a plain TextureNode regardless of the
+      // underlying THREE.Data3DTexture - it never auto-detects/routes to
+      // Texture3DNode. A plain TextureNode's generateUV does not know to
+      // emit a vec3-typed WGSL coordinate for Lut3DNode's own vec3 `uvw`
+      // sample, so the compiled shader ends up calling
+      // `textureSample(texture_3d<f32>, sampler, vec2<f32>)` - a
+      // dimension mismatch real Chromium tolerates (as a non-fatal
+      // warning) but the experimental native-Dawn `webgpu` npm package
+      // rejects outright (GPUValidationError), aborting the draw and
+      // leaving the frame solid black. Texture3DNode (three3D's own
+      // dedicated 3D-texture node) overrides generateUV to always build a
+      // real vec3 coordinate, which fixes this on both drivers.
+      const lutTextureNode = texture3D(lutTexture);
       return createLut3DNode(colorTexture, lutTextureNode, lutSize, float(effect.intensity ?? 1));
     }
   }

@@ -4,16 +4,22 @@ import { describe, expect, it } from "vitest";
 import { encodePixelBufferToPng } from "./png-codec.js";
 import { renderRasterGoldenScene } from "./render-raster-scene.js";
 import type { GoldenScene } from "./scenes/golden-scene.js";
-import { lightingScene, materialsScene, minimalDefaultsScene, textFontkitScene, textOpentypeScene } from "./scenes/index.js";
+import {
+  lightingScene,
+  materialsScene,
+  minimalDefaultsScene,
+  postProcessingScene,
+  textFontkitScene,
+  textOpentypeScene,
+} from "./scenes/index.js";
 import { buildSingleTrackProject } from "./scenes/shared.js";
 import { isNativeGpuAvailable } from "./test-support/environment-checks.js";
 
 /**
  * A minimal lit-box scene with no `postProcessing` of its own, so a caller
  * can add exactly one effect and A/B against this same scene's own
- * unmodified render - not through `postProcessingScene` (`driver: "browser"`
- * now; see that scene's own doc), which stacks eight effects together and
- * would not isolate a single one.
+ * unmodified render - not through `postProcessingScene`, which stacks eight
+ * effects together and would not isolate a single one.
  */
 function buildSharpenProbeScene(): GoldenScene {
   function buildProject() {
@@ -98,20 +104,18 @@ function countNonBlackPixels(data: Uint8ClampedArray): number {
  * "renders a real scene" coverage, just driven through this harness's own
  * curated scene registry instead of a one-off inline scene.
  *
- * `pathTracedScene`, `motionBlurScene`, and `postProcessingScene` are
- * deliberately not covered here: all three are `driver: "browser"` (see
- * `GoldenSceneDriver`'s own doc - path tracing has no native-GPU-headless
- * path at all; `postProcessingScene`'s own `lut` effect does not render
- * correctly through the experimental native Dawn binding specifically,
- * unlike every other post-processing effect this harness exercises, and
- * `motionBlurScene` stays on `"browser"` alongside it even though it does
- * not strictly need to anymore - see both scenes' own doc comments), so
- * their real-render coverage lives in `render-browser-scene.e2e.test.ts`
- * instead. The "does postProcessing genuinely apply at all through
- * `"nativeGpuHeadless"`" regression this file itself needs is covered below
- * by a dedicated, reference-free A/B test (`sharpen` alone, not through
- * `postProcessingScene`), independent of any effect's own driver-specific
- * quirks.
+ * `pathTracedScene` and `motionBlurScene` are deliberately not covered here:
+ * both are `driver: "browser"` (see `GoldenSceneDriver`'s own doc - path
+ * tracing has no native-GPU-headless path at all; `motionBlurScene` stays on
+ * `"browser"` even though it does not strictly need to anymore, see that
+ * scene's own doc), so their real-render coverage lives in
+ * `render-browser-scene.e2e.test.ts` instead. `postProcessingScene` *is*
+ * covered here (`driver: "nativeGpuHeadless"` as of the fixes documented in
+ * its own doc comment) - both via the shared non-blank check below and a
+ * dedicated, stronger full-stack test further down; a reference-free,
+ * single-effect A/B probe (`sharpen` alone, not through `postProcessingScene`)
+ * covers the same "does postProcessing genuinely apply at all" regression
+ * independently of any one effect's own quirks.
  *
  * Every test below skips cleanly (an early `return` inside a passing test,
  * not `it.skip`) when no real native WebGPU device can be acquired at all,
@@ -126,6 +130,7 @@ describe("renderRasterGoldenScene: real native GPU renders (no browser)", () => 
     ["materials", materialsScene],
     ["lighting", lightingScene],
     ["minimal-defaults", minimalDefaultsScene],
+    ["post-processing", postProcessingScene],
   ] as const)("renders %s to a non-blank PixelBuffer at the scene's own size", async (_label, scene) => {
     if (!(await nativeGpuAvailable)) {
       return;
@@ -263,8 +268,57 @@ describe("renderRasterGoldenScene: real native GPU renders (no browser)", () => 
     // postProcessing effect silently no-op'd through this driver - this
     // scene's own sharpen kernel is a deliberately simple, single-effect
     // probe for exactly that regression, independent of any one effect's
-    // own further quirks (see post-processing-scene.ts's own doc for why
-    // that richer scene stays on driver: "browser" instead).
+    // own further quirks (see the fuller postProcessingScene stack test
+    // right below for coverage of those).
     expect(diffPixelCount).toBeGreaterThan(500);
   });
+
+  it(
+    "produces a real, visible effect from the full post-processing stack (lut included) through this driver: a same-scene A/B render differs by more than a rounding-level amount",
+    async () => {
+      if (!(await nativeGpuAvailable)) {
+        return;
+      }
+
+      const withEffects = await renderRasterGoldenScene(postProcessingScene);
+
+      // See countNonBlackPixels's own doc: an A/B diff alone would still
+      // pass on a degenerate solid-black withEffects, since that still
+      // "differs" from a correctly-lit baseline. This is this file's own
+      // mirror of render-browser-scene.e2e.test.ts's identical test, now
+      // that postProcessingScene renders correctly through both drivers
+      // (see post-processing-scene.ts's own doc) - kept on both so a future
+      // driver-specific regression in either one shows up here directly.
+      expect(countNonBlackPixels(withEffects.data)).toBeGreaterThan(8000);
+
+      const withoutEffectsScene: GoldenScene = {
+        ...postProcessingScene,
+        buildProject: () => {
+          const project = postProcessingScene.buildProject();
+          return {
+            ...project,
+            compositions: project.compositions.map((composition): Composition =>
+              composition.id === postProcessingScene.compositionId
+                ? { ...composition, postProcessing: undefined, shadowQuality: undefined }
+                : composition,
+            ),
+          };
+        },
+      };
+      const withoutEffects = await renderRasterGoldenScene(withoutEffectsScene);
+
+      let diffPixelCount = 0;
+      for (let i = 0; i < withEffects.data.length; i += 4) {
+        const rDiff = Math.abs(withEffects.data[i]! - withoutEffects.data[i]!);
+        const gDiff = Math.abs(withEffects.data[i + 1]! - withoutEffects.data[i + 1]!);
+        const bDiff = Math.abs(withEffects.data[i + 2]! - withoutEffects.data[i + 2]!);
+        if (rDiff > 2 || gDiff > 2 || bDiff > 2) {
+          diffPixelCount += 1;
+        }
+      }
+
+      expect(diffPixelCount).toBeGreaterThan(8000);
+    },
+    30_000,
+  );
 });
