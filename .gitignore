@@ -1,5 +1,9 @@
 temp/
 
+# Cadra MCP server's local workspace: authored scenes, uploaded assets, and
+# rendered output for the "cadra" server registered in .mcp.json.
+.cadra/
+
 # Dependencies
 node_modules/
 
