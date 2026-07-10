@@ -26,6 +26,7 @@
     "@cadra/core": "workspace:*",
     "@cadra/headless": "workspace:*",
     "@cadra/renderer": "workspace:*",
+    "@cadra/text": "workspace:*",
     "mp4-muxer": "^5.2.2",
     "webm-muxer": "^5.1.4"
   },

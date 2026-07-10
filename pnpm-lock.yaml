@@ -148,6 +148,9 @@ importers:
       '@cadra/renderer':
         specifier: workspace:*
         version: link:../renderer
+      '@cadra/text':
+        specifier: workspace:*
+        version: link:../text
       mp4-muxer:
         specifier: ^5.2.2
         version: 5.2.2
