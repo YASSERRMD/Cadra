@@ -4,7 +4,14 @@ import {
   type OnProgressFn,
   renderComposition,
 } from "@cadra/headless";
-import { createPixelReadableRenderer, createRenderer, type PixelBuffer } from "@cadra/renderer";
+import {
+  createInMemoryTextRenderRegistry,
+  createPixelReadableRenderer,
+  createRenderer,
+  type PixelBuffer,
+  type TextRenderRegistry,
+} from "@cadra/renderer";
+import type { PositionedGlyph } from "@cadra/text/browser";
 
 import { type CapturedVideoFrame, captureFrames } from "./capture-frames.js";
 import { type EncodedChunkResult, encodeFrames } from "./encode-frames.js";
@@ -62,6 +69,70 @@ declare global {
   }
 }
 
+/**
+ * A `MsdfAtlasPage`, with its two `Uint8Array` fields (`pixels`/`png`)
+ * widened to plain `number[]`: verified empirically (this module's own
+ * `createBridgedWriteTarget` doc) that a raw `Uint8Array` does not survive
+ * Playwright's structured-clone boundary as itself, so every binary field
+ * crossing into this page via `page.evaluate`'s `arg` uses this same
+ * defensive `number[]` encoding, reconstructed via `Uint8Array.from` once
+ * inside the page (see `buildTextRenderRegistry` below).
+ */
+interface SerializedMsdfAtlasPage {
+  width: number;
+  height: number;
+  pixels: number[];
+  png: number[];
+}
+
+/** `TextRenderData` (`@cadra/text`'s own shape) with its atlas pages' binary fields serialized; see `SerializedMsdfAtlasPage`'s own doc. `glyphs`/`lineCount` are already plain data, needing no conversion. */
+interface SerializedTextRenderData {
+  atlasPages: readonly SerializedMsdfAtlasPage[];
+  glyphs: readonly PositionedGlyph[];
+  lineCount: number;
+}
+
+/**
+ * One `TextRenderRegistry` entry (see that interface's own doc in
+ * `@cadra/renderer`), prepared ahead of time on the Node side (font
+ * loading, HarfBuzz shaping, and MSDF atlas generation are all
+ * Node-only-dependency-laden work that cannot run inside this bundled
+ * browser page — see `@cadra/text/browser`'s own module doc for why) and
+ * carried across `page.evaluate`'s structured-clone boundary as plain,
+ * serializable data.
+ */
+export interface SerializedTextRenderEntry {
+  /** Matches `computeTextNodeRenderKey(node, 0)` for the `TextNode`(s) this entry serves. */
+  cacheKey: string;
+  data: SerializedTextRenderData;
+  fontBytes: number[];
+  fontContentHash: string;
+}
+
+/** Reconstructs a real, in-page `TextRenderRegistry` from `entries`, undoing `SerializedTextRenderEntry`'s own `Uint8Array` -> `number[]` encoding. */
+function buildTextRenderRegistry(entries: readonly SerializedTextRenderEntry[]): TextRenderRegistry {
+  const registry = createInMemoryTextRenderRegistry();
+
+  for (const entry of entries) {
+    registry.register(entry.cacheKey, {
+      data: {
+        atlasPages: entry.data.atlasPages.map((page) => ({
+          width: page.width,
+          height: page.height,
+          pixels: Uint8Array.from(page.pixels),
+          png: Uint8Array.from(page.png),
+        })),
+        glyphs: entry.data.glyphs,
+        lineCount: entry.data.lineCount,
+      },
+      fontBytes: Uint8Array.from(entry.fontBytes),
+      fontContentHash: entry.fontContentHash,
+    });
+  }
+
+  return registry;
+}
+
 /** Config this entry function accepts, structured-cloned in from the Node orchestrator via `page.evaluate`. */
 export interface BrowserHeadlessRenderConfig {
   /** The project to render, i.e. `renderComposition`'s own `options.project`. */
@@ -74,6 +145,8 @@ export interface BrowserHeadlessRenderConfig {
   format: "mp4" | "webm";
   /** Target bitrate in bits per second for `encodeFrames`. */
   bitrate: number;
+  /** Every `TextNode` render entry this project needs, prepared ahead of time on the Node side; see `SerializedTextRenderEntry`'s own doc. Omitted/empty means every text node renders as an empty placeholder, matching `createRenderer`'s own no-registry default. */
+  textRenderEntries?: readonly SerializedTextRenderEntry[];
 }
 
 /**
@@ -105,6 +178,8 @@ export interface BrowserHeadlessRenderRangeConfig {
    * `startFrame` to reliably land on a forced keyframe.
    */
   keyframeIntervalFrames?: number;
+  /** Every `TextNode` render entry this project needs, prepared ahead of time on the Node side; see `SerializedTextRenderEntry`'s own doc. Omitted/empty means every text node renders as an empty placeholder, matching `createRenderer`'s own no-registry default. */
+  textRenderEntries?: readonly SerializedTextRenderEntry[];
 }
 
 /**
@@ -246,6 +321,7 @@ function buildEncodedChunksForRange(
   seed: string | number,
   bitrate: number,
   range: { startFrame?: number; endFrame?: number; keyframeIntervalFrames?: number } = {},
+  textRenderEntries: readonly SerializedTextRenderEntry[] = [],
 ): {
   composition: { width: number; height: number; fps: number };
   encodedChunks: AsyncGenerator<EncodedChunkResult>;
@@ -268,7 +344,7 @@ function buildEncodedChunksForRange(
   canvas.width = composition.width;
   canvas.height = composition.height;
 
-  const innerRenderer = createRenderer();
+  const innerRenderer = createRenderer({ textRenderRegistry: buildTextRenderRegistry(textRenderEntries) });
   const renderer = createPixelReadableRenderer({
     renderer: innerRenderer,
     readPixels: createRealReadPixels(),
@@ -344,6 +420,8 @@ export async function runBrowserHeadlessRender(config: BrowserHeadlessRenderConf
       config.compositionId,
       config.seed,
       config.bitrate,
+      {},
+      config.textRenderEntries,
     );
 
     const destination = createBridgedWriteTarget();
@@ -423,6 +501,7 @@ export async function runBrowserHeadlessRenderRange(
         endFrame: config.endFrame,
         keyframeIntervalFrames: config.keyframeIntervalFrames,
       },
+      config.textRenderEntries,
     );
 
     const serialized: SerializedEncodedChunk[] = [];

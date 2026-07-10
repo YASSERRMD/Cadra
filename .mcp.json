@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "cadra": {
+      "command": "node",
+      "args": ["scripts/cadra-mcp-stdio.mjs"],
+      "env": {
+        "CADRA_WORKSPACE_ROOT": ".cadra",
+        "CADRA_OUTPUT_DIRECTORY": ".cadra/output"
+      }
+    }
+  }
+}

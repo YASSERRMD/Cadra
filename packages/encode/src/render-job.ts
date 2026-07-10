@@ -1,4 +1,6 @@
-import type { Project } from "@cadra/core";
+import { readFileSync } from "node:fs";
+
+import type { Project, SceneNode, TextNode } from "@cadra/core";
 import type {
   BrowserLauncher,
   HeadlessBrowserLike,
@@ -18,6 +20,8 @@ import {
   resumeRenderJob as resumeHeadlessRenderJob,
   submitRenderJob as submitHeadlessRenderJob,
 } from "@cadra/headless";
+import { computeTextNodeRenderKey } from "@cadra/renderer";
+import { createFontRegistry, type PositionedGlyph, prepareTextRenderData } from "@cadra/text";
 
 import type { EncodedChunkResult } from "./encode-frames.js";
 import { DEFAULT_KEYFRAME_INTERVAL_FRAMES } from "./encode-frames.js";
@@ -141,6 +145,9 @@ export interface SubmitEncodedRenderJobOptions {
 /** Milliseconds allowed for one range attempt by default: 2 minutes. Shorter than `renderCompositionHeadlessServer`'s own 5-minute default, since a single range is, by construction, a fraction of a whole composition's frames. */
 export const DEFAULT_RANGE_TIMEOUT_MS = 2 * 60 * 1000;
 
+/** Maximum extra time `runOneRangeAttempt` waits for `browser.close()` to finish before giving up on it and letting the attempt settle anyway; see that function's own `finally` block doc for why this is bounded at all. */
+const BROWSER_CLOSE_GRACE_MS = 10 * 1000;
+
 /**
  * A submitted encoded render job's handle: a job id for status queries, plus
  * a `result` promise resolving once the final muxed file has been fully
@@ -174,6 +181,29 @@ export function getEncodedRenderJobStatus(
   return getHeadlessRenderJobStatus<SerializedEncodedChunk[]>(jobId);
 }
 
+/** Mirrors `browser-headless-render-entry.ts`'s own `SerializedMsdfAtlasPage`; duplicated (not imported) for the same reason `BrowserRangeConfigArg` below is - see its own doc. */
+interface SerializedMsdfAtlasPage {
+  width: number;
+  height: number;
+  pixels: number[];
+  png: number[];
+}
+
+/** Mirrors `browser-headless-render-entry.ts`'s own `SerializedTextRenderData`. */
+interface SerializedTextRenderData {
+  atlasPages: SerializedMsdfAtlasPage[];
+  glyphs: readonly PositionedGlyph[];
+  lineCount: number;
+}
+
+/** Mirrors `browser-headless-render-entry.ts`'s own `SerializedTextRenderEntry` - one prepared `TextRenderRegistry` entry, ready to cross the `page.evaluate` structured-clone boundary. */
+interface SerializedTextRenderEntry {
+  cacheKey: string;
+  data: SerializedTextRenderData;
+  fontBytes: number[];
+  fontContentHash: string;
+}
+
 /** The exact shape `runBrowserHeadlessRenderRange` (`@cadra/encode`'s own browser-side entry point) accepts, duplicated here (not imported) for the same reason `render-composition-headless-server.ts` duplicates `BrowserHeadlessRenderConfig`'s shape: this config crosses into the page via `page.evaluate`'s structured-cloned `arg`, not a compile-time import boundary. */
 interface BrowserRangeConfigArg {
   project: Project;
@@ -183,6 +213,124 @@ interface BrowserRangeConfigArg {
   startFrame: number;
   endFrame: number;
   keyframeIntervalFrames: number;
+  textRenderEntries: SerializedTextRenderEntry[];
+}
+
+/**
+ * This package's own bundled default font, used for every `TextNode` that
+ * does not (yet) resolve `fontRef` against a real font-asset registry -
+ * `render_scene`'s actual render path never wired one up at all (every
+ * text node silently built as an empty, glyph-less group; see this
+ * module's own `buildTextRenderEntriesForProject` doc), the same
+ * "SIL Open Font License, freely embeddable" font this workspace's own
+ * `@cadra/golden-frames` test fixtures already use for text golden tests.
+ */
+const DEFAULT_FONT_PATH = new URL("../assets/fonts/Inter-Variable.ttf", import.meta.url);
+
+/** Recursively collects every `TextNode` in `node`'s own subtree into `out`. */
+function collectTextNodes(node: SceneNode, out: TextNode[]): void {
+  if (node.kind === "text") {
+    out.push(node);
+  }
+  for (const child of node.children) {
+    collectTextNodes(child, out);
+  }
+}
+
+/**
+ * Prepares a `SerializedTextRenderEntry` for every distinct `TextNode`
+ * (deduped by `computeTextNodeRenderKey(node, 0)`, mirroring
+ * `TextRenderRegistry`'s own resolve-by-key contract) found anywhere in
+ * `project`'s own scene graph, across every composition/track/clip.
+ *
+ * Fixes the gap this package's own render path had: `createRenderer()`
+ * (called from `browser-headless-render-entry.ts`, the actual entry
+ * `submitEncodedRenderJob` bundles and runs per range) was never handed a
+ * `TextRenderRegistry` at all, so every `TextNode` resolved to an empty,
+ * glyph-less `THREE.Group()` (see `node-factory.ts`'s own `buildTextObject`)
+ * - correctly reproducing the mesh/light/post-processing pipeline while
+ * silently rendering zero text, with no thrown error anywhere in that
+ * path. Font loading, HarfBuzz shaping, and MSDF atlas generation are all
+ * Node-only-dependency-laden work (`fontkit`'s `Buffer` usage,
+ * `msdfgen-wasm`'s `createRequire`, `subset-font`'s `fs`) that cannot run
+ * inside the browser-bundled render page itself (see `@cadra/text/browser`'s
+ * own module doc for why that package's browser-safe subset deliberately
+ * omits `prepareTextRenderData`/`createFontRegistry`), so this runs here,
+ * server-side, once per job (not once per range/attempt - every range
+ * needs the exact same entries, mirroring how `entrySource` itself is
+ * bundled once and reused), with the result carried into the page as
+ * plain, `page.evaluate`-structured-clone-safe data.
+ *
+ * Every node currently uses this module's own bundled default font
+ * regardless of whether it set its own `fontRef`: resolving `fontRef`
+ * against a real, agent-uploaded font asset registry is a follow-up this
+ * phase's scope does not cover (`create_scene`/`add_text_node`'s own
+ * MCP-server callers have no such registry wired through to here yet
+ * either), not something dropped by mistake.
+ */
+async function buildTextRenderEntriesForProject(
+  project: Project,
+): Promise<SerializedTextRenderEntry[]> {
+  const textNodes: TextNode[] = [];
+  for (const composition of project.compositions) {
+    for (const track of composition.tracks) {
+      for (const clip of track.clips) {
+        collectTextNodes(clip.node, textNodes);
+      }
+    }
+  }
+
+  if (textNodes.length === 0) {
+    return [];
+  }
+
+  const fontBytes = readFileSync(DEFAULT_FONT_PATH);
+  const fontBytesArray = Array.from(fontBytes);
+  // "opentype" (not "fontkit"): the only backend @cadra/text/browser's own
+  // doc confirms works when bundled for a browser target, matching
+  // createFontRegistry's own doc ("pass 'opentype' ... for registries that
+  // must also work inside a browser-bundled render page"). Preparation
+  // itself runs here in Node, but shaping must stay consistent with
+  // whatever backend a browser-side re-shape would use, and there is none
+  // here at all - "opentype" is simply the correct, only-supported choice.
+  const fontRegistry = createFontRegistry("opentype");
+  const font = await fontRegistry.registerBytes(fontBytes).ready;
+
+  const entries = new Map<string, SerializedTextRenderEntry>();
+  for (const node of textNodes) {
+    const cacheKey = computeTextNodeRenderKey(node, 0);
+    if (entries.has(cacheKey)) {
+      continue;
+    }
+
+    // A 128px-per-em MSDF (vs the library's 42px default, tuned for
+    // preview-sized text) keeps glyph edges crisp when a title fills a large
+    // fraction of a 1080p+ frame: at the default, a full-width title
+    // magnifies the atlas ~12x and its edges read visibly stair-stepped in
+    // the encoded output. `range` stays at its default: the MSDF material's
+    // alpha ramp is calibrated against that default, and a wider range
+    // leaves a visible haze out to each glyph quad's own bounds.
+    const data = await prepareTextRenderData(font, node.content, {
+      atlasOptions: { fontSize: 128 },
+    });
+    entries.set(cacheKey, {
+      cacheKey,
+      data: {
+        atlasPages: data.atlasPages.map((page) => ({
+          width: page.width,
+          height: page.height,
+          pixels: Array.from(page.pixels),
+          png: Array.from(page.png),
+        })),
+        glyphs: data.glyphs,
+        lineCount: data.lineCount,
+      },
+      fontBytes: fontBytesArray,
+      fontContentHash: font.contentHash,
+    });
+  }
+
+  return Array.from(entries.values());
 }
 
 /**
@@ -289,7 +437,27 @@ async function runOneRangeAttempt(
     return await Promise.race([renderDone, crashed, timeoutPromise]);
   } finally {
     clearTimeout(timeoutHandle);
-    await browser?.close();
+    // `browser.close()` itself has no bounded wait anywhere in this
+    // codebase: under sustained CPU contention (e.g. many concurrent
+    // software-rendered Chromium instances, see browser-launcher.ts's own
+    // doc on why this launcher defaults to swiftshader), a `close()` call
+    // on an already-struggling browser process can itself hang well past
+    // this attempt's own timeoutMs, delaying the next attempt's fresh
+    // `launcher({})` call and compounding exactly the CPU pressure that
+    // caused the timeout in the first place. Racing it against a fixed
+    // ceiling bounds that: an attempt that hit `timeoutMs` always frees up
+    // this function's own caller within `timeoutMs + BROWSER_CLOSE_GRACE_MS`
+    // at the very most, whether or not the underlying process ever
+    // actually finishes tearing down.
+    if (browser !== undefined) {
+      await Promise.race([
+        browser.close().catch(() => {}),
+        new Promise<void>((resolve) => {
+          const handle = setTimeout(resolve, BROWSER_CLOSE_GRACE_MS);
+          (handle as unknown as { unref?: () => void }).unref?.();
+        }),
+      ]);
+    }
   }
 }
 
@@ -408,6 +576,10 @@ async function runEncodedRenderJob(
   const keyframeIntervalFrames = options.keyframeIntervalFrames ?? DEFAULT_KEYFRAME_INTERVAL_FRAMES;
 
   const entrySource = await bundleEntry({ entryFilePath: options.entryFilePath });
+  // Computed once per job, not once per range/attempt: every range needs
+  // the exact same entries (see buildTextRenderEntriesForProject's own
+  // doc), mirroring entrySource itself being bundled once and reused.
+  const textRenderEntries = await buildTextRenderEntriesForProject(options.project);
 
   const renderRange = (range: {
     rangeIndex: number;
@@ -423,6 +595,7 @@ async function runEncodedRenderJob(
         seed: options.seed,
         bitrate: options.bitrate,
         keyframeIntervalFrames,
+        textRenderEntries,
       },
       range,
       options.onProgress,
