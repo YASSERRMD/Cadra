@@ -351,6 +351,21 @@ describe("ThreeRenderer lifecycle", () => {
     expect(webGpuRenderer.setSize).toHaveBeenCalledWith(1920, 1080, false);
   });
 
+  it("sets the fallback default camera's aspect from init()'s render size, and updates it again on resize()", async () => {
+    const { deps, webGpuRenderer } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size); // size = { width: 640, height: 480 }
+
+    renderer.renderFrame(makeSceneState(), makeFrameContext()); // no activeCameraNodeId -> default camera
+    const [, cameraAfterInit] = webGpuRenderer.render.mock.calls[0] as [THREE.Scene, THREE.PerspectiveCamera];
+    expect(cameraAfterInit.aspect).toBeCloseTo(640 / 480, 10);
+
+    renderer.resize({ width: 1920, height: 1080 });
+    renderer.renderFrame(makeSceneState(), makeFrameContext());
+    const [, cameraAfterResize] = webGpuRenderer.render.mock.calls[1] as [THREE.Scene, THREE.PerspectiveCamera];
+    expect(cameraAfterResize.aspect).toBeCloseTo(1920 / 1080, 10);
+  });
+
   it("throws a clear error if renderFrame is called before init resolves", () => {
     const { deps } = createFakeDeps();
     const renderer = new ThreeRenderer(deps);
@@ -702,6 +717,50 @@ describe("ThreeRenderer.renderFrame: active camera selection", () => {
     const [, camera] = webGpuRenderer.render.mock.calls[0] as [THREE.Scene, THREE.PerspectiveCamera];
     expect(camera.name).toBe("camera-a");
     expect(camera.fov).toBe(60);
+  });
+
+  it("sets the reconciled camera's aspect from the composition's own width/height, not hardcoded square", async () => {
+    const { deps, webGpuRenderer } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    const sceneState = makeSceneState({
+      width: 1920,
+      height: 1080,
+      layers: [
+        {
+          compositionId: "comp-1",
+          trackId: "track-1",
+          clipId: "clip-1",
+          node: cameraNode("camera-a", 50),
+          zIndex: 0,
+          localFrame: 3,
+          opacity: 1,
+        },
+      ],
+      activeCameraNodeId: "camera-a",
+    });
+
+    renderer.renderFrame(sceneState, makeFrameContext());
+
+    const [, camera] = webGpuRenderer.render.mock.calls[0] as [THREE.Scene, THREE.PerspectiveCamera];
+    expect(camera.aspect).toBeCloseTo(1920 / 1080, 10);
+    expect(camera.aspect).not.toBe(1);
+
+    // Re-rendering a differently-shaped composition through the same renderer
+    // instance updates the aspect again, rather than sticking to whatever the
+    // first renderFrame call happened to compute: `aspect` is resolved fresh
+    // from `sceneState.width/height` every call (see NodeFactoryContext.aspect's
+    // own doc), not cached on the camera or the renderer.
+    const squareSceneState = makeSceneState({
+      width: 500,
+      height: 500,
+      layers: sceneState.layers,
+      activeCameraNodeId: "camera-a",
+    });
+    renderer.renderFrame(squareSceneState, makeFrameContext());
+    const [, secondCamera] = webGpuRenderer.render.mock.calls[1] as [THREE.Scene, THREE.PerspectiveCamera];
+    expect(secondCamera.aspect).toBe(1);
   });
 
   it("picks the correct camera among several candidates by matching activeCameraNodeId", async () => {

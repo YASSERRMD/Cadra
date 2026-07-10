@@ -89,6 +89,10 @@ export interface Reconciler {
    * `.fps`'s own docs), supplied fresh each call for the same reason.
    * Defaults to every `"volume"` node rendering as an empty group when
    * `backend` is omitted.
+   *
+   * `aspect` is this composition's own `width / height` (see
+   * `NodeFactoryContext.aspect`'s own doc), supplied fresh each call for the
+   * same reason. Defaults to `1` (square) when omitted.
    */
   reconcile(
     nextRoot: SceneNode | null,
@@ -98,6 +102,7 @@ export interface Reconciler {
     particleObjects?: ReadonlyMap<string, THREE.Object3D>,
     backend?: RendererBackend,
     fps?: number,
+    aspect?: number,
   ): THREE.Object3D | null;
 }
 
@@ -145,12 +150,14 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
     particleObjects?: ReadonlyMap<string, THREE.Object3D>,
     backend?: RendererBackend,
     fps?: number,
+    aspect?: number,
   ): THREE.Object3D | null {
     ctx.whiteBalanceGain = whiteBalanceGain ?? [1, 1, 1];
     ctx.physicsTransforms = physicsTransforms;
     ctx.particleObjects = particleObjects;
     ctx.backend = backend;
     ctx.fps = fps;
+    ctx.aspect = aspect;
 
     if (nextRoot === null) {
       teardownAll();

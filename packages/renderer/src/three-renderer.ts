@@ -815,6 +815,8 @@ export class ThreeRenderer implements Renderer {
     this.particleRuntime = this.deps.createParticleRuntime(this.buildParticleRuntimeDeps());
 
     this.threeRenderer.setSize(size.width, size.height, false);
+    this.defaultCamera.aspect = size.width / size.height;
+    this.defaultCamera.updateProjectionMatrix();
     this.domTarget = target;
   }
 
@@ -870,6 +872,7 @@ export class ThreeRenderer implements Renderer {
       particleObjects,
       this.resolvedBackend,
       frameContext.fps,
+      sceneState.width / sceneState.height,
     );
     if (reconciled === null) {
       // `buildSceneStateRoot` always returns a non-null SceneNode, so
@@ -1293,6 +1296,8 @@ export class ThreeRenderer implements Renderer {
     // `updateStyle: false`: touching `.style` would throw on an
     // OffscreenCanvas-shaped target, which has no such property.
     renderer.setSize(size.width, size.height, false);
+    this.defaultCamera.aspect = size.width / size.height;
+    this.defaultCamera.updateProjectionMatrix();
   }
 
   dispose(): void {

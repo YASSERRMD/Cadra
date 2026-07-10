@@ -175,6 +175,15 @@ export interface NodeFactoryContext {
    */
   fps?: number;
   /**
+   * This composition's own `width / height`, mutated in place by
+   * `reconciler.ts`'s own `reconcile` at the start of every call, mirroring
+   * `fps`'s own treatment. Read only by `"camera"`, to set `camera.aspect`
+   * so its projection matches the composition's actual pixel dimensions
+   * instead of assuming a square frame. `undefined` falls back to `1`
+   * (square), matching every camera's behavior before this field existed.
+   */
+  aspect?: number;
+  /**
    * Resolves a `ModelNode.assetRef` to its already-loaded `LoadedModel`.
    * Optional, mirroring `textRenderRegistry`/`satoriLayerRenderRegistry`'s
    * own optionality: omitted, or no entry for a given `assetRef`, falls
@@ -632,7 +641,7 @@ export function applyNodeProperties(
       camera.fov = resolveNumberProperty(node.fov, frame);
       camera.near = resolveNumberProperty(node.near, frame);
       camera.far = resolveNumberProperty(node.far, frame);
-      camera.aspect = 1; // Nothing in this phase's scope sets aspect from anywhere else.
+      camera.aspect = ctx.aspect ?? 1;
       camera.updateProjectionMatrix();
       const target = resolveVector3Property(node.target, frame);
       camera.lookAt(target[0], target[1], target[2]);
