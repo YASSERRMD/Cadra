@@ -62,6 +62,7 @@ import { buildVideoProviderRegistry } from "./provider-registry.js";
 import { registerCadraRenderFramesTools } from "./render-frames-tools.js";
 import { registerCadraRenderTools } from "./render-tools.js";
 import { registerCadraRepairSceneTool } from "./repair-scene-tools.js";
+import { registerCadraSceneLintTools } from "./scene-lint-tools.js";
 import { registerCadraSceneTools } from "./scene-tools.js";
 import { registerCadraTextNodeTools } from "./text-node-tools.js";
 import {
@@ -161,6 +162,7 @@ export function createCadraMcpServer(options: CreateCadraMcpServerOptions = {}):
   registerCadraAssetTools(server, config, logger);
   registerCadraRenderTools(server, config, logger, { generationStore });
   registerCadraRenderFramesTools(server, config, logger);
+  registerCadraSceneLintTools(server, config, logger);
   registerCadraRepairSceneTool(server, config.workspaceRoot, logger);
   registerCadraGenerationTools(server, config, logger, {
     ...options.generation,
