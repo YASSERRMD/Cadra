@@ -191,6 +191,16 @@ export interface NodeFactoryContext {
    */
   aspect?: number;
   /**
+   * This render's own base seed (`FrameContext.seed`), mutated in place by
+   * `reconciler.ts`'s own `reconcile` at the start of every call, mirroring
+   * `fps`'s own treatment. Read only by `"volume"`, combined with the node's
+   * own `id` and `VolumeNode.seed` (see that field's own doc) into the
+   * numeric seed its noise field is built from - `undefined` falls back to
+   * `0`, contributing nothing (a volume's own `id`/`seed` alone still
+   * determine its noise field, same as before this field existed).
+   */
+  seed?: string | number;
+  /**
    * Resolves a `ModelNode.assetRef` to its already-loaded `LoadedModel`.
    * Optional, mirroring `textRenderRegistry`/`satoriLayerRenderRegistry`'s
    * own optionality: omitted, or no entry for a given `assetRef`, falls
@@ -455,7 +465,7 @@ function buildThreeObject(node: SceneNode, ctx: NodeFactoryContext): BuiltObject
         return { object3D: new THREE.Group(), owned: undefined };
       }
       const geometry = buildVolumeGeometry(node.shape);
-      const material = buildVolumeMaterial(node);
+      const material = buildVolumeMaterial(node, ctx);
       const mesh = new THREE.Mesh(geometry, material);
       return { object3D: mesh, owned: { volume: { geometry, material } } };
     }
@@ -558,12 +568,23 @@ interface VolumeUniforms {
  * their backing uniforms (`VolumeUniforms`, stashed on `material.userData`)
  * every frame, exactly like every other node kind's own per-frame
  * properties, without rebuilding this material or its shader graph.
+ *
+ * `numericSeed` combines `ctx.seed` (this render's own base seed),
+ * `node.id`, and `node.seed` into one value, exactly matching
+ * `VolumeNode.seed`'s own documented contract ("combined with the
+ * composition's own frame seed and this node's own `id`") - mirroring
+ * `@cadra/particles`' own identical `ParticleSystemNode.seed` combination
+ * (`toNumericSeed(\`${node.id}:${node.seed}\`)`, in `particle-runtime.ts`),
+ * folded into one `toNumericSeed` call here since `valueNoise3DTSL` (unlike
+ * `particleHash`) takes only one seed-shaped argument, not a separate
+ * composition/emitter pair.
  */
-function buildVolumeMaterial(node: VolumeNode): VolumeNodeMaterial {
+function buildVolumeMaterial(node: VolumeNode, ctx: NodeFactoryContext): VolumeNodeMaterial {
   const material = new VolumeNodeMaterial();
   material.steps = node.raymarchSteps ?? 25;
 
-  const numericSeed = uint(toNumericSeed(node.seed ?? 0));
+  const resolvedNumericSeed = toNumericSeed(`${ctx.seed ?? 0}:${node.id}:${node.seed ?? 0}`);
+  const numericSeed = uint(resolvedNumericSeed);
   const frequency = node.noiseFrequency ?? 1;
 
   const uniforms: VolumeUniforms = {
@@ -574,6 +595,11 @@ function buildVolumeMaterial(node: VolumeNode): VolumeNodeMaterial {
     drift: uniform(0, "float") as Node<"float">,
   };
   material.userData.volumeUniforms = uniforms;
+  // Not consulted by anything else this material's own construction needs -
+  // stashed purely so a test can verify the resolved value without reaching
+  // into scatteringNode's own closure, mirroring volumeUniforms' own "stash
+  // on userData for test introspection" precedent immediately above.
+  material.userData.volumeNumericSeed = resolvedNumericSeed;
 
   material.scatteringNode = ({ positionRay }: { positionRay: Node<"vec3"> }) => {
     const sampleX = positionRay.x.mul(frequency) as Node<"float">;

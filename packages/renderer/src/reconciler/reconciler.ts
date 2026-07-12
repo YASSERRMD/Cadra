@@ -102,6 +102,11 @@ export interface Reconciler {
    * `aspect` is this composition's own `width / height` (see
    * `NodeFactoryContext.aspect`'s own doc), supplied fresh each call for the
    * same reason. Defaults to `1` (square) when omitted.
+   *
+   * `seed` is this render's own base seed (see `NodeFactoryContext.seed`'s
+   * own doc), supplied fresh each call for the same reason. Defaults to a
+   * `"volume"` node's noise field depending only on its own `id`/`seed`,
+   * with no composition-level contribution, when omitted.
    */
   reconcile(
     nextRoot: SceneNode | null,
@@ -112,6 +117,7 @@ export interface Reconciler {
     backend?: RendererBackend,
     fps?: number,
     aspect?: number,
+    seed?: string | number,
   ): THREE.Object3D | null;
 }
 
@@ -162,6 +168,7 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
     backend?: RendererBackend,
     fps?: number,
     aspect?: number,
+    seed?: string | number,
   ): THREE.Object3D | null {
     ctx.whiteBalanceGain = whiteBalanceGain ?? [1, 1, 1];
     ctx.physicsTransforms = physicsTransforms;
@@ -169,6 +176,7 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
     ctx.backend = backend;
     ctx.fps = fps;
     ctx.aspect = aspect;
+    ctx.seed = seed;
 
     if (nextRoot === null) {
       teardownAll();
