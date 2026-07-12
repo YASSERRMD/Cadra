@@ -192,6 +192,35 @@ describe("buildTextGroup: flat MSDF path", () => {
     expect(sawNearZero).toBe(true);
     expect(sawNearOne).toBe(true);
   });
+
+  it("orients each glyph's UV rect so its atlas content renders upright, not vertically mirrored", async () => {
+    // Regression test for a real bug: every glyph rendered vertically
+    // mirrored within its own (correctly positioned) quad - readable as
+    // "V" -> "Λ", "P" -> "b", "W" -> "M" - because applyGlyphUv paired
+    // PositionedGlyph.uv's v0/v1 with the wrong pair of PlaneGeometry
+    // vertices. Symmetric/round letters still looked glyph-shaped when
+    // flipped, which is why this went unnoticed in the existing "Cadra"
+    // golden reference (references/text-opentype.png predates this fix);
+    // punctuation and descenders (a comma's tail rendering above its dot)
+    // made it visible. This assertion pins the actual correct pairing,
+    // confirmed by rendering punctuated text through the real pipeline
+    // (createNativeGpuHeadlessRenderer) and reading the output PNG before
+    // writing this test - see the fix commit for the rendered evidence.
+    const data = await prepareTextRenderData(ROBOTO_FLEX, "V");
+    const resources = buildTextGroup(data, { color: [1, 1, 1, 1] });
+    const glyph = data.glyphs[0]!;
+
+    expect(glyph.uv.v0).toBeLessThan(glyph.uv.v1);
+
+    const uvAttribute = resources.geometries[0]!.getAttribute("uv");
+    // THREE.PlaneGeometry's 4 vertices are ordered bottom-left,
+    // bottom-right, top-left, top-right (build-text-group.ts's own doc).
+    const bottomLeftV = uvAttribute.getY(0);
+    const topLeftV = uvAttribute.getY(2);
+
+    expect(topLeftV).toBe(glyph.uv.v1);
+    expect(bottomLeftV).toBe(glyph.uv.v0);
+  });
 });
 
 describe("buildTextGroup: gradient fill", () => {

@@ -448,13 +448,13 @@ function applyGlyphUv(
   // top-left, top-right; its default uv attribute is [0,0, 1,0, 0,1, 1,1].
   const uv = new Float32Array([
     uvRect.u0,
-    uvRect.v1,
+    uvRect.v0,
     uvRect.u1,
-    uvRect.v1,
+    uvRect.v0,
     uvRect.u0,
-    uvRect.v0,
+    uvRect.v1,
     uvRect.u1,
-    uvRect.v0,
+    uvRect.v1,
   ]);
   geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
 }
