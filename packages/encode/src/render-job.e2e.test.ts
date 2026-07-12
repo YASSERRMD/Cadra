@@ -7,13 +7,16 @@ import {
   type Composition,
   createComposition,
   createProject,
+  Image,
   Light,
   type Project,
   Sequence,
   Shape,
+  Video,
 } from "@cadra/core";
-import { renderCompositionHeadlessServer } from "@cadra/headless";
+import { launchPlaywrightHeadlessBrowser, renderCompositionHeadlessServer } from "@cadra/headless";
 import { chromium } from "playwright";
+import { PNG } from "pngjs";
 import { describe, expect, it } from "vitest";
 
 import { BROWSER_HEADLESS_RENDER_ENTRY_PATH } from "./browser-headless-render-entry-path.js";
@@ -653,5 +656,287 @@ describe("submitEncodedRenderJob: real audio track in the final muxed output", (
       expect(readMp4AudioTrackTimescale(bytes)).toBeUndefined();
     },
     60_000,
+  );
+});
+
+/** Frame rate shared by both compositions in the `VideoNode` e2e test below: the source (color-swap) composition and the outer (`VideoNode`-consuming) composition must agree, since `resolveVideoSourceFrame`'s own returned source frame is expressed in the *consuming* composition's own fps space, not any notion of the source video's own encoded fps (see `resolveVideoSourceFrame`'s own doc in `@cadra/core`) - using the same fps for both is what makes composition-absolute frame 1 of the outer project land exactly on the source video's own frame 1 boundary, rather than some fractional point between two of its encoded frames. */
+const VIDEO_TEST_FPS = 10;
+/** Square, matching `browser-headless-render-entry.e2e.test.ts`'s own `IMAGE_SIZE` rationale: small, and large enough relative to the fullscreen plane's own `transform.scale` that no background pixel survives anywhere in the frame. */
+const VIDEO_TEST_SIZE = 32;
+
+/** A solid-color square PNG, mirroring `browser-headless-render-entry.e2e.test.ts`'s own `buildTwoToneTestPng` rationale, one flat color per call rather than a two-tone split. */
+function buildSolidColorPng(size: number, color: readonly [number, number, number]): Buffer {
+  const png = new PNG({ width: size, height: size });
+  for (let i = 0; i < size * size; i += 1) {
+    const index = i << 2;
+    png.data[index] = color[0];
+    png.data[index + 1] = color[1];
+    png.data[index + 2] = color[2];
+    png.data[index + 3] = 255;
+  }
+  return PNG.sync.write(png);
+}
+
+/**
+ * A project whose sole purpose is to be rendered once, to real, valid,
+ * playable video bytes, as this test's own *input* fixture: two fullscreen
+ * `ImageNode`s, one per frame (solid red at composition frame 0, solid
+ * blue at frame 1), mirroring `browser-headless-render-entry.e2e.test.ts`'s
+ * own `buildImageFillsFrameProject` fullscreen-plane technique - reusing
+ * this package's own real, already-proven encode/mux pipeline to
+ * synthesize a real test video, rather than hand-building a container.
+ */
+function buildTwoFrameColorSwapImageProject(redAssetRef: string, blueAssetRef: string): Project {
+  const redImage = Image({
+    id: "red-image",
+    assetRef: redAssetRef,
+    transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [8, 8, 8] },
+  });
+  const blueImage = Image({
+    id: "blue-image",
+    assetRef: blueAssetRef,
+    transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [8, 8, 8] },
+  });
+  const camera = Camera({
+    id: "camera-1",
+    transform: { position: [0, 0, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  });
+
+  const composition = createComposition({
+    id: "comp-1",
+    name: "Main",
+    fps: VIDEO_TEST_FPS,
+    durationInFrames: 2,
+    width: VIDEO_TEST_SIZE,
+    height: VIDEO_TEST_SIZE,
+    tracks: [
+      {
+        id: "track-image",
+        clips: [
+          Sequence({ id: "clip-red", from: 0, durationInFrames: 1, content: redImage }),
+          Sequence({ id: "clip-blue", from: 1, durationInFrames: 1, content: blueImage }),
+        ],
+      },
+      {
+        id: "track-camera",
+        clips: [Sequence({ id: "clip-camera", from: 0, durationInFrames: 2, content: camera })],
+      },
+    ],
+  });
+
+  return createProject({
+    id: "color-swap-source",
+    name: "Color swap source",
+    compositions: [
+      { ...composition, activeCameraTrack: [{ startFrame: 0, durationInFrames: 2, cameraNodeId: "camera-1" }] },
+    ],
+  });
+}
+
+/**
+ * The actual project under test: a single, fullscreen `VideoNode`
+ * referencing `assetRef` (the color-swap video `buildTwoFrameColorSwapImageProject`
+ * produces), no `inFrame`/`outFrame`/`playbackRate` override - every
+ * default (`inFrame: 0`, `playbackRate: 1`, `outFrame` unbounded) means
+ * `resolveVideoSourceFrame` maps composition-absolute frame N directly to
+ * source frame N, so composition frame 0 must show red and frame 1 must
+ * show blue, exactly matching the source video's own two frames.
+ */
+function buildVideoFillsFrameProject(assetRef: string): Project {
+  const video = Video({
+    id: "video-1",
+    assetRef,
+    transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [8, 8, 8] },
+  });
+  const camera = Camera({
+    id: "camera-1",
+    transform: { position: [0, 0, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  });
+
+  const composition = createComposition({
+    id: "comp-1",
+    name: "Main",
+    fps: VIDEO_TEST_FPS,
+    durationInFrames: 2,
+    width: VIDEO_TEST_SIZE,
+    height: VIDEO_TEST_SIZE,
+    tracks: [
+      {
+        id: "track-video",
+        clips: [Sequence({ id: "clip-video", from: 0, durationInFrames: 2, content: video })],
+      },
+      {
+        id: "track-camera",
+        clips: [Sequence({ id: "clip-camera", from: 0, durationInFrames: 2, content: camera })],
+      },
+    ],
+  });
+
+  return createProject({
+    id: "video-e2e",
+    name: "Video e2e",
+    compositions: [
+      { ...composition, activeCameraTrack: [{ startFrame: 0, durationInFrames: 2, cameraNodeId: "camera-1" }] },
+    ],
+  });
+}
+
+/** Reads one RGBA pixel out of a flat, top-left-origin RGBA8 buffer, mirroring `browser-headless-render-entry.e2e.test.ts`'s own `pixelAt`. */
+function pixelAt(data: readonly number[], width: number, x: number, y: number): readonly number[] {
+  const index = (y * width + x) * 4;
+  return data.slice(index, index + 4);
+}
+
+describe("submitEncodedRenderJob: real VideoNode texture rendering", () => {
+  it(
+    "renders the correct source frame's own real pixel content at each composition frame (not stuck on frame 0, not off-by-one)",
+    async () => {
+      if (!chromiumAvailable) {
+        console.log(
+          "VideoNode texture rendering e2e test: skipping, real Chromium not found (no cached Playwright browser in this environment).",
+        );
+        return;
+      }
+
+      // --- Step 1: produce a real, valid, playable 2-frame test video
+      // (frame 0 red, frame 1 blue) via this package's own real production
+      // render pipeline (submitEncodedRenderJob itself) - the exact same
+      // real encode+mux path this whole package exists to run, reused here
+      // purely as this test's own fixture-generation step.
+      const redAssetRef = "cadra-asset://color-swap-red";
+      const blueAssetRef = "cadra-asset://color-swap-blue";
+      const redPng = buildSolidColorPng(VIDEO_TEST_SIZE, [255, 0, 0]);
+      const bluePng = buildSolidColorPng(VIDEO_TEST_SIZE, [0, 0, 255]);
+      const sourceBytesByRef: Record<string, Uint8Array> = {
+        [redAssetRef]: redPng,
+        [blueAssetRef]: bluePng,
+      };
+
+      const testVideoBytes = await renderToTempFile((destination) =>
+        submitEncodedRenderJob({
+          project: buildTwoFrameColorSwapImageProject(redAssetRef, blueAssetRef),
+          compositionId: "comp-1",
+          seed: "color-swap-source-seed",
+          format: "mp4",
+          bitrate: 2_000_000,
+          destination,
+          entryFilePath: BROWSER_HEADLESS_RENDER_ENTRY_PATH,
+          timeoutMs: 45_000,
+          fetchAssetBytes: async (assetRef) => sourceBytesByRef[assetRef],
+        }).then((handle) => handle.result),
+      );
+
+      // --- Step 2: render a genuinely different project containing one
+      // VideoNode referencing the video Step 1 just produced, through the
+      // real production submitEncodedRenderJob path - proving
+      // render-job.ts's own scene walk/dedup/per-range sample computation
+      // and browser-headless-render-entry.ts's own decode work correctly
+      // together, not merely in isolation.
+      const videoAssetRef = "cadra-asset://color-swap-video";
+      const outputBytes = await renderToTempFile((destination) =>
+        submitEncodedRenderJob({
+          project: buildVideoFillsFrameProject(videoAssetRef),
+          compositionId: "comp-1",
+          seed: "video-node-e2e-seed",
+          format: "mp4",
+          bitrate: 2_000_000,
+          destination,
+          entryFilePath: BROWSER_HEADLESS_RENDER_ENTRY_PATH,
+          timeoutMs: 45_000,
+          fetchAssetBytes: async (assetRef) => (assetRef === videoAssetRef ? testVideoBytes : undefined),
+        }).then((handle) => handle.result),
+      );
+
+      // --- Step 3: verify the final output's own frame 0 and frame 1
+      // directly, via a real, plain <video> element sampled through a
+      // canvas (no @cadra bundled code needed here at all - this only
+      // proves outputBytes is a genuinely valid, standard-decodable video
+      // whose own content is correct, the same real-world criterion any
+      // actual video player would apply).
+      const browser = await launchPlaywrightHeadlessBrowser({});
+      try {
+        const page = await browser.newPage();
+        const sampled = await page.evaluate(
+          async (arg: { videoBytes: number[]; fps: number }) => {
+            const video = document.createElement("video");
+            video.muted = true;
+            video.playsInline = true;
+            video.preload = "auto";
+            const blob = new Blob([Uint8Array.from(arg.videoBytes)]);
+            await new Promise<void>((resolve, reject) => {
+              video.addEventListener("loadeddata", () => resolve(), { once: true });
+              video.addEventListener(
+                "error",
+                () => reject(video.error instanceof Error ? video.error : new Error("video load failed")),
+                { once: true },
+              );
+              video.src = URL.createObjectURL(blob);
+            });
+
+            const canvas = document.createElement("canvas");
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const context = canvas.getContext("2d");
+            if (context === null) {
+              throw new Error("Failed to acquire a 2D context.");
+            }
+            // Re-bound to a fresh const: TypeScript's narrowing of
+            // `context !== null` above does not flow into the nested
+            // `seekAndSample` function declaration below.
+            const context2d = context;
+
+            async function seekAndSample(timestamp: number): Promise<number[]> {
+              if (Math.abs(video.currentTime - timestamp) > 1e-4) {
+                await new Promise<void>((resolve, reject) => {
+                  const onSeeked = (): void => {
+                    video.removeEventListener("error", onError);
+                    resolve();
+                  };
+                  const onError = (): void => {
+                    video.removeEventListener("seeked", onSeeked);
+                    reject(video.error instanceof Error ? video.error : new Error("video seek failed"));
+                  };
+                  video.addEventListener("seeked", onSeeked, { once: true });
+                  video.addEventListener("error", onError, { once: true });
+                  video.currentTime = timestamp;
+                });
+              }
+              context2d.drawImage(video, 0, 0);
+              const imageData = context2d.getImageData(0, 0, canvas.width, canvas.height);
+              return Array.from(imageData.data);
+            }
+
+            const frame0 = await seekAndSample(0);
+            const frame1 = await seekAndSample(1 / arg.fps);
+            return { width: canvas.width, height: canvas.height, frame0, frame1 };
+          },
+          { videoBytes: Array.from(outputBytes), fps: VIDEO_TEST_FPS },
+        );
+
+        expect(sampled.width).toBe(VIDEO_TEST_SIZE);
+        expect(sampled.height).toBe(VIDEO_TEST_SIZE);
+
+        const center = Math.floor(VIDEO_TEST_SIZE / 2);
+        const frame0Pixel = pixelAt(sampled.frame0, sampled.width, center, center);
+        const frame1Pixel = pixelAt(sampled.frame1, sampled.width, center, center);
+
+        // Composition frame 0: the VideoNode's own source frame 0 (the
+        // color-swap video's own red frame). A "stuck on the placeholder"
+        // regression would leave this the renderer's own gray placeholder
+        // color instead.
+        expect(frame0Pixel[0]).toBeGreaterThan(150);
+        expect(frame0Pixel[2]).toBeLessThan(100);
+
+        // Composition frame 1: the VideoNode's own source frame 1 (blue).
+        // An off-by-one regression (e.g. still sampling source frame 0, or
+        // this render key never actually changing between frames) would
+        // leave this red instead of blue.
+        expect(frame1Pixel[2]).toBeGreaterThan(150);
+        expect(frame1Pixel[0]).toBeLessThan(100);
+      } finally {
+        await browser.close();
+      }
+    },
+    90_000,
   );
 });

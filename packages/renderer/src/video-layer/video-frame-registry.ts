@@ -27,6 +27,23 @@ export interface MutableVideoFrameRegistry extends VideoFrameRegistry {
 }
 
 /**
+ * The cache key a `VideoFrameRegistry` is keyed by for a given `assetRef` at
+ * a given already-resolved source-video-local frame - the same shape both
+ * `computeVideoFrameRenderKey` below (given a live `VideoNode` plus a
+ * composition frame to resolve) and a Node-side render-job's own per-range
+ * sample preparation (given only the raw `assetRef`/`sourceFrame` pair it
+ * already computed via `resolveVideoSourceFrame` itself, with no `VideoNode`
+ * in hand at all - see `@cadra/encode`'s own `render-job.ts`) need to
+ * produce, so both sides of the `page.evaluate` structured-clone boundary
+ * are guaranteed to agree on one key format from a single source of truth,
+ * rather than two independently-hand-written `JSON.stringify` call sites
+ * silently drifting apart.
+ */
+export function computeVideoFrameCacheKey(assetRef: string, sourceFrame: number): string {
+  return JSON.stringify({ assetRef, sourceFrame });
+}
+
+/**
  * The cache key a `VideoFrameRegistry` is keyed by for a given `VideoNode`
  * at a given `frame`: `assetRef` plus the exact source-video-local frame
  * `@cadra/core`'s own `resolveVideoSourceFrame` maps this frame to (via
@@ -62,7 +79,7 @@ export function computeVideoFrameRenderKey(node: VideoNode, frame: number): stri
     },
     frame,
   );
-  return JSON.stringify({ assetRef: node.assetRef, sourceFrame });
+  return computeVideoFrameCacheKey(node.assetRef, sourceFrame);
 }
 
 /** A simple in-memory `MutableVideoFrameRegistry`, backed by a `Map`. */

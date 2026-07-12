@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 
-import type { Project, SceneNode, TextNode } from "@cadra/core";
-import { resolveAudioMixdown } from "@cadra/core";
+import type { Project, SceneNode, TextNode, VideoFrameMapping } from "@cadra/core";
+import { resolveAudioMixdown, resolveVideoSourceFrame } from "@cadra/core";
 import type {
   BrowserLauncher,
   HeadlessBrowserLike,
@@ -23,6 +23,7 @@ import {
 } from "@cadra/headless";
 import {
   computeTextNodeRenderKey,
+  computeVideoFrameCacheKey,
   createDataTexture,
   createInMemoryTextRenderRegistry,
   createInMemoryTextureRegistry,
@@ -161,15 +162,17 @@ export interface SubmitEncodedRenderJobOptions {
   /** Milliseconds allowed for one range attempt before it is treated as timed out and retried. Defaults to `DEFAULT_RANGE_TIMEOUT_MS`. */
   timeoutMs?: number;
   /**
-   * Resolves an `ImageNode.assetRef` or an `AudioMixdownSegment.assetRef`
-   * to that asset's own raw bytes, e.g. `@cadra/mcp-server`'s own
-   * `createAssetBytesFetcher(workspaceRoot)` - the same asset store serves
-   * both kinds, so one resolver covers both. Omitted means every
-   * `ImageNode` in `project` renders as the renderer's own documented gray
-   * placeholder (see `buildImageRenderEntriesForProject`'s own doc for the
-   * full "unresolved is an expected runtime state" contract) and every
-   * audio segment renders as silence (see `prepareAudioMixdownAssetEntries`'s
-   * own doc for the identical contract on the audio side).
+   * Resolves an `ImageNode.assetRef`, a `VideoNode.assetRef`, or an
+   * `AudioMixdownSegment.assetRef` to that asset's own raw bytes, e.g.
+   * `@cadra/mcp-server`'s own `createAssetBytesFetcher(workspaceRoot)` -
+   * the same asset store serves all three kinds, so one resolver covers
+   * them all. Omitted means every `ImageNode`/`VideoNode` in `project`
+   * renders as the renderer's own documented placeholder (see
+   * `buildImageRenderEntriesForProject`'s/`buildVideoAssetEntriesForProject`'s
+   * own doc for the full "unresolved is an expected runtime state"
+   * contract) and every audio segment renders as silence (see
+   * `prepareAudioMixdownAssetEntries`'s own doc for the identical contract
+   * on the audio side).
    */
   fetchAssetBytes?: (assetRef: string) => Promise<Uint8Array | undefined>;
   /** Target bitrate in bits per second for the audio encoder, if `project`'s own composition has any audio content at all (see `resolveAudioMixdown`). Defaults to `DEFAULT_AUDIO_BITRATE`. Has no effect on a composition with no `audioTracks` (or only empty ones): no audio encoding happens there at all, matching `renderAudioMixdown`'s own "a caller decides whether a silent mixdown is worth encoding" contract. */
@@ -232,6 +235,18 @@ interface SerializedImageRenderEntry {
   bytes: number[];
 }
 
+/** Mirrors `browser-headless-render-entry.ts`'s own `SerializedVideoAssetEntry`; duplicated for the same reason `SerializedImageRenderEntry` above is. */
+interface SerializedVideoAssetEntry {
+  assetRef: string;
+  bytes: number[];
+}
+
+/** Mirrors `browser-headless-render-entry.ts`'s own `VideoSampleRequest`; duplicated for the same reason `SerializedImageRenderEntry` above is. */
+interface VideoSampleRequest {
+  assetRef: string;
+  sourceFrame: number;
+}
+
 /** Mirrors `browser-headless-render-entry.ts`'s own `SerializedTextRenderData`. */
 interface SerializedTextRenderData {
   atlasPages: SerializedMsdfAtlasPage[];
@@ -258,6 +273,8 @@ interface BrowserRangeConfigArg {
   keyframeIntervalFrames: number;
   textRenderEntries: SerializedTextRenderEntry[];
   imageRenderEntries: SerializedImageRenderEntry[];
+  videoAssetEntries: SerializedVideoAssetEntry[];
+  videoSamplesNeeded: VideoSampleRequest[];
 }
 
 /** Mirrors `browser-headless-render-entry.ts`'s own `SerializedAudioAssetEntry`; duplicated (not imported) for the same reason `BrowserRangeConfigArg` above is - see its own doc. */
@@ -312,6 +329,100 @@ function collectImageAssetRefs(node: SceneNode, out: Set<string>): void {
   for (const child of node.children) {
     collectImageAssetRefs(child, out);
   }
+}
+
+/** Recursively collects every distinct `VideoNode.assetRef` in `node`'s own subtree into `out`. */
+function collectVideoAssetRefs(node: SceneNode, out: Set<string>): void {
+  if (node.kind === "video") {
+    out.add(node.assetRef);
+  }
+  for (const child of node.children) {
+    collectVideoAssetRefs(child, out);
+  }
+}
+
+/** A `VideoNode`'s own `resolveVideoSourceFrame` mapping (`@cadra/core`'s own `VideoFrameMapping`), plus the `assetRef` it applies to - `collectVideoNodeMappings`'s own per-node output shape. */
+interface VideoNodeMapping extends VideoFrameMapping {
+  assetRef: string;
+}
+
+/** Recursively collects every `VideoNode`'s own `resolveVideoSourceFrame` mapping in `node`'s own subtree into `out`. */
+function collectVideoNodeMappings(node: SceneNode, out: VideoNodeMapping[]): void {
+  if (node.kind === "video") {
+    out.push({
+      assetRef: node.assetRef,
+      inFrame: node.inFrame,
+      outFrame: node.outFrame,
+      playbackRate: node.playbackRate,
+      outOfRangeBehavior: node.outOfRangeBehavior,
+    });
+  }
+  for (const child of node.children) {
+    collectVideoNodeMappings(child, out);
+  }
+}
+
+/**
+ * Collects every `VideoNode` mapping across every composition/track/clip in
+ * `project`'s own scene graph - `computeNeededVideoSamplesForRange`'s own
+ * input, computed once per job (mirroring `textRenderEntries`/
+ * `imageRenderEntries`'s own "computed once, reused by every range"
+ * placement in `runEncodedRenderJob`): every field this reads
+ * (`assetRef`/`inFrame`/`outFrame`/`playbackRate`/`outOfRangeBehavior`) is a
+ * plain, non-keyframeable value on `VideoNode` (see its own doc in
+ * `@cadra/core`), so nothing here depends on which frame range is currently
+ * rendering.
+ */
+function collectVideoNodeMappingsForProject(project: Project): VideoNodeMapping[] {
+  const mappings: VideoNodeMapping[] = [];
+  for (const composition of project.compositions) {
+    for (const track of composition.tracks) {
+      for (const clip of track.clips) {
+        collectVideoNodeMappings(clip.node, mappings);
+      }
+    }
+  }
+  return mappings;
+}
+
+/**
+ * Computes every distinct `(assetRef, sourceFrame)` pair this range's own
+ * `[startFrame, endFrame)` needs a decoded video frame for: for every
+ * `VideoNodeMapping` in `videoNodeMappings` (see
+ * `collectVideoNodeMappingsForProject`) and every composition-absolute
+ * frame in this range, resolves `resolveVideoSourceFrame` and dedupes via
+ * the exact same cache-key format `@cadra/renderer`'s own
+ * `computeVideoFrameCacheKey` (and so, ultimately, `VideoFrameRegistry`
+ * itself) uses - guaranteeing this list contains exactly the entries the
+ * renderer will actually look up: no more (a wasted decode for a source
+ * frame no node in this range will ever request) and no less (a
+ * placeholder shown for a frame a real decode was actually available for).
+ *
+ * Pure arithmetic over an already-collected mapping list: no scene-graph
+ * walk happens per range (see `collectVideoNodeMappingsForProject`'s own
+ * doc for why one project-wide walk, done once per job, is enough).
+ */
+function computeNeededVideoSamplesForRange(
+  videoNodeMappings: readonly VideoNodeMapping[],
+  startFrame: number,
+  endFrame: number,
+): VideoSampleRequest[] {
+  const seenKeys = new Set<string>();
+  const requests: VideoSampleRequest[] = [];
+
+  for (const mapping of videoNodeMappings) {
+    for (let frame = startFrame; frame < endFrame; frame += 1) {
+      const sourceFrame = resolveVideoSourceFrame(mapping, frame);
+      const key = computeVideoFrameCacheKey(mapping.assetRef, sourceFrame);
+      if (seenKeys.has(key)) {
+        continue;
+      }
+      seenKeys.add(key);
+      requests.push({ assetRef: mapping.assetRef, sourceFrame });
+    }
+  }
+
+  return requests;
 }
 
 /** One prepared, real (non-serialized) `TextRenderRegistry` entry - `prepareTextRenderEntriesForProject`'s own output shape, shared by both of its callers below. */
@@ -494,6 +605,71 @@ async function buildImageRenderEntriesForProject(
   return entries.map((entry) => ({ assetRef: entry.assetRef, bytes: Array.from(entry.bytes) }));
 }
 
+/** Mirrors `PreparedImageEntry`, for the video case. */
+interface PreparedVideoEntry {
+  assetRef: string;
+  bytes: Uint8Array;
+}
+
+/**
+ * Fetches every distinct `VideoNode.assetRef` found anywhere in `project`'s
+ * own scene graph (deduped, across every composition/track/clip) via
+ * `fetchAssetBytes` - mirrors `prepareImageEntriesForProject`'s own shape
+ * exactly, one asset fetch per distinct `assetRef` regardless of how many
+ * `VideoNode`s (or ranges) actually reference it; every range of the same
+ * job reuses this same result (see `runEncodedRenderJob`'s own "computed
+ * once per job" comment), since the raw bytes a `VideoNode.assetRef`
+ * resolves to do not depend on which frame range is currently rendering,
+ * only on which distinct assets the whole project references at all.
+ *
+ * Same "omitted `fetchAssetBytes`, or one `assetRef` it cannot resolve" is
+ * not an error" contract as `prepareImageEntriesForProject`'s own doc - see
+ * there for why.
+ */
+async function prepareVideoEntriesForProject(
+  project: Project,
+  fetchAssetBytes?: (assetRef: string) => Promise<Uint8Array | undefined>,
+): Promise<PreparedVideoEntry[]> {
+  if (fetchAssetBytes === undefined) {
+    return [];
+  }
+
+  const assetRefs = new Set<string>();
+  for (const composition of project.compositions) {
+    for (const track of composition.tracks) {
+      for (const clip of track.clips) {
+        collectVideoAssetRefs(clip.node, assetRefs);
+      }
+    }
+  }
+
+  const entries: PreparedVideoEntry[] = [];
+  for (const assetRef of assetRefs) {
+    const bytes = await fetchAssetBytes(assetRef);
+    if (bytes === undefined) {
+      continue;
+    }
+    entries.push({ assetRef, bytes });
+  }
+  return entries;
+}
+
+/**
+ * Serializes `prepareVideoEntriesForProject`'s output to cross a
+ * `page.evaluate` structured-clone boundary, mirroring
+ * `buildImageRenderEntriesForProject`'s own doc exactly: no Node-only
+ * decoding happens here at all (a real browser's own `HTMLVideoElement`
+ * does that decoding, inside `browser-headless-render-entry.ts`'s own
+ * `buildVideoFrameRegistry`), this only fetches and serializes raw bytes.
+ */
+async function buildVideoAssetEntriesForProject(
+  project: Project,
+  fetchAssetBytes?: (assetRef: string) => Promise<Uint8Array | undefined>,
+): Promise<SerializedVideoAssetEntry[]> {
+  const entries = await prepareVideoEntriesForProject(project, fetchAssetBytes);
+  return entries.map((entry) => ({ assetRef: entry.assetRef, bytes: Array.from(entry.bytes) }));
+}
+
 /**
  * Builds a real (non-serialized) `TextRenderRegistry` for `project`, via the
  * same `prepareTextRenderEntriesForProject` every `TextNode` in this module
@@ -585,7 +761,8 @@ export async function buildTextureRegistryForProject(
 async function runOneRangeAttempt(
   launcher: BrowserLauncher,
   entrySource: string,
-  baseConfig: Omit<BrowserRangeConfigArg, "startFrame" | "endFrame">,
+  baseConfig: Omit<BrowserRangeConfigArg, "startFrame" | "endFrame" | "videoSamplesNeeded">,
+  videoNodeMappings: readonly VideoNodeMapping[],
   range: { startFrame: number; endFrame: number },
   onProgress: OnProgressFn | undefined,
   onLog: OnLogFn | undefined,
@@ -643,6 +820,16 @@ async function runOneRangeAttempt(
       ...baseConfig,
       startFrame: range.startFrame,
       endFrame: range.endFrame,
+      // Computed here, not passed in via baseConfig: unlike
+      // videoAssetEntries (job-wide raw bytes, identical for every range),
+      // which sourceFrames this specific range's own [startFrame, endFrame)
+      // needs genuinely varies per range - see
+      // computeNeededVideoSamplesForRange's own doc.
+      videoSamplesNeeded: computeNeededVideoSamplesForRange(
+        videoNodeMappings,
+        range.startFrame,
+        range.endFrame,
+      ),
     };
 
     // See render-composition-headless-server.ts's own extensive doc on why
@@ -1016,6 +1203,16 @@ async function runEncodedRenderJob(
     options.project,
     options.fetchAssetBytes,
   );
+  const videoAssetEntries = await buildVideoAssetEntriesForProject(
+    options.project,
+    options.fetchAssetBytes,
+  );
+  // Also computed once per job, not once per range: the mapping itself
+  // (assetRef/inFrame/outFrame/playbackRate/outOfRangeBehavior) never
+  // varies by frame range, only computeNeededVideoSamplesForRange's own
+  // per-range resolveVideoSourceFrame arithmetic does - see that
+  // function's own doc.
+  const videoNodeMappings = collectVideoNodeMappingsForProject(options.project);
 
   // Kicked off alongside the video ranges below (not awaited here), since
   // whole-composition audio mixdown/encoding has no range to align against
@@ -1076,7 +1273,9 @@ async function runEncodedRenderJob(
         keyframeIntervalFrames,
         textRenderEntries,
         imageRenderEntries,
+        videoAssetEntries,
       },
+      videoNodeMappings,
       range,
       options.onProgress,
       options.onLog,
