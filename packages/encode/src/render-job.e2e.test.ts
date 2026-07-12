@@ -11,6 +11,7 @@ import {
   Light,
   Model,
   type Project,
+  Satori,
   Sequence,
   Shape,
   Video,
@@ -1007,6 +1008,56 @@ describe("submitEncodedRenderJob: real ModelNode texture rendering", () => {
 });
 
 /**
+ * Proves `submitEncodedRenderJob` - `render_scene`'s own real production
+ * render path - actually renders a real `SatoriNode`, not the silently
+ * empty group every `"satori"` node fell back to before this wiring
+ * (`buildSatoriLayerRenderEntriesForRange`/`browser-headless-render-entry.ts`'s
+ * own `buildSatoriLayerRenderRegistry` were both new; `render_frames`' own
+ * equivalent gap was already closed separately, but satori rendering cannot
+ * run inside a browser page at all - see `SerializedSatoriLayerRenderEntry`'s
+ * own doc - so this needed genuinely separate, per-range Node-side
+ * rasterization, not just reusing the same registry-building function).
+ *
+ * Same raw-output-byte-comparison technique as the `ModelNode` test
+ * immediately above, for the same reason: an empty-group placeholder
+ * renders identically regardless of the satori layer's own color.
+ */
+describe("submitEncodedRenderJob: real SatoriNode rendering", () => {
+  it(
+    "renders visibly different output for two renders whose only difference is their SatoriNode's own layer color",
+    async () => {
+      if (!chromiumAvailable) {
+        console.log(
+          "SatoriNode e2e test: skipping, real Chromium not found (no cached Playwright browser in this environment).",
+        );
+        return;
+      }
+
+      async function renderWithColor(color: string): Promise<Buffer> {
+        return renderToTempFile((destination) =>
+          submitEncodedRenderJob({
+            project: buildSatoriFillsFrameProject(color),
+            compositionId: "comp-1",
+            seed: "satori-node-e2e-seed",
+            format: "mp4",
+            bitrate: 2_000_000,
+            destination,
+            entryFilePath: BROWSER_HEADLESS_RENDER_ENTRY_PATH,
+            timeoutMs: 45_000,
+          }).then((handle) => handle.result),
+        );
+      }
+
+      const redOutput = await renderWithColor("#ff0000");
+      const blueOutput = await renderWithColor("#0000ff");
+
+      expect(Buffer.compare(redOutput, blueOutput)).not.toBe(0);
+    },
+    60_000,
+  );
+});
+
+/**
  * A minimal `FileReader` standing in for the real DOM one, mirroring
  * `@cadra/renderer`'s own `gltf-loader.test.ts` `NodeFileReaderPolyfill`
  * exactly: `GLTFExporter`'s own writer unconditionally reaches for a real
@@ -1119,6 +1170,61 @@ function buildModelFillsFrameProject(assetRef: string): Project {
   return createProject({
     id: "model-e2e",
     name: "Model e2e",
+    compositions: [
+      { ...composition, activeCameraTrack: [{ startFrame: 0, durationInFrames: 2, cameraNodeId: "camera-1" }] },
+    ],
+  });
+}
+
+/**
+ * The actual project under test: a single, fullscreen `SatoriNode` whose
+ * own `layer` is a solid-`color` `div` (no text at all, so no font-family-
+ * matching question to worry about - see
+ * `buildSatoriLayerRenderEntriesForRange`'s own doc), mirroring
+ * `render-frames-tools.test.ts`'s own `buildSatoriFillsFrameDocument`: a
+ * satori node's own geometry is sized directly from its own `width`/
+ * `height` in world units (not normalized to 1 unit wide), so a
+ * generously large, fixed `width`/`height` trivially fills the whole
+ * camera frustum. No lights needed - a satori layer's own rasterized
+ * texture, applied via `MeshBasicMaterial`, is unlit.
+ */
+function buildSatoriFillsFrameProject(color: string): Project {
+  const satori = Satori({
+    id: "satori-1",
+    layer: {
+      type: "div",
+      style: { width: "100%", height: "100%", backgroundColor: color, display: "flex" },
+    },
+    width: 400,
+    height: 400,
+  });
+  const camera = Camera({
+    id: "camera-1",
+    transform: { position: [0, 0, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  });
+
+  const composition = createComposition({
+    id: "comp-1",
+    name: "Main",
+    fps: VIDEO_TEST_FPS,
+    durationInFrames: 2,
+    width: VIDEO_TEST_SIZE,
+    height: VIDEO_TEST_SIZE,
+    tracks: [
+      {
+        id: "track-satori",
+        clips: [Sequence({ id: "clip-satori", from: 0, durationInFrames: 2, content: satori })],
+      },
+      {
+        id: "track-camera",
+        clips: [Sequence({ id: "clip-camera", from: 0, durationInFrames: 2, content: camera })],
+      },
+    ],
+  });
+
+  return createProject({
+    id: "satori-e2e",
+    name: "Satori e2e",
     compositions: [
       { ...composition, activeCameraTrack: [{ startFrame: 0, durationInFrames: 2, cameraNodeId: "camera-1" }] },
     ],

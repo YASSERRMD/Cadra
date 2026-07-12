@@ -262,6 +262,14 @@ interface VideoSampleRequest {
   sourceFrame: number;
 }
 
+/** Mirrors `browser-headless-render-entry.ts`'s own `SerializedSatoriLayerRenderEntry`; duplicated for the same reason `SerializedImageRenderEntry` above is. */
+interface SerializedSatoriLayerRenderEntry {
+  cacheKey: string;
+  width: number;
+  height: number;
+  pixels: number[];
+}
+
 /** Mirrors `browser-headless-render-entry.ts`'s own `SerializedTextRenderData`. */
 interface SerializedTextRenderData {
   atlasPages: SerializedMsdfAtlasPage[];
@@ -291,6 +299,7 @@ interface BrowserRangeConfigArg {
   modelRenderEntries: SerializedModelAssetEntry[];
   videoAssetEntries: SerializedVideoAssetEntry[];
   videoSamplesNeeded: VideoSampleRequest[];
+  satoriLayerRenderEntries: SerializedSatoriLayerRenderEntry[];
 }
 
 /** Mirrors `browser-headless-render-entry.ts`'s own `SerializedAudioAssetEntry`; duplicated (not imported) for the same reason `BrowserRangeConfigArg` above is - see its own doc. */
@@ -999,6 +1008,75 @@ export async function buildSatoriLayerRenderRegistryForProject(
 }
 
 /**
+ * Fetches every distinct `SatoriNode` render-key's own rasterized pixels
+ * needed anywhere within `[startFrame, endFrame)` - `render_scene`'s own
+ * per-range counterpart to `buildSatoriLayerRenderRegistryForProject`
+ * (`render_frames`' own same-process path) immediately above: computed once
+ * per range (not once per job, unlike image/model/video's own raw asset
+ * bytes), because a `SatoriNode`'s own rendered pixels genuinely can vary by
+ * frame (`elementAnimations`; see `computeSatoriLayerRenderKey`'s own doc),
+ * scoped to exactly the frames this one range actually needs - mirroring
+ * `computeNeededVideoSamplesForRange`'s own per-range scoping. One
+ * difference: unlike video, satori has no cheaper "resolve which distinct
+ * samples are needed" arithmetic separate from the render itself, so every
+ * frame in the range is walked directly, deduped only by `cacheKey` (a node
+ * whose `elementAnimations` resolves to the same style across a run of
+ * frames still rasterizes only once for that whole run, the same dedup
+ * `buildSatoriLayerRenderRegistryForProject` itself already does).
+ *
+ * Passes `fonts: []` to `prepareSatoriLayerRenderData` for the same reason
+ * `buildSatoriLayerRenderRegistryForProject`'s own doc gives (a confirmed
+ * upstream Satori/opentype.js crash parsing this module's own bundled
+ * variable font).
+ *
+ * Returns `[]` when `project` has no satori nodes at all - the browser
+ * side's own `buildSatoriLayerRenderRegistry` (see
+ * `browser-headless-render-entry.ts`) already treats an empty entries array
+ * the same as "no satori content to register," matching every other asset
+ * kind's own "omitted means placeholder" contract.
+ */
+async function buildSatoriLayerRenderEntriesForRange(
+  project: Project,
+  startFrame: number,
+  endFrame: number,
+): Promise<SerializedSatoriLayerRenderEntry[]> {
+  const satoriNodes: SatoriNode[] = [];
+  for (const composition of project.compositions) {
+    for (const track of composition.tracks) {
+      for (const clip of track.clips) {
+        collectSatoriNodes(clip.node, satoriNodes);
+      }
+    }
+  }
+
+  if (satoriNodes.length === 0) {
+    return [];
+  }
+
+  const fonts: SatoriLayerFont[] = [];
+  const seenCacheKeys = new Set<string>();
+  const entries: SerializedSatoriLayerRenderEntry[] = [];
+  for (const node of satoriNodes) {
+    for (let frame = startFrame; frame < endFrame; frame += 1) {
+      const cacheKey = computeSatoriLayerRenderKey(node, frame);
+      if (seenCacheKeys.has(cacheKey)) {
+        continue;
+      }
+      seenCacheKeys.add(cacheKey);
+      const rasterized = await prepareSatoriLayerRenderData(node, frame, fonts);
+      entries.push({
+        cacheKey,
+        width: rasterized.width,
+        height: rasterized.height,
+        pixels: Array.from(rasterized.pixels),
+      });
+    }
+  }
+
+  return entries;
+}
+
+/**
  * Runs exactly one range attempt: launches a fresh browser (mirroring
  * `renderCompositionHeadlessServer`'s own `runOneAttempt`: one browser
  * launch per attempt, not shared/reused across attempts, for the same
@@ -1011,7 +1089,10 @@ export async function buildSatoriLayerRenderRegistryForProject(
 async function runOneRangeAttempt(
   launcher: BrowserLauncher,
   entrySource: string,
-  baseConfig: Omit<BrowserRangeConfigArg, "startFrame" | "endFrame" | "videoSamplesNeeded">,
+  baseConfig: Omit<
+    BrowserRangeConfigArg,
+    "startFrame" | "endFrame" | "videoSamplesNeeded" | "satoriLayerRenderEntries"
+  >,
   videoNodeMappings: readonly VideoNodeMapping[],
   range: { startFrame: number; endFrame: number },
   onProgress: OnProgressFn | undefined,
@@ -1066,10 +1147,22 @@ async function runOneRangeAttempt(
 
     await page.addScript(entrySource);
 
+    // Computed here, not passed in via baseConfig: a SatoriNode's own
+    // rendered pixels genuinely can vary by frame (elementAnimations), so
+    // which cache keys this specific range's own [startFrame, endFrame)
+    // needs varies per range, exactly like videoSamplesNeeded below - see
+    // buildSatoriLayerRenderEntriesForRange's own doc.
+    const satoriLayerRenderEntries = await buildSatoriLayerRenderEntriesForRange(
+      baseConfig.project,
+      range.startFrame,
+      range.endFrame,
+    );
+
     const config: BrowserRangeConfigArg = {
       ...baseConfig,
       startFrame: range.startFrame,
       endFrame: range.endFrame,
+      satoriLayerRenderEntries,
       // Computed here, not passed in via baseConfig: unlike
       // videoAssetEntries (job-wide raw bytes, identical for every range),
       // which sourceFrames this specific range's own [startFrame, endFrame)

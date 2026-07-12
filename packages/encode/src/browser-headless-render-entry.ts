@@ -10,6 +10,7 @@ import {
   createDefaultParseGltf,
   createImageTexture,
   createInMemoryModelRegistry,
+  createInMemorySatoriLayerRenderRegistry,
   createInMemoryTextRenderRegistry,
   createInMemoryTextureRegistry,
   createInMemoryVideoFrameRegistry,
@@ -21,6 +22,7 @@ import {
   type PixelBuffer,
   type SampleAtTimestamp,
   sampleVideoFrame,
+  type SatoriLayerRenderRegistry,
   type TextRenderRegistry,
   type TextureRegistry,
   type VideoFrameRegistry,
@@ -277,6 +279,57 @@ async function buildModelRegistry(entries: readonly SerializedModelAssetEntry[])
 }
 
 /**
+ * One already-rasterized `SatoriNode` render-key's own RGBA8 pixels,
+ * rendered ahead of time on the Node side (`@cadra/encode`'s own
+ * `render-job.ts`, via `buildSatoriLayerRenderEntriesForRange`) and carried
+ * across `page.evaluate`'s structured-clone boundary as plain, serializable
+ * data - unlike every other asset kind's own `Serialized*Entry` (raw,
+ * still-encoded bytes, decoded/parsed here in the page), satori rendering
+ * cannot run inside this page at all: `@cadra/satori-layer`/`@cadra/svg-raster`'s
+ * full (Node-only) entries depend on native Node addons (`harfbuzzjs`,
+ * `@resvg/resvg-js`) with no browser build, confirmed directly by this
+ * exact package's own `@cadra/renderer` export surface - adding
+ * `prepareSatoriLayerRenderData` to that package's main barrel once broke
+ * this exact browser bundle for that reason (see `@cadra/renderer`'s
+ * package.json own `./svg-layer/prepare-satori-layer-render-data.js`
+ * subpath export, added specifically so a Node-side caller can reach it
+ * without ever bundling it here). So the rendering itself already happened
+ * Node-side before this ever reaches the page; `buildSatoriLayerRenderRegistry`
+ * below only deserializes and registers already-finished pixels.
+ */
+export interface SerializedSatoriLayerRenderEntry {
+  /** The `SatoriLayerRenderRegistry` cache key (`computeSatoriLayerRenderKey`'s own output) this entry resolves. */
+  cacheKey: string;
+  width: number;
+  height: number;
+  /** RGBA8 pixels, row-major, top-to-bottom - `RasterizedSvg.pixels`, serialized. */
+  pixels: number[];
+}
+
+/**
+ * Reconstructs a real, in-page `SatoriLayerRenderRegistry` from `entries`:
+ * no decoding/parsing/rendering happens here at all (see
+ * `SerializedSatoriLayerRenderEntry`'s own doc for why) - this only
+ * deserializes each entry's own already-rasterized pixels back into a
+ * `RasterizedSvg`-shaped object and registers it under its own `cacheKey`.
+ */
+function buildSatoriLayerRenderRegistry(
+  entries: readonly SerializedSatoriLayerRenderEntry[],
+): SatoriLayerRenderRegistry {
+  const registry = createInMemorySatoriLayerRenderRegistry();
+  for (const entry of entries) {
+    registry.register(entry.cacheKey, {
+      rasterized: {
+        width: entry.width,
+        height: entry.height,
+        pixels: Uint8Array.from(entry.pixels),
+      },
+    });
+  }
+  return registry;
+}
+
+/**
  * One `VideoNode.assetRef` this project needs, fetched ahead of time on the
  * Node side (`@cadra/encode`'s own `render-job.ts`, via the same
  * `fetchAssetBytes` seam `SerializedImageRenderEntry` already uses) and
@@ -493,6 +546,8 @@ export interface BrowserHeadlessRenderConfig {
   videoAssetEntries?: readonly SerializedVideoAssetEntry[];
   /** Every `(assetRef, sourceFrame)` pair this render's own frames actually need a decoded video frame for; see `VideoSampleRequest`'s own doc. Omitted/empty means no video frame is ever sampled (every video node renders as the documented placeholder for the whole render), independent of whether `videoAssetEntries` itself is populated. */
   videoSamplesNeeded?: readonly VideoSampleRequest[];
+  /** Every `SatoriNode` render-key's own already-rasterized pixels this render's own frames actually need; see `SerializedSatoriLayerRenderEntry`'s own doc. Omitted/empty means every satori node renders as an empty group, matching `createRenderer`'s own no-registry default. */
+  satoriLayerRenderEntries?: readonly SerializedSatoriLayerRenderEntry[];
 }
 
 /**
@@ -534,6 +589,8 @@ export interface BrowserHeadlessRenderRangeConfig {
   videoAssetEntries?: readonly SerializedVideoAssetEntry[];
   /** Every `(assetRef, sourceFrame)` pair this range's own `[startFrame, endFrame)` actually needs a decoded video frame for; see `VideoSampleRequest`'s own doc. Omitted/empty means no video frame is ever sampled for this range, independent of whether `videoAssetEntries` itself is populated. */
   videoSamplesNeeded?: readonly VideoSampleRequest[];
+  /** Every `SatoriNode` render-key's own already-rasterized pixels this range's own `[startFrame, endFrame)` actually needs; see `SerializedSatoriLayerRenderEntry`'s own doc. Omitted/empty means every satori node renders as an empty group, matching `createRenderer`'s own no-registry default. */
+  satoriLayerRenderEntries?: readonly SerializedSatoriLayerRenderEntry[];
 }
 
 /**
@@ -693,6 +750,7 @@ async function buildEncodedChunksForRange(
   modelRenderEntries: readonly SerializedModelAssetEntry[] = [],
   videoAssetEntries: readonly SerializedVideoAssetEntry[] = [],
   videoSamplesNeeded: readonly VideoSampleRequest[] = [],
+  satoriLayerRenderEntries: readonly SerializedSatoriLayerRenderEntry[] = [],
 ): Promise<{
   composition: { width: number; height: number; fps: number };
   encodedChunks: AsyncGenerator<EncodedChunkResult>;
@@ -717,6 +775,7 @@ async function buildEncodedChunksForRange(
 
   const textureRegistry = await buildTextureRegistry(imageRenderEntries);
   const modelRegistry = await buildModelRegistry(modelRenderEntries);
+  const satoriLayerRenderRegistry = buildSatoriLayerRenderRegistry(satoriLayerRenderEntries);
   const videoFrameRegistry = await buildVideoFrameRegistry(
     videoAssetEntries,
     videoSamplesNeeded,
@@ -726,6 +785,7 @@ async function buildEncodedChunksForRange(
     textRenderRegistry: buildTextRenderRegistry(textRenderEntries),
     textureRegistry,
     modelRegistry,
+    satoriLayerRenderRegistry,
     videoFrameRegistry,
   });
   const renderer = createPixelReadableRenderer({
@@ -806,6 +866,7 @@ export async function runBrowserHeadlessRender(config: BrowserHeadlessRenderConf
       config.modelRenderEntries,
       config.videoAssetEntries,
       config.videoSamplesNeeded,
+      config.satoriLayerRenderEntries,
     );
 
     const destination = createBridgedWriteTarget();
@@ -890,6 +951,7 @@ export async function runBrowserHeadlessRenderRange(
       config.modelRenderEntries,
       config.videoAssetEntries,
       config.videoSamplesNeeded,
+      config.satoriLayerRenderEntries,
     );
 
     const serialized: SerializedEncodedChunk[] = [];
