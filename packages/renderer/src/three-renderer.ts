@@ -12,6 +12,7 @@ import {
   resolveVector3Property,
   type SceneNode,
   type SceneState,
+  type ShadowQualityTier,
   type WhiteBalanceGain,
 } from "@cadra/core";
 import {
@@ -905,7 +906,12 @@ export class ThreeRenderer implements Renderer {
       return;
     }
 
-    this.applyCascadedShadows(reconciled, sceneState.shadowQuality?.cascadedShadows, this.requireBackend());
+    this.applyCascadedShadows(
+      reconciled,
+      sceneState.shadowQuality?.cascadedShadows,
+      sceneState.shadowQuality?.tier,
+      this.requireBackend(),
+    );
 
     if (reconciled.parent !== this.scene) {
       // Only true on the very first call (or if the reconciler ever handed
@@ -1194,6 +1200,7 @@ export class ThreeRenderer implements Renderer {
   private applyCascadedShadows(
     reconciled: THREE.Object3D,
     cascadedShadows: CascadedShadowConfig | undefined,
+    tier: ShadowQualityTier | undefined,
     backend: RendererBackend,
   ): void {
     if (cascadedShadows === undefined || backend !== "webgpu") {
@@ -1212,7 +1219,13 @@ export class ThreeRenderer implements Renderer {
       return;
     }
 
-    const cascades = cascadedShadows.cascades ?? 4;
+    // Mirrors resolveAmbientOcclusion's own isPreview treatment immediately
+    // below: CascadedShadowConfig.cascades' own doc promises "Defaults to 3
+    // (4 at the "final" quality tier)", so an omitted cascades must resolve
+    // differently depending on tier, not a single fixed constant regardless
+    // of it.
+    const isPreview = (tier ?? "final") === "preview";
+    const cascades = cascadedShadows.cascades ?? (isPreview ? 3 : 4);
     const maxFar = cascadedShadows.maxFar ?? 100000;
     if (
       this.cachedCsm === undefined ||

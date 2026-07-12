@@ -1486,6 +1486,62 @@ describe("ThreeRenderer.renderFrame: cascaded shadow maps (Phase 57)", () => {
     expect((shadowNode as CSMShadowNode).maxFar).toBe(500);
   });
 
+  it("defaults an omitted cascades to 3 at the preview quality tier (CascadedShadowConfig.cascades' own documented default)", async () => {
+    const { deps } = createFakeDeps({ detectWebGpuSupport: () => true });
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({
+        layers: [
+          {
+            compositionId: "comp-1",
+            trackId: "track-1",
+            clipId: "clip-1",
+            node: lightNode("sun", { lightType: "directional" }),
+            zIndex: 0,
+            localFrame: 3,
+            opacity: 1,
+          },
+        ],
+        shadowQuality: { tier: "preview", cascadedShadows: {} },
+      }),
+      makeFrameContext(),
+    );
+
+    const light = renderer.getObject3DByNodeId("sun") as THREE.DirectionalLight;
+    const shadowNode = (light.shadow as unknown as { shadowNode: unknown }).shadowNode;
+    expect((shadowNode as CSMShadowNode).cascades).toBe(3);
+  });
+
+  it("defaults an omitted cascades to 4 at the final quality tier (including when tier itself is omitted)", async () => {
+    const { deps } = createFakeDeps({ detectWebGpuSupport: () => true });
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    renderer.renderFrame(
+      makeSceneState({
+        layers: [
+          {
+            compositionId: "comp-1",
+            trackId: "track-1",
+            clipId: "clip-1",
+            node: lightNode("sun", { lightType: "directional" }),
+            zIndex: 0,
+            localFrame: 3,
+            opacity: 1,
+          },
+        ],
+        shadowQuality: { cascadedShadows: {} },
+      }),
+      makeFrameContext(),
+    );
+
+    const light = renderer.getObject3DByNodeId("sun") as THREE.DirectionalLight;
+    const shadowNode = (light.shadow as unknown as { shadowNode: unknown }).shadowNode;
+    expect((shadowNode as CSMShadowNode).cascades).toBe(4);
+  });
+
   it("does not attach a CSMShadowNode on the WebGL2 fallback backend (cascaded shadows are WebGPU-only)", async () => {
     const { deps } = createFakeDeps({ detectWebGpuSupport: () => false });
     const renderer = new ThreeRenderer(deps);
