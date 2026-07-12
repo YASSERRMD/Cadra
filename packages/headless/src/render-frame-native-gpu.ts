@@ -540,6 +540,12 @@ export function createNativeGpuHeadlessRenderer(
   let headlessTarget: ReturnType<typeof createHeadlessGpuCanvasTarget> | undefined;
   let device: GPUDevice | undefined;
   let currentSize: RenderSize | undefined;
+  // True only once `inner.init()` itself has resolved - not merely once
+  // `init()` was called. `device = await createDevice()` can throw first
+  // (e.g. NativeGpuAdapterUnavailableError on a machine with no usable
+  // adapter), in which case `inner.init()` never runs at all: see
+  // `dispose()`'s own doc below for why this distinction matters.
+  let innerInitialized = false;
 
   const deps: ThreeRendererDependencies = {
     detectWebGpuSupport: () => true,
@@ -600,6 +606,7 @@ export function createNativeGpuHeadlessRenderer(
       headlessTarget = createHeadlessGpuCanvasTarget(device, size);
       currentSize = size;
       await inner.init(headlessTarget.canvas, size);
+      innerInitialized = true;
     },
     renderFrame(sceneState, frameContext): void {
       inner.renderFrame(sceneState, frameContext);
@@ -623,11 +630,25 @@ export function createNativeGpuHeadlessRenderer(
       inner.resize(size);
     },
     dispose(): void {
-      inner.dispose();
+      // inner.dispose() itself throws RendererNotInitializedError if
+      // inner.init() never ran (see ThreeRenderer.dispose()'s own
+      // requireInitialized() check) - a real, previously-undiscovered bug
+      // this guard fixes: init() rejecting before reaching inner.init()
+      // (e.g. NativeGpuAdapterUnavailableError, the expected outcome on any
+      // machine with no usable GPU adapter) left a caller's own
+      // `try { await renderer.init() } catch { ... } finally { renderer.dispose() }`
+      // pattern (e.g. render-frames-tools.ts's own) with its correctly-
+      // caught, actionable error silently replaced by this unrelated one,
+      // since a throw from a finally block overrides whatever the try/catch
+      // was already returning or throwing.
+      if (innerInitialized) {
+        inner.dispose();
+      }
       headlessTarget?.getLastDrawnTexture()?.destroy();
       device?.destroy();
       device = undefined;
       headlessTarget = undefined;
+      innerInitialized = false;
     },
     async readPixels() {
       if (device === undefined || headlessTarget === undefined || currentSize === undefined) {
