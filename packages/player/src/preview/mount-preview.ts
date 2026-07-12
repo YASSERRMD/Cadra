@@ -1,6 +1,8 @@
 import type { Project } from "@cadra/core";
 import type { Renderer } from "@cadra/renderer";
 
+import { attachAudioToTransport, type AudioTransportSync, type ResolveAudioBufferFn } from "../audio/attach-audio.js";
+import type { AudioContextLike } from "../audio/audio-context-like.js";
 import type {
   CancelFrameFn,
   IsFrameReadyFn,
@@ -43,6 +45,30 @@ export interface MountPreviewOptions {
    * requires a layout engine no DOM test environment reliably implements.
    */
   observeResize?: ObserveResizeFn;
+  /**
+   * Looks up a decoded `AudioBuffer` for an `AudioClip.assetRef`, forwarded
+   * to `attachAudioToTransport`'s own identically-named option (see that
+   * function's own doc for the full scheduling behavior: gain envelopes,
+   * trim, sync through seek/pause/play). Supplying this (or `audioContext`
+   * below) is what opts a `mountPreview` call into audio scheduling at all;
+   * with neither given, `attachAudioToTransport` is never attached and no
+   * `AudioContext` is ever constructed - see this function's own top-level
+   * doc for why. `mountPreview` itself fetches/decodes nothing: resolving
+   * `assetRef` to real, already-decoded buffers (e.g. via `@cadra/renderer`'s
+   * own `loadAudio`) is the caller's job, exactly like resolving a
+   * `Renderer`'s own `textureRegistry`/`videoFrameRegistry` is.
+   */
+  resolveAudioBuffer?: ResolveAudioBufferFn;
+  /**
+   * The Web Audio dependency, forwarded to `attachAudioToTransport`.
+   * Defaults to a real `AudioContext` once audio scheduling is actually
+   * attached (see `resolveAudioBuffer`'s own doc for when that is).
+   * Overridable in tests, since no DOM test environment implements one; also
+   * usable on its own (with `resolveAudioBuffer` omitted) for a caller that
+   * wants audio scheduling attached with a fixed `AudioContext` but every
+   * `assetRef` silent for now.
+   */
+  audioContext?: AudioContextLike;
 }
 
 /** Unsubscribes a handler previously registered via `PreviewHandle.onFrameChanged`. */
@@ -126,6 +152,16 @@ function formatFpsReadout(fps: number): string {
  * largest size that fits within the container while exactly preserving the
  * composition's aspect ratio (letterbox/pillarbox, never stretch), via
  * `computeAspectFitSize`.
+ *
+ * Audio: once the `Transport` is constructed, `attachAudioToTransport`
+ * (`../audio/attach-audio.js`) is attached to it - but only if the caller
+ * opted in via `options.resolveAudioBuffer` and/or `options.audioContext`;
+ * with neither, every `AudioClip.assetRef` would resolve to nothing
+ * regardless, so there is nothing to schedule, and no real `AudioContext`
+ * (unavailable in some environments, e.g. any DOM test environment) is ever
+ * constructed for a caller who never touches audio. `options.resolveAudioBuffer`
+ * is how a caller supplies the actual decoded buffers an `AudioClip.assetRef`
+ * resolves to - `mountPreview` itself fetches or decodes nothing on its own.
  */
 export function mountPreview(container: HTMLElement, options: MountPreviewOptions): PreviewHandle {
   const composition = options.project.compositions.find(
@@ -146,6 +182,7 @@ export function mountPreview(container: HTMLElement, options: MountPreviewOption
 
   let isDisposed = false;
   let transport: Transport | undefined;
+  let audioSync: AudioTransportSync | undefined;
   // Queued intents applied once the Transport exists, replayed in the order
   // received. A seek queued after a play (or vice versa) both survive; only
   // repeated seeks collapse to the last one, matching how a user rapidly
@@ -419,6 +456,23 @@ export function mountPreview(container: HTMLElement, options: MountPreviewOption
       isFrameReady: options.isFrameReady,
     });
     transport = createdTransport;
+    // Only attached when the caller opted in (resolveAudioBuffer and/or a
+    // fixed audioContext given): with neither, every assetRef would resolve
+    // to nothing regardless, so there is nothing to schedule - matching
+    // createRenderer's own "only construct extra machinery a caller
+    // actually opted into" pattern for textureRegistry/videoFrameRegistry.
+    // This also means a caller who never touches audio never pays for a
+    // real AudioContext construction (unavailable in some environments,
+    // e.g. jsdom, and not free even where it is available).
+    if (options.resolveAudioBuffer !== undefined || options.audioContext !== undefined) {
+      audioSync = attachAudioToTransport({
+        project: options.project,
+        compositionId: options.compositionId,
+        transport: createdTransport,
+        resolveAudioBuffer: options.resolveAudioBuffer ?? (() => undefined),
+        ...(options.audioContext !== undefined && { audioContext: options.audioContext }),
+      });
+    }
 
     createdTransport.on("frameChanged", (frame) => {
       pendingFrameForGetFrame = frame;
@@ -466,6 +520,7 @@ export function mountPreview(container: HTMLElement, options: MountPreviewOption
       container.removeAttribute("tabindex");
     }
 
+    audioSync?.dispose();
     transport?.dispose();
     options.renderer.dispose();
     frameChangedHandlers.clear();
