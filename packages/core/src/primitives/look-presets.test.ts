@@ -23,14 +23,22 @@ describe("LOOK_PRESETS", () => {
     }
   });
 
-  it("ships the full curated library: cinematic, product, documentary, boldSocial, elegantTitle", () => {
+  it("ships the full curated library: cinematic, product, documentary, boldSocial, elegantTitle, dynamicAction", () => {
     expect(Object.keys(LOOK_PRESETS).sort()).toEqual([
       "boldSocial",
       "cinematic",
       "documentary",
+      "dynamicAction",
       "elegantTitle",
       "product",
     ]);
+  });
+
+  it("dynamicAction is the one preset that turns on motionBlur (@cadra/renderer's own real, tested velocity-buffer effect, otherwise unreachable through apply_look_preset)", () => {
+    const motionBlurPresets = Object.entries(LOOK_PRESETS).filter(([, preset]) =>
+      preset.postProcessing?.effects.some((effect) => effect.type === "motionBlur"),
+    );
+    expect(motionBlurPresets.map(([name]) => name)).toEqual(["dynamicAction"]);
   });
 
   it("gives every preset at least one postProcessing effect", () => {
