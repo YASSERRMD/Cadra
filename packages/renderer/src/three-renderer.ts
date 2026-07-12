@@ -838,8 +838,19 @@ export class ThreeRenderer implements Renderer {
    * `webgl2` variant of `ParticleRuntimeDependencies` carries no `compute`
    * field at all, since nothing in that backend's own particle path ever
    * needs to dispatch a GPU compute pass.
+   *
+   * `resolveTexture` is `this.textureRegistry`'s own `resolve`, the same
+   * registry `applyImageProperties`'s/mesh normal-map's own resolution
+   * already uses (see `node-factory.ts`) - without this, a
+   * `ParticleSystemNode.textureRef` (both `gpu-particle-system.ts`'s and
+   * `cpu-particle-object.ts`'s own emitter construction already fully
+   * support it) had no way to ever resolve to a real texture, silently
+   * falling back to an untextured point/circle regardless of what an agent
+   * authored.
    */
   private buildParticleRuntimeDeps(): ParticleRuntimeDependencies {
+    const resolveTexture = (ref: string): THREE.Texture | undefined => this.textureRegistry?.resolve(ref);
+
     if (this.resolvedBackend === "webgpu") {
       return {
         backend: "webgpu",
@@ -851,9 +862,10 @@ export class ThreeRenderer implements Renderer {
           // genuinely is one at runtime (what that package's own
           // `Fn(...).compute(...)` construction actually returns).
           this.threeRenderer?.compute?.(computeNode as WebGpuComputeNode),
+        resolveTexture,
       };
     }
-    return { backend: "webgl2" };
+    return { backend: "webgl2", resolveTexture };
   }
 
   renderFrame(sceneState: SceneState, frameContext: FrameContext): void {
