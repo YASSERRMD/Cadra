@@ -123,6 +123,27 @@ describe("Cadra MCP apply_look_preset tool", () => {
     expect(parseScene(payload.document).success).toBe(true);
   });
 
+  it("applies dynamicAction (motionBlur, otherwise unreachable through this tool) and produces a scene that validates", async () => {
+    const connectedClient = await connectClient();
+    await createEmptyScene(connectedClient, "scene-1");
+
+    const result = await connectedClient.callTool({
+      name: APPLY_LOOK_PRESET_TOOL_NAME,
+      arguments: { sceneId: "scene-1", compositionId: "comp-1", presetName: "dynamicAction" },
+    });
+    const payload = parseToolResult<ApplyLookPresetPayload>(result as ToolTextResult);
+
+    expect(payload.success).toBe(true);
+    if (!payload.success) {
+      throw new Error("Expected apply_look_preset to succeed.");
+    }
+
+    const composition = payload.document.project.compositions[0]!;
+    const effectTypes = composition.postProcessing?.effects.map((effect) => effect.type) ?? [];
+    expect(effectTypes).toContain("motionBlur");
+    expect(parseScene(payload.document).success).toBe(true);
+  });
+
   it("is deterministic: applying the same preset with the same idSeed twice produces the same light node ids", async () => {
     const connectedClient = await connectClient();
     await createEmptyScene(connectedClient, "scene-1");

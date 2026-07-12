@@ -48,8 +48,19 @@ export interface LookPreset {
  * The curated look-preset library: `cinematic` and `product` shipped in
  * Phase 72 (proving the mechanism end to end); `documentary`, `boldSocial`,
  * and `elegantTitle` shipped in Phase 73 (this codebase's own improvement
- * track's "full curated library" deliverable). Adding a new named entry
- * here later is a pure data addition, no mechanism change.
+ * track's "full curated library" deliverable); `dynamicAction` added later,
+ * the first preset to turn on `motionBlur` (`@cadra/renderer`'s own
+ * velocity-buffer motion blur, real and independently tested via
+ * `@cadra/golden-frames`' own `motionBlurScene`, but until now unreachable
+ * through `apply_look_preset` - only authorable by hand-editing raw
+ * `postProcessing.effects` JSON). Adding a new named entry here later is a
+ * pure data addition, no mechanism change - with one caveat: `godRays`
+ * (`GodRaysEffectConfig`) needs a `lightNodeId` referencing a specific
+ * `LightNode`'s id, but a preset's own lights only ever get a fresh id at
+ * `applyLookPreset`'s own call time (`generateId()`, below) - there is no
+ * mechanism today for a preset's static `postProcessing` to reference one
+ * of its own not-yet-generated light ids, so `godRays` cannot be added to
+ * a preset without a real design change first (tracked separately).
  */
 export const LOOK_PRESETS: Record<string, LookPreset> = {
   /** A three-point-inspired key/fill/rim rig plus `POST_PROCESSING_LOOK_PRESETS.cinematic`: a general-purpose dramatic look for a title card or hero shot. */
@@ -174,6 +185,30 @@ export const LOOK_PRESETS: Record<string, LookPreset> = {
       effects: [
         { type: "bloom", threshold: 0.8, intensity: 0.35, radius: 0.3 },
         { type: "colorGrade", saturation: 0.92, contrast: 1.05 },
+      ],
+    },
+  },
+  /** A high-energy two-light rig plus velocity-buffer motion blur, a punchy grade, and sharpening: built for fast-moving subjects (sports, action, kinetic product shots) where real per-object motion blur reads as "genuinely fast," not just "in frame." WebGPU-only, per `MotionBlurEffectConfig`'s own doc - a WebGL2 render silently renders this preset's every other effect with no blur, not an error. */
+  dynamicAction: {
+    lights: [
+      {
+        name: "key",
+        lightType: "directional",
+        transform: { position: [4, 5, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        intensity: 2.3,
+        castShadow: true,
+      },
+      {
+        name: "fill",
+        lightType: "ambient",
+        intensity: 0.4,
+      },
+    ],
+    postProcessing: {
+      effects: [
+        { type: "motionBlur", shutterAngle: 200, samples: 16 },
+        { type: "colorGrade", saturation: 1.15, contrast: 1.15 },
+        { type: "sharpen", amount: 0.4 },
       ],
     },
   },
