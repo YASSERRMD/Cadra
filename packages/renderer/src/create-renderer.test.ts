@@ -20,6 +20,14 @@ describe("createRenderer", () => {
     expect(() => createRenderer({ detectWebGpuSupport: () => false })).not.toThrow();
   });
 
+  it("accepts optional modelRegistry/satoriLayerRenderRegistry overrides without throwing at construction time", () => {
+    const modelRegistry = { resolve: () => undefined };
+    const satoriLayerRenderRegistry = { resolve: () => undefined };
+    expect(() => createRenderer({ modelRegistry })).not.toThrow();
+    expect(() => createRenderer({ satoriLayerRenderRegistry })).not.toThrow();
+    expect(() => createRenderer({ modelRegistry, satoriLayerRenderRegistry })).not.toThrow();
+  });
+
   it("defers to the real WebGPU-detection default when no override is supplied", () => {
     // No assertion on the result itself (it depends on the real
     // environment's navigator.gpu, which this Node test environment does

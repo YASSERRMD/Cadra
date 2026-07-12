@@ -9,6 +9,7 @@ import {
   createProject,
   Image,
   Light,
+  Model,
   type Project,
   Sequence,
   Shape,
@@ -17,7 +18,9 @@ import {
 import { launchPlaywrightHeadlessBrowser, renderCompositionHeadlessServer } from "@cadra/headless";
 import { chromium } from "playwright";
 import { PNG } from "pngjs";
-import { describe, expect, it } from "vitest";
+import * as THREE from "three";
+import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BROWSER_HEADLESS_RENDER_ENTRY_PATH } from "./browser-headless-render-entry-path.js";
 import { expectedMp4DurationTicks } from "./mux-timescale.js";
@@ -940,3 +943,184 @@ describe("submitEncodedRenderJob: real VideoNode texture rendering", () => {
     90_000,
   );
 });
+
+/**
+ * Proves `submitEncodedRenderJob` - `render_scene`'s own real production
+ * render path - actually renders a real `ModelNode`, not the silently empty
+ * group every `"model"` node fell back to before this wiring
+ * (`buildModelRenderEntriesForProject`/`browser-headless-render-entry.ts`'s
+ * own `buildModelRegistry` were both new; the reconciler's own
+ * `buildModelObject`/`applyModelProperties` were already implemented and
+ * tested, but - like `render_frames`' own equivalent gap this mirrors - had
+ * no real caller feeding them an actual loaded model).
+ *
+ * Verifies via a raw output-byte comparison (`Buffer.compare`), not a
+ * decoded-pixel one: an empty-group placeholder renders identically
+ * regardless of the referenced GLB's own material color, so two renders
+ * differing only in that color producing byte-identical output would be
+ * exactly the pre-fix symptom - the same technique (and the same real
+ * production `submitEncodedRenderJob` pipeline) `render-e2e.test.ts`'s own
+ * "real image asset bytes reach the renderer" test already establishes for
+ * `ImageNode`.
+ */
+describe("submitEncodedRenderJob: real ModelNode texture rendering", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it(
+    "renders visibly different output for two renders whose only difference is their ModelNode's own GLB material color",
+    async () => {
+      if (!chromiumAvailable) {
+        console.log(
+          "ModelNode e2e test: skipping, real Chromium not found (no cached Playwright browser in this environment).",
+        );
+        return;
+      }
+
+      const redGlbBytes = await buildGlbBytes(0xff0000);
+      const blueGlbBytes = await buildGlbBytes(0x0000ff);
+
+      async function renderWithModel(assetRef: string, glbBytes: Uint8Array): Promise<Buffer> {
+        return renderToTempFile((destination) =>
+          submitEncodedRenderJob({
+            project: buildModelFillsFrameProject(assetRef),
+            compositionId: "comp-1",
+            seed: "model-node-e2e-seed",
+            format: "mp4",
+            bitrate: 2_000_000,
+            destination,
+            entryFilePath: BROWSER_HEADLESS_RENDER_ENTRY_PATH,
+            timeoutMs: 45_000,
+            fetchAssetBytes: async (ref) => (ref === assetRef ? glbBytes : undefined),
+          }).then((handle) => handle.result),
+        );
+      }
+
+      const redOutput = await renderWithModel("cadra-asset://model-red", redGlbBytes);
+      const blueOutput = await renderWithModel("cadra-asset://model-blue", blueGlbBytes);
+
+      expect(Buffer.compare(redOutput, blueOutput)).not.toBe(0);
+    },
+    60_000,
+  );
+});
+
+/**
+ * A minimal `FileReader` standing in for the real DOM one, mirroring
+ * `@cadra/renderer`'s own `gltf-loader.test.ts` `NodeFileReaderPolyfill`
+ * exactly: `GLTFExporter`'s own writer unconditionally reaches for a real
+ * `FileReader` to turn its own merged `Blob` into an `ArrayBuffer` (binary
+ * `.glb` mode), a genuine DOM API this headless Vitest/Node test environment
+ * does not provide on its own.
+ */
+class NodeFileReaderPolyfill {
+  result: ArrayBuffer | string | null = null;
+  onloadend: (() => void) | null = null;
+
+  readAsArrayBuffer(blob: Blob): void {
+    void blob.arrayBuffer().then((buffer) => {
+      this.result = buffer;
+      this.onloadend?.();
+    });
+  }
+
+  readAsDataURL(blob: Blob): void {
+    void blob.arrayBuffer().then((buffer) => {
+      const base64 = Buffer.from(buffer).toString("base64");
+      this.result = `data:${blob.type};base64,${base64}`;
+      this.onloadend?.();
+    });
+  }
+}
+
+/**
+ * Builds a real, self-contained `.glb`'s raw bytes: a unit `THREE.BoxGeometry`
+ * with a solid-`color` `MeshStandardMaterial`, round-tripped through
+ * `GLTFExporter`'s own `binary: true` mode - the exact same real-GLB
+ * construction `@cadra/renderer`'s own `gltf-loader.test.ts` (and this
+ * package's own `render-frames-tools.test.ts` equivalent, for the
+ * `render_frames` side of this same gap) already prove `createDefaultParseGltf`
+ * correctly parses back into a usable mesh.
+ */
+async function buildGlbBytes(color: number): Promise<Uint8Array> {
+  vi.stubGlobal("FileReader", NodeFileReaderPolyfill);
+  try {
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const material = new THREE.MeshStandardMaterial({ color });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = "TestBox";
+    const scene = new THREE.Scene();
+    scene.add(mesh);
+
+    const glb = (await new GLTFExporter().parseAsync(scene, { binary: true })) as ArrayBuffer;
+    return new Uint8Array(glb);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+}
+
+/**
+ * The actual project under test: a single, fullscreen `ModelNode`
+ * referencing `assetRef` (one of `buildGlbBytes`' own GLBs), scaled to
+ * `[4, 4, 4]` - a unit box's near face then sits at world Z `+2`, well
+ * inside the default `fov: 50`/distance-5 camera's frustum at that depth,
+ * filling the whole frame - mirroring `buildVideoFillsFrameProject`'s own
+ * "generously overfill, no per-test camera-distance math" approach. Lit
+ * (ambient + directional), since a `ModelNode`'s cloned material is
+ * whatever the source GLTF authored - here, a lit `MeshStandardMaterial` -
+ * unlike `ImageNode`/`VideoNode`'s always-unlit `MeshBasicMaterial`.
+ */
+function buildModelFillsFrameProject(assetRef: string): Project {
+  const model = Model({
+    id: "model-1",
+    assetRef,
+    transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [4, 4, 4] },
+  });
+  const camera = Camera({
+    id: "camera-1",
+    transform: { position: [0, 0, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  });
+  const ambientLight = Light({ id: "light-ambient", lightType: "ambient", intensity: 1.5 });
+  const directionalLight = Light({
+    id: "light-directional",
+    transform: { position: [2, 3, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    lightType: "directional",
+    intensity: 1.5,
+  });
+
+  const composition = createComposition({
+    id: "comp-1",
+    name: "Main",
+    fps: VIDEO_TEST_FPS,
+    durationInFrames: 2,
+    width: VIDEO_TEST_SIZE,
+    height: VIDEO_TEST_SIZE,
+    tracks: [
+      {
+        id: "track-model",
+        clips: [Sequence({ id: "clip-model", from: 0, durationInFrames: 2, content: model })],
+      },
+      {
+        id: "track-camera",
+        clips: [Sequence({ id: "clip-camera", from: 0, durationInFrames: 2, content: camera })],
+      },
+      {
+        id: "track-ambient",
+        clips: [Sequence({ id: "clip-ambient", from: 0, durationInFrames: 2, content: ambientLight })],
+      },
+      {
+        id: "track-directional",
+        clips: [Sequence({ id: "clip-directional", from: 0, durationInFrames: 2, content: directionalLight })],
+      },
+    ],
+  });
+
+  return createProject({
+    id: "model-e2e",
+    name: "Model e2e",
+    compositions: [
+      { ...composition, activeCameraTrack: [{ startFrame: 0, durationInFrames: 2, cameraNodeId: "camera-1" }] },
+    ],
+  });
+}
