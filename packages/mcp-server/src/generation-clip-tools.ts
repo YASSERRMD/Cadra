@@ -107,8 +107,8 @@ interface AddGeneratedClipSuccessPayload {
   document: SceneDocument;
 }
 
-/** Zod shape for the generation request `add_generated_clip` accepts, mirroring `@cadra/providers`' own `VideoGenerationRequest` field-for-field. */
-const generationRequestShape = {
+/** Zod shape for the generation request `add_generated_clip` accepts, mirroring `@cadra/providers`' own `VideoGenerationRequest` field-for-field. Exported so `./generation-regenerate-tools.ts` can derive its own all-optional `overrides` shape from the exact same field set/descriptions via `.partial()`, rather than hand-duplicating it. */
+export const generationRequestShape = {
   prompt: z.string().describe("The text prompt describing the desired video."),
   referenceImageUrls: z
     .array(z.string())

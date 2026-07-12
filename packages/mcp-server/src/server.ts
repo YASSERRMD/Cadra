@@ -11,7 +11,10 @@
  * Phase 35 `get_generation_status` tool (reports a generative-video slot's
  * current status against a `@cadra/providers` `GenerationStore`), the Phase
  * 36 `add_generated_clip` tool (requests a generation and inserts its clip
- * layer onto an existing scene's timeline in one step), the Phase 72
+ * layer onto an existing scene's timeline in one step), the `regenerate_clip`
+ * tool (resubmits a fresh generation for an existing VideoNode, resetting
+ * its assetRef so the next status check binds the new result automatically),
+ * the Phase 72
  * `add_text_node` tool (constructs a rich TextNode - stagger/physics/path/
  * morph/fill/outline/glow/shadow/variationAxes included - and inserts it in
  * one step) and `apply_look_preset` tool (applies a named lighting/post/
@@ -31,12 +34,13 @@
  * One `GenerationStore` instance is constructed here and shared across
  * every tool that touches generative-video state
  * (`registerCadraGenerationTools`, `registerCadraGenerationClipTools`,
- * `registerCadraRenderTools`): `add_generated_clip` submits into it,
+ * `registerCadraGenerationRegenerateTools`, `registerCadraRenderTools`):
+ * `add_generated_clip` submits into it, `regenerate_clip` resubmits into it,
  * `get_generation_status` reads its slot statuses, and `render_scene`'s own
  * pre-flight check reads and (via `bindReadyGenerationsForScene`) rewrites
  * it too. Sharing one instance is what makes a slot `add_generated_clip`
- * submits actually observable by the other two - three independently
- * constructed stores would never see each other's state. `options.generation`
+ * submits actually observable by the others - independently constructed
+ * stores would never see each other's state. `options.generation`
  * (if given) supplies this shared instance directly (chiefly for tests
  * injecting a fake-provider-backed store); omitted, a fresh, empty store is
  * constructed (no providers registered), matching every generation-aware
@@ -52,6 +56,7 @@ import { resolveCadraMcpServerConfig } from "./config.js";
 import { registerCadraContractResource } from "./contract-resource.js";
 import { registerCadraDescribeSceneTools } from "./describe-scene-tools.js";
 import { registerCadraGenerationClipTools } from "./generation-clip-tools.js";
+import { registerCadraGenerationRegenerateTools } from "./generation-regenerate-tools.js";
 import {
   registerCadraGenerationTools,
   type RegisterCadraGenerationToolsOptions,
@@ -152,7 +157,7 @@ export function createCadraMcpServer(options: CreateCadraMcpServerOptions = {}):
         logging: {},
       },
       instructions:
-        "Cadra exposes a code-first, agent-first 3D video animation scene format. Read the cadra://contract resource for the full JSON Schema, capability manifest, and example scene documents (including a kinetic title sequence, a product shot with IBL and depth of field, and an Arabic-and-Latin animated lower third). Use create_scene, get_scene, update_scene, validate_scene, and list_scenes to author and query scene documents persisted in this server's workspace. Use describe_scene for a compact id/kind/name-only structural outline of one scene instead of get_scene's full per-property JSON - the fast way to see what a scene contains and which node id to target next. Use generate_scene_from_text to generate a scene straight from a natural-language brief via an LLM, persisting the result the same way create_scene does; it self-corrects on an invalid first draft and returns its final diagnostics if every attempt fails. Use add_text_node to construct a rich TextNode (content, font, color, and any of stagger/physics/path/morph/fill/outline/glow/shadow/variationAxes) and insert it onto a scene's timeline in one step, rather than hand-writing the full TextNode JSON; pass typePreset (title/lowerThird/caption/kineticWordReveal) to start from a curated fontSize/stagger/outline/glow/shadow combination, overriding any field passed alongside it. Use apply_look_preset to apply a named cinematic look (a lighting rig plus post-processing/color-grading/environment bundle) onto an existing composition in one call. Use upload_asset to store an image/video/audio/font/glTF asset (by URL or by raw base64 bytes) and get back a cadra-asset:// ref usable in a scene node's assetRef field, and list_assets to see everything already stored. Use render_scene to render a scene's composition to a video file (returns a job id immediately), get_render_status to poll that job's progress, and get_render_output to fetch a reference to the finished file once the job is done. Use render_frames to see specific frames (first/middle/last, or a suspect range) directly as in-band PNG images without waiting on a full render job - the fast way to check whether a scene actually looks right before committing to render_scene. Use probe_render for a fast, low-resolution draft video instead (same jobId/get_render_status/get_render_output flow as render_scene) when you need to check timing/motion across a whole clip, not just individual frames. Use get_generation_status to check a generative-video slot's status (a placeholder while generating, the finished clip's outputUrl once ready, or a failure reason). Use add_generated_clip to request a generative-video job and insert its clip layer onto an existing scene's timeline in one step, without waiting for generation to finish. If a write is rejected, its diagnostics may carry a suggestedPatch; call repair_scene to automatically apply every safe one and re-validate, or fix the remaining diagnostics manually via update_scene. Use scene_lint to catch a static-hold/low-motion composition before rendering it. Use list_outputs to see every render output file currently on disk, delete_output to remove one by name, and prune_outputs to bulk-delete by age/total-size policy (protectFileNames keeps specific files regardless of policy) - render output files can accumulate quickly, and none of this server's render tools delete anything on their own.",
+        "Cadra exposes a code-first, agent-first 3D video animation scene format. Read the cadra://contract resource for the full JSON Schema, capability manifest, and example scene documents (including a kinetic title sequence, a product shot with IBL and depth of field, and an Arabic-and-Latin animated lower third). Use create_scene, get_scene, update_scene, validate_scene, and list_scenes to author and query scene documents persisted in this server's workspace. Use describe_scene for a compact id/kind/name-only structural outline of one scene instead of get_scene's full per-property JSON - the fast way to see what a scene contains and which node id to target next. Use generate_scene_from_text to generate a scene straight from a natural-language brief via an LLM, persisting the result the same way create_scene does; it self-corrects on an invalid first draft and returns its final diagnostics if every attempt fails. Use add_text_node to construct a rich TextNode (content, font, color, and any of stagger/physics/path/morph/fill/outline/glow/shadow/variationAxes) and insert it onto a scene's timeline in one step, rather than hand-writing the full TextNode JSON; pass typePreset (title/lowerThird/caption/kineticWordReveal) to start from a curated fontSize/stagger/outline/glow/shadow combination, overriding any field passed alongside it. Use apply_look_preset to apply a named cinematic look (a lighting rig plus post-processing/color-grading/environment bundle) onto an existing composition in one call. Use upload_asset to store an image/video/audio/font/glTF asset (by URL or by raw base64 bytes) and get back a cadra-asset:// ref usable in a scene node's assetRef field, and list_assets to see everything already stored. Use render_scene to render a scene's composition to a video file (returns a job id immediately), get_render_status to poll that job's progress, and get_render_output to fetch a reference to the finished file once the job is done. Use render_frames to see specific frames (first/middle/last, or a suspect range) directly as in-band PNG images without waiting on a full render job - the fast way to check whether a scene actually looks right before committing to render_scene. Use probe_render for a fast, low-resolution draft video instead (same jobId/get_render_status/get_render_output flow as render_scene) when you need to check timing/motion across a whole clip, not just individual frames. Use get_generation_status to check a generative-video slot's status (a placeholder while generating, the finished clip's outputUrl once ready, or a failure reason). Use add_generated_clip to request a generative-video job and insert its clip layer onto an existing scene's timeline in one step, without waiting for generation to finish. Use regenerate_clip to request a fresh generation for an existing VideoNode add_generated_clip created, when the current result isn't what was wanted - it resubmits under the same node/slot id (a new seed by default, or given overrides), leaving the clip's own placement untouched, and resets the node's assetRef so the next status check binds the new result automatically once ready. If a write is rejected, its diagnostics may carry a suggestedPatch; call repair_scene to automatically apply every safe one and re-validate, or fix the remaining diagnostics manually via update_scene. Use scene_lint to catch a static-hold/low-motion composition before rendering it. Use list_outputs to see every render output file currently on disk, delete_output to remove one by name, and prune_outputs to bulk-delete by age/total-size policy (protectFileNames keeps specific files regardless of policy) - render output files can accumulate quickly, and none of this server's render tools delete anything on their own.",
     },
   );
 
@@ -173,6 +178,7 @@ export function createCadraMcpServer(options: CreateCadraMcpServerOptions = {}):
     store: generationStore,
   });
   registerCadraGenerationClipTools(server, config, logger, { store: generationStore });
+  registerCadraGenerationRegenerateTools(server, config, logger, { store: generationStore });
 
   server.registerTool(
     PING_TOOL_NAME,
