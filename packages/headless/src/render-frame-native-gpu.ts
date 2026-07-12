@@ -3,6 +3,7 @@ import type {
   PixelReadableRenderer,
   RenderSize,
   RenderTarget,
+  SatoriLayerRenderRegistry,
   TextRenderRegistry,
   TextureRegistry,
   ThreeRendererDependencies,
@@ -489,6 +490,18 @@ export interface CreateNativeGpuHeadlessRendererOptions {
    */
   textRenderRegistry?: TextRenderRegistry;
   /**
+   * Resolves a `"satori"` scene node's own already-rendered-and-rasterized
+   * pixels (Phase 48). Defaults to `undefined`, mirroring `ThreeRenderer`'s
+   * own constructor default - every `"satori"` node then renders as an
+   * empty group (see `applySatoriLayerProperties`'s own doc in
+   * `@cadra/renderer`) until a caller supplies a real registry populated
+   * ahead of time (rendering to SVG and rasterizing are both async; see
+   * `SatoriLayerRenderRegistry`'s own doc, and `@cadra/encode`'s
+   * `buildSatoriLayerRenderRegistryForProject` for the one real
+   * implementation this codebase's own callers use).
+   */
+  satoriLayerRenderRegistry?: SatoriLayerRenderRegistry;
+  /**
    * Resolves an `"image"` node's own `assetRef` (and a mesh's own
    * `normalMapRef`/`aoMapRef`) to an already-decoded `THREE.Texture`.
    * Defaults to `undefined`, mirroring `ThreeRenderer`'s own constructor
@@ -550,6 +563,7 @@ export function createNativeGpuHeadlessRenderer(
   const createDevice = options.createDevice ?? (() => createNativeGpuDevice());
   const modelRegistry = options.modelRegistry ?? createDefaultModelRegistry();
   const textRenderRegistry = options.textRenderRegistry;
+  const satoriLayerRenderRegistry = options.satoriLayerRenderRegistry;
   const textureRegistry = options.textureRegistry;
 
   let headlessTarget: ReturnType<typeof createHeadlessGpuCanvasTarget> | undefined;
@@ -619,7 +633,7 @@ export function createNativeGpuHeadlessRenderer(
     undefined,
     modelRegistry,
     textRenderRegistry,
-    undefined,
+    satoriLayerRenderRegistry,
     textureRegistry,
   );
 

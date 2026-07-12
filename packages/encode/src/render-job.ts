@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import type { Project, SceneNode, TextNode, VideoFrameMapping } from "@cadra/core";
+import type { Project, SatoriNode, SceneNode, TextNode, VideoFrameMapping } from "@cadra/core";
 import { resolveAudioMixdown, resolveVideoSourceFrame } from "@cadra/core";
 import type {
   BrowserLauncher,
@@ -22,14 +22,19 @@ import {
   submitRenderJob as submitHeadlessRenderJob,
 } from "@cadra/headless";
 import {
+  computeSatoriLayerRenderKey,
   computeTextNodeRenderKey,
   computeVideoFrameCacheKey,
   createDataTexture,
+  createInMemorySatoriLayerRenderRegistry,
   createInMemoryTextRenderRegistry,
   createInMemoryTextureRegistry,
+  type SatoriLayerRenderRegistry,
   type TextRenderRegistry,
   type TextureRegistry,
 } from "@cadra/renderer";
+import { prepareSatoriLayerRenderData } from "@cadra/renderer/svg-layer/prepare-satori-layer-render-data.js";
+import type { SatoriLayerFont } from "@cadra/satori-layer";
 import {
   createFontRegistry,
   type PositionedGlyph,
@@ -338,6 +343,16 @@ function collectVideoAssetRefs(node: SceneNode, out: Set<string>): void {
   }
   for (const child of node.children) {
     collectVideoAssetRefs(child, out);
+  }
+}
+
+/** Recursively collects every `SatoriNode` in `node`'s own subtree into `out`. */
+function collectSatoriNodes(node: SceneNode, out: SatoriNode[]): void {
+  if (node.kind === "satori") {
+    out.push(node);
+  }
+  for (const child of node.children) {
+    collectSatoriNodes(child, out);
   }
 }
 
@@ -745,6 +760,83 @@ export async function buildTextureRegistryForProject(
       );
     }
   }
+  return registry;
+}
+
+/**
+ * Builds a real (non-serialized) `SatoriLayerRenderRegistry` for `project`,
+ * pre-rendering and rasterizing every distinct `SatoriNode` at every frame
+ * in `frames` - the `SatoriLayerRenderRegistry` counterpart to
+ * `buildTextRenderRegistryForProject`/`buildTextureRegistryForProject`
+ * above, for the exact same "no browser page, no `page.evaluate`
+ * structured-clone boundary at all" caller (`@cadra/headless`'s
+ * `createNativeGpuHeadlessRenderer`).
+ *
+ * Unlike text/image (registered once, frame-independent - a `TextNode`'s
+ * own shaped glyphs and an `ImageNode`'s own decoded texture never depend
+ * on which frame is being rendered), a `SatoriNode`'s own rendered pixels
+ * genuinely can vary by frame (`elementAnimations`; see
+ * `computeSatoriLayerRenderKey`'s own doc), so this needs the caller's own
+ * exact frame list up front rather than resolving once - `frames` mirrors
+ * exactly what a caller (e.g. `render_frames`, whose own input is already
+ * a bounded, explicit list of frames to render) already has in hand, no
+ * per-range windowing/streaming the way video's own per-range sample
+ * computation needs.
+ *
+ * Returns `undefined` (not an empty registry) when `project` has no satori
+ * nodes at all, matching `TextRenderRegistry`'s/`TextureRegistry`'s own
+ * "omit entirely" convention.
+ *
+ * Passes `fonts: []` to `prepareSatoriLayerRenderData` - deliberately, not
+ * yet this module's own bundled default font the way
+ * `prepareTextRenderEntriesForProject` uses it for every `TextNode`.
+ * Verified directly (constructing a real `SatoriLayerFont` from that exact
+ * bundled `Inter-Variable.ttf` and feeding it through a real
+ * `prepareSatoriLayerRenderData` call) that doing so throws inside Satori's
+ * own bundled font parser (`@shuding/opentype.js`'s `parseFvarAxis`, a
+ * `TypeError` reading past the end of that font's own `fvar` - variable
+ * font axes - table) for this specific font file, unrelated to anything
+ * this function does with it. A `layer` with no text at all (e.g. a plain
+ * colored background/shape/icon) renders correctly regardless - Satori
+ * never needs a font for non-text content - so this still closes the real
+ * gap this function exists for (a `"satori"` node rendering as a real
+ * layer instead of silently staying invisible forever). A `layer` that
+ * does contain text currently renders without glyphs for it (the same
+ * graceful "no font matched" fallback `@cadra/satori-layer`'s own
+ * `renderLayerToSvg` already documents for an unmatched `fontFamily`, not
+ * a new failure mode), until a real Satori-compatible font is wired in as
+ * a follow-up.
+ */
+export async function buildSatoriLayerRenderRegistryForProject(
+  project: Project,
+  frames: readonly number[],
+): Promise<SatoriLayerRenderRegistry | undefined> {
+  const satoriNodes: SatoriNode[] = [];
+  for (const composition of project.compositions) {
+    for (const track of composition.tracks) {
+      for (const clip of track.clips) {
+        collectSatoriNodes(clip.node, satoriNodes);
+      }
+    }
+  }
+
+  if (satoriNodes.length === 0) {
+    return undefined;
+  }
+
+  const fonts: SatoriLayerFont[] = [];
+  const registry = createInMemorySatoriLayerRenderRegistry();
+  for (const node of satoriNodes) {
+    for (const frame of frames) {
+      const cacheKey = computeSatoriLayerRenderKey(node, frame);
+      if (registry.resolve(cacheKey) !== undefined) {
+        continue;
+      }
+      const rasterized = await prepareSatoriLayerRenderData(node, frame, fonts);
+      registry.register(cacheKey, { rasterized });
+    }
+  }
+
   return registry;
 }
 

@@ -150,6 +150,7 @@ describe("@cadra/renderer Renderer-facing surface has no Three.js leakage", () =
     "assets/render-when-ready.ts",
     "assets/types.ts",
     "assets/video-loader.ts",
+    "svg-layer/satori-layer-render-registry.ts",
     "video-layer/video-frame-registry.ts",
     "worker/index.ts",
     "worker/offscreen-detection.ts",

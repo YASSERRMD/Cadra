@@ -159,6 +159,15 @@ export type {
   RenderTarget,
 } from "./renderer.js";
 export type {
+  MutableSatoriLayerRenderRegistry,
+  SatoriLayerRenderEntry,
+  SatoriLayerRenderRegistry,
+} from "./svg-layer/satori-layer-render-registry.js";
+export {
+  computeSatoriLayerRenderKey,
+  createInMemorySatoriLayerRenderRegistry,
+} from "./svg-layer/satori-layer-render-registry.js";
+export type {
   MutableTextRenderRegistry,
   TextRenderEntry,
   TextRenderRegistry,
