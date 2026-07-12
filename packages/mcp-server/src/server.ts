@@ -58,6 +58,7 @@ import {
 import type { Logger } from "./logger.js";
 import { createLogger } from "./logger.js";
 import { registerCadraLookPresetTools } from "./look-preset-tools.js";
+import { buildVideoProviderRegistry } from "./provider-registry.js";
 import { registerCadraRenderTools } from "./render-tools.js";
 import { registerCadraRepairSceneTool } from "./repair-scene-tools.js";
 import { registerCadraSceneTools } from "./scene-tools.js";
@@ -130,7 +131,13 @@ export function createCadraMcpServer(options: CreateCadraMcpServerOptions = {}):
   // Shared across every generation-aware tool (see this module's own
   // top-level doc): add_generated_clip submits into it, get_generation_status
   // reads it, and render_scene's pre-flight check reads/rewrites it.
-  const generationStore = options.generation?.store ?? createGenerationStore({ providers: {} });
+  // Providers are built from config.providerKeys (see ./provider-registry.ts):
+  // a vendor with no configured key is simply absent from the registry, so
+  // requesting it still fails with the same descriptive UnknownProviderError
+  // as before, never a crash from a half-configured adapter.
+  const generationStore =
+    options.generation?.store ??
+    createGenerationStore({ providers: buildVideoProviderRegistry(config.providerKeys) });
 
   const server = new McpServer(
     { name: SERVER_NAME, version: SERVER_VERSION },
