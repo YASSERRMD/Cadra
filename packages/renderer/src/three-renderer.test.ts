@@ -13,6 +13,7 @@ import {
   type SceneState,
   type TextNode,
 } from "@cadra/core";
+import type { ParticleRuntimeDependencies } from "@cadra/particles";
 import type { PhysicsTransform } from "@cadra/physics";
 import type { TextRenderData } from "@cadra/text";
 import * as THREE from "three";
@@ -23,6 +24,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { LoadedModel } from "./assets/model-registry.js";
 import { createInMemoryModelRegistry } from "./assets/model-registry.js";
 import type { EnvironmentRegistry } from "./environment/environment-registry.js";
+import { createDataTexture, createInMemoryTextureRegistry } from "./reconciler/registries.js";
 import type { RenderSize, RenderTarget } from "./renderer.js";
 import { computeTextNodeRenderKey, createInMemoryTextRenderRegistry } from "./text/text-render-registry.js";
 import type { ThreeRendererDependencies, ThreeRendererFactory } from "./three-renderer.js";
@@ -1321,6 +1323,72 @@ describe("ThreeRenderer: GLTF models (Phase 69)", () => {
 
     expect(rendererA.getObject3DByNodeId("model-1")?.getObjectByName("Body")).toBeInstanceOf(THREE.Mesh);
     expect(rendererB.getObject3DByNodeId("model-1")?.children.length).toBe(0);
+  });
+});
+
+/** The `ParticleRuntimeDependencies` `deps.createParticleRuntime` was actually called with, from `init()`'s own single call to it (see `buildParticleRuntimeDeps`'s own doc in `three-renderer.ts`). */
+function lastParticleRuntimeDeps(deps: ThreeRendererDependencies): ParticleRuntimeDependencies {
+  const mock = deps.createParticleRuntime as unknown as { mock: { calls: [ParticleRuntimeDependencies][] } };
+  const call = mock.mock.calls.at(-1);
+  if (call === undefined) {
+    throw new Error("createParticleRuntime was never called.");
+  }
+  return call[0];
+}
+
+describe("ThreeRenderer: particle runtime resolveTexture wiring", () => {
+  it("threads a textureRegistry passed to the constructor into createParticleRuntime's own resolveTexture, on the webgpu backend", async () => {
+    const texture = createDataTexture(new Uint8Array([255, 0, 0, 255]), 1, 1);
+    const textureRegistry = createInMemoryTextureRegistry();
+    textureRegistry.register("cadra-asset://spark.png", texture);
+
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(
+      deps,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      textureRegistry,
+    );
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    const particleDeps = lastParticleRuntimeDeps(deps);
+    expect(particleDeps.backend).toBe("webgpu");
+    expect(particleDeps.resolveTexture?.("cadra-asset://spark.png")).toBe(texture);
+    expect(particleDeps.resolveTexture?.("cadra-asset://unknown.png")).toBeUndefined();
+  });
+
+  it("threads a textureRegistry passed to the constructor into createParticleRuntime's own resolveTexture, on the webgl2 backend", async () => {
+    const texture = createDataTexture(new Uint8Array([0, 255, 0, 255]), 1, 1);
+    const textureRegistry = createInMemoryTextureRegistry();
+    textureRegistry.register("cadra-asset://spark.png", texture);
+
+    const { deps } = createFakeDeps({ detectWebGpuSupport: () => false });
+    const renderer = new ThreeRenderer(
+      deps,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      textureRegistry,
+    );
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    const particleDeps = lastParticleRuntimeDeps(deps);
+    expect(particleDeps.backend).toBe("webgl2");
+    expect(particleDeps.resolveTexture?.("cadra-asset://spark.png")).toBe(texture);
+  });
+
+  it("resolveTexture resolves every ref to undefined when no textureRegistry was supplied to the constructor", async () => {
+    const { deps } = createFakeDeps();
+    const renderer = new ThreeRenderer(deps);
+    await renderer.init(htmlCanvasLikeTarget, size);
+
+    const particleDeps = lastParticleRuntimeDeps(deps);
+    expect(particleDeps.resolveTexture?.("cadra-asset://anything.png")).toBeUndefined();
   });
 });
 
