@@ -1,13 +1,21 @@
 import { readFileSync } from "node:fs";
 
-import { Camera, createComposition, createProject, Image, type Project, Sequence } from "@cadra/core";
+import {
+  Camera,
+  type Composition,
+  createComposition,
+  createProject,
+  Image,
+  type Project,
+  Sequence,
+} from "@cadra/core";
 import { BROWSER_ENTRY_GLOBAL_NAME, bundleBrowserEntry, launchPlaywrightHeadlessBrowser } from "@cadra/headless";
 import { chromium } from "playwright";
 import { PNG } from "pngjs";
 import { describe, expect, it } from "vitest";
 
 import { BROWSER_HEADLESS_RENDER_ENTRY_PATH } from "./browser-headless-render-entry-path.js";
-import type { SerializedEncodedChunk } from "./serialized-encoded-chunk.js";
+import type { SerializedEncodedAudioChunk, SerializedEncodedChunk } from "./serialized-encoded-chunk.js";
 
 /**
  * This test lives in `@cadra/encode` for the same reason
@@ -399,6 +407,231 @@ describe("runBrowserHeadlessRenderRange: real ImageNode texture rendering", () =
         // Bottom of frame: the source PNG's own bottom half was pure blue.
         expect(bottomPixel[2]).toBeGreaterThan(150);
         expect(bottomPixel[0]).toBeLessThan(100);
+      } finally {
+        await browser.close();
+      }
+    },
+    30_000,
+  );
+});
+
+/** A real, valid, uncompressed WAV file: a single-channel sine tone at `frequencyHz`, `durationSeconds` long, 16-bit PCM - simple enough to hand-construct correctly with no encoding library, and a format every real browser's own `decodeAudioData` accepts. */
+function buildSineWaveWav(durationSeconds: number, frequencyHz: number, sampleRate = 44_100): Uint8Array {
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const numSamples = Math.floor(durationSeconds * sampleRate);
+  const blockAlign = numChannels * (bitsPerSample / 8);
+  const dataSize = numSamples * blockAlign;
+
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  const writeAscii = (offset: number, text: string): void => {
+    for (let i = 0; i < text.length; i += 1) {
+      view.setUint8(offset + i, text.charCodeAt(i));
+    }
+  };
+
+  writeAscii(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeAscii(8, "WAVE");
+  writeAscii(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  writeAscii(36, "data");
+  view.setUint32(40, dataSize, true);
+
+  for (let i = 0; i < numSamples; i += 1) {
+    const t = i / sampleRate;
+    const sample = Math.sin(2 * Math.PI * frequencyHz * t) * 0.8;
+    view.setInt16(44 + i * blockAlign, Math.round(sample * 32_767), true);
+  }
+
+  return new Uint8Array(buffer);
+}
+
+/** A project with one audio clip (referencing `assetRef`) spanning the whole composition, plus a lit box (video content is irrelevant to this suite, but a composition needs a valid target to resolve against). */
+function buildProjectWithAudio(assetRef: string, durationInFrames: number, fps: number): Project {
+  const composition = createComposition({
+    id: "comp-1",
+    name: "Main",
+    fps,
+    durationInFrames,
+    width: 16,
+    height: 16,
+    tracks: [],
+  });
+  const withAudioTrack: Composition = {
+    ...composition,
+    audioTracks: [
+      {
+        id: "audio-track-1",
+        clips: [
+          {
+            id: "audio-clip-1",
+            startFrame: 0,
+            durationInFrames,
+            assetRef,
+          },
+        ],
+      },
+    ],
+  };
+  return createProject({ id: "audio-e2e", name: "Audio e2e", compositions: [withAudioTrack] });
+}
+
+/**
+ * Proves `runBrowserHeadlessAudioMixdown` delivers real, decodable,
+ * non-silent audio - not just a correctly-shaped but empty/degenerate
+ * chunk stream - mirroring this file's own `ImageNode` texture test: real
+ * source bytes in, decoded back via a real in-page WebCodecs `AudioDecoder`
+ * (the audio-side counterpart to that test's own `VideoDecoder` use), real
+ * PCM samples checked directly rather than assumed from the pipeline
+ * merely not throwing.
+ */
+describe("runBrowserHeadlessAudioMixdown: real audio mixdown/encode", () => {
+  it(
+    "renders a real uploaded audio asset's own real, non-silent samples",
+    async () => {
+      if (!chromiumAvailable) {
+        console.log(
+          "Audio mixdown e2e test: skipping, real Chromium not found (no cached Playwright browser in this environment).",
+        );
+        return;
+      }
+
+      const entrySource = await bundleBrowserEntry({
+        entryFilePath: BROWSER_HEADLESS_RENDER_ENTRY_PATH,
+      });
+      const browser = await launchPlaywrightHeadlessBrowser({});
+      try {
+        const page = await browser.newPage();
+        await page.addScript(entrySource);
+
+        const assetRef = "cadra-asset://sine-tone";
+        const fps = 10;
+        const durationInFrames = 10;
+        const wavBytes = buildSineWaveWav(durationInFrames / fps, 440);
+        const project = buildProjectWithAudio(assetRef, durationInFrames, fps);
+
+        const result = await page.evaluate(
+          async (arg: {
+            globalName: string;
+            project: Project;
+            assetRef: string;
+            wavBytes: number[];
+          }) => {
+            const entry = (
+              window as unknown as Record<
+                string,
+                | {
+                    runBrowserHeadlessAudioMixdown: (config: {
+                      project: Project;
+                      compositionId: string;
+                      container: "mp4" | "webm";
+                      bitrate: number;
+                      audioAssetEntries: Array<{ assetRef: string; bytes: number[] }>;
+                    }) => Promise<
+                      | {
+                          chunks: SerializedEncodedAudioChunk[];
+                          codec: string;
+                          numberOfChannels: number;
+                          sampleRate: number;
+                        }
+                      | undefined
+                    >;
+                  }
+                | undefined
+              >
+            )[arg.globalName];
+            if (entry === undefined) {
+              throw new Error(`window["${arg.globalName}"] was not defined.`);
+            }
+
+            const mixdownResult = await entry.runBrowserHeadlessAudioMixdown({
+              project: arg.project,
+              compositionId: "comp-1",
+              container: "mp4",
+              bitrate: 128_000,
+              audioAssetEntries: [{ assetRef: arg.assetRef, bytes: arg.wavBytes }],
+            });
+            if (mixdownResult === undefined) {
+              throw new Error("Expected a real audio mixdown result, got undefined.");
+            }
+            if (mixdownResult.chunks.length === 0) {
+              throw new Error("Expected at least one encoded audio chunk.");
+            }
+
+            // Decode the real, just-encoded chunks back to real samples via
+            // a real in-page WebCodecs AudioDecoder - same rationale as
+            // this file's own VideoDecoder use for the image texture test.
+            const decodedFrames: Array<{ numberOfFrames: number; samples: number[] }> = [];
+            await new Promise<void>((resolve, reject) => {
+              const decoder = new AudioDecoder({
+                output: (audioData) => {
+                  const samples = new Float32Array(audioData.numberOfFrames);
+                  audioData.copyTo(samples, { planeIndex: 0 });
+                  decodedFrames.push({
+                    numberOfFrames: audioData.numberOfFrames,
+                    samples: Array.from(samples),
+                  });
+                  audioData.close();
+                  if (decodedFrames.length === mixdownResult.chunks.length) {
+                    resolve();
+                  }
+                },
+                error: (error) => reject(error),
+              });
+              decoder.configure({
+                codec: mixdownResult.codec,
+                sampleRate: mixdownResult.sampleRate,
+                numberOfChannels: mixdownResult.numberOfChannels,
+              });
+              for (const chunk of mixdownResult.chunks) {
+                decoder.decode(
+                  new EncodedAudioChunk({
+                    type: chunk.type,
+                    timestamp: chunk.timestamp,
+                    duration: chunk.duration,
+                    data: Uint8Array.from(chunk.data),
+                  }),
+                );
+              }
+              decoder.flush().catch(() => {
+                // Any decode failure already surfaces through the `error`
+                // callback above, which rejects this same promise.
+              });
+            });
+
+            return {
+              chunkCount: mixdownResult.chunks.length,
+              codec: mixdownResult.codec,
+              numberOfChannels: mixdownResult.numberOfChannels,
+              sampleRate: mixdownResult.sampleRate,
+              decodedFrames,
+            };
+          },
+          { globalName: BROWSER_ENTRY_GLOBAL_NAME, project, assetRef, wavBytes: Array.from(wavBytes) },
+        );
+
+        expect(result.chunkCount).toBeGreaterThan(0);
+        expect(result.sampleRate).toBeGreaterThan(0);
+        expect(result.numberOfChannels).toBeGreaterThan(0);
+        expect(result.decodedFrames.length).toBeGreaterThan(0);
+
+        // Real, non-silent content: at least one decoded sample across
+        // every frame must have a meaningfully non-zero amplitude - a
+        // broken pipeline (e.g. a mixdown that resolved no segments, or an
+        // encoder fed an all-zero buffer) would decode back to all-zero
+        // (or, for a lossy codec's own quantization noise floor, at most
+        // vanishingly small) samples instead.
+        const allSamples = result.decodedFrames.flatMap((frame) => frame.samples);
+        const maxAbsSample = Math.max(...allSamples.map((sample) => Math.abs(sample)));
+        expect(maxAbsSample).toBeGreaterThan(0.1);
       } finally {
         await browser.close();
       }

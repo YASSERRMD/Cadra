@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
 import type { Project, SceneNode, TextNode } from "@cadra/core";
+import { resolveAudioMixdown } from "@cadra/core";
 import type {
   BrowserLauncher,
   HeadlessBrowserLike,
@@ -36,13 +37,19 @@ import {
 } from "@cadra/text";
 import { PNG } from "pngjs";
 
+import type { EncodedAudioChunkResult } from "./encode-audio.js";
 import type { EncodedChunkResult } from "./encode-frames.js";
 import { DEFAULT_KEYFRAME_INTERVAL_FRAMES } from "./encode-frames.js";
+import type { MuxMp4AudioTrackOptions } from "./mux-mp4.js";
 import { muxToMp4Stream } from "./mux-mp4.js";
 import type { NodeWritableLike } from "./mux-stream-target.js";
+import type { MuxWebmAudioTrackOptions } from "./mux-webm.js";
 import { muxToWebmStream } from "./mux-webm.js";
-import type { SerializedEncodedChunk } from "./serialized-encoded-chunk.js";
-import { deserializeEncodedChunkResult } from "./serialized-encoded-chunk.js";
+import type { SerializedEncodedAudioChunk, SerializedEncodedChunk } from "./serialized-encoded-chunk.js";
+import {
+  deserializeEncodedAudioChunkResult,
+  deserializeEncodedChunkResult,
+} from "./serialized-encoded-chunk.js";
 
 /**
  * Phase 25's render job orchestrator, wiring `@cadra/headless`'s generic
@@ -154,15 +161,23 @@ export interface SubmitEncodedRenderJobOptions {
   /** Milliseconds allowed for one range attempt before it is treated as timed out and retried. Defaults to `DEFAULT_RANGE_TIMEOUT_MS`. */
   timeoutMs?: number;
   /**
-   * Resolves an `ImageNode.assetRef` to that asset's own raw bytes, e.g.
-   * `@cadra/mcp-server`'s own `createAssetBytesFetcher(workspaceRoot)`.
-   * Omitted means every `ImageNode` in `project` renders as the renderer's
-   * own documented gray placeholder, matching this option's pre-existing
-   * behavior before it existed at all - see `buildImageRenderEntriesForProject`'s
-   * own doc for the full "unresolved is an expected runtime state" contract.
+   * Resolves an `ImageNode.assetRef` or an `AudioMixdownSegment.assetRef`
+   * to that asset's own raw bytes, e.g. `@cadra/mcp-server`'s own
+   * `createAssetBytesFetcher(workspaceRoot)` - the same asset store serves
+   * both kinds, so one resolver covers both. Omitted means every
+   * `ImageNode` in `project` renders as the renderer's own documented gray
+   * placeholder (see `buildImageRenderEntriesForProject`'s own doc for the
+   * full "unresolved is an expected runtime state" contract) and every
+   * audio segment renders as silence (see `prepareAudioMixdownAssetEntries`'s
+   * own doc for the identical contract on the audio side).
    */
   fetchAssetBytes?: (assetRef: string) => Promise<Uint8Array | undefined>;
+  /** Target bitrate in bits per second for the audio encoder, if `project`'s own composition has any audio content at all (see `resolveAudioMixdown`). Defaults to `DEFAULT_AUDIO_BITRATE`. Has no effect on a composition with no `audioTracks` (or only empty ones): no audio encoding happens there at all, matching `renderAudioMixdown`'s own "a caller decides whether a silent mixdown is worth encoding" contract. */
+  audioBitrate?: number;
 }
+
+/** `SubmitEncodedRenderJobOptions.audioBitrate`'s own default: 128 kbps, a standard, safe default for both AAC (mp4) and Opus (webm) at this module's own render sample rate/channel count. */
+export const DEFAULT_AUDIO_BITRATE = 128_000;
 
 /** Milliseconds allowed for one range attempt by default: 2 minutes. Shorter than `renderCompositionHeadlessServer`'s own 5-minute default, since a single range is, by construction, a fraction of a whole composition's frames. */
 export const DEFAULT_RANGE_TIMEOUT_MS = 2 * 60 * 1000;
@@ -243,6 +258,29 @@ interface BrowserRangeConfigArg {
   keyframeIntervalFrames: number;
   textRenderEntries: SerializedTextRenderEntry[];
   imageRenderEntries: SerializedImageRenderEntry[];
+}
+
+/** Mirrors `browser-headless-render-entry.ts`'s own `SerializedAudioAssetEntry`; duplicated (not imported) for the same reason `BrowserRangeConfigArg` above is - see its own doc. */
+interface SerializedAudioAssetEntry {
+  assetRef: string;
+  bytes: number[];
+}
+
+/** The exact shape `runBrowserHeadlessAudioMixdown` (`@cadra/encode`'s own browser-side entry point) accepts, duplicated here for the same reason `BrowserRangeConfigArg` above is. */
+interface BrowserAudioMixdownConfigArg {
+  project: Project;
+  compositionId: string;
+  container: "mp4" | "webm";
+  bitrate: number;
+  audioAssetEntries: SerializedAudioAssetEntry[];
+}
+
+/** Mirrors `browser-headless-render-entry.ts`'s own `SerializedAudioMixdownResult`; duplicated here for the same reason `BrowserRangeConfigArg` above is. */
+interface SerializedAudioMixdownResult {
+  chunks: SerializedEncodedAudioChunk[];
+  codec: string;
+  numberOfChannels: number;
+  sampleRate: number;
 }
 
 /**
@@ -663,6 +701,157 @@ async function runOneRangeAttempt(
 }
 
 /**
+ * Collects every distinct `AudioMixdownSegment.assetRef` in
+ * `project`'s own composition `compositionId`'s resolved audio mixdown
+ * (`@cadra/core`'s `resolveAudioMixdown`) and fetches each one's raw bytes
+ * via `fetchAssetBytes`, mirroring `prepareImageEntriesForProject`'s own
+ * shape for the image case. Unlike that function, this resolves against
+ * one specific composition (audio mixdown resolution is inherently
+ * per-composition, unlike `ImageNode`/`TextNode` collection, which walks
+ * every composition in `project`), matching exactly what this job's own
+ * final render actually targets.
+ *
+ * Returns `[]` (not an error) both when `fetchAssetBytes` is omitted and
+ * when the mixdown itself has no segments at all: a caller checking for
+ * "is there any audio to render" should resolve the mixdown itself first
+ * (see `runEncodedRenderJob`'s own doc) rather than infer it from this
+ * function's own return value being empty for a different reason.
+ *
+ * An `assetRef` `fetchAssetBytes` itself cannot resolve is silently
+ * omitted, not an error - every segment referencing it renders as silence
+ * for its own window instead, matching `ResolveAudioBufferFn`'s own
+ * "unresolved is an expected runtime state" contract exactly (the audio-
+ * side counterpart to an unresolved `ImageNode.assetRef` falling back to
+ * the renderer's own gray placeholder).
+ */
+async function prepareAudioMixdownAssetEntries(
+  project: Project,
+  compositionId: string,
+  fetchAssetBytes?: (assetRef: string) => Promise<Uint8Array | undefined>,
+): Promise<SerializedAudioAssetEntry[]> {
+  if (fetchAssetBytes === undefined) {
+    return [];
+  }
+
+  const mixdown = resolveAudioMixdown(project, compositionId);
+  const assetRefs = new Set(mixdown.segments.map((segment) => segment.assetRef));
+
+  const entries: SerializedAudioAssetEntry[] = [];
+  for (const assetRef of assetRefs) {
+    const bytes = await fetchAssetBytes(assetRef);
+    if (bytes === undefined) {
+      continue;
+    }
+    entries.push({ assetRef, bytes: Array.from(bytes) });
+  }
+  return entries;
+}
+
+/**
+ * Launches one fresh browser (mirroring `runOneRangeAttempt`'s own
+ * per-attempt-fresh-browser rationale - see that function's doc), evaluates
+ * the bundled `runBrowserHeadlessAudioMixdown` for this job's own
+ * composition, and returns its `SerializedAudioMixdownResult` (or
+ * `undefined`, for a composition whose mixdown has no segments at all).
+ *
+ * Runs independently of every video range's own `runOneRangeAttempt` call
+ * (`runEncodedRenderJob` kicks this off alongside `dispatch`, not after
+ * it), since audio mixdown/encoding for the whole composition has no range
+ * to align against and no dependency on any video range's own output.
+ *
+ * Unlike a video range attempt, this has no retry loop of its own: a
+ * failure here (any rejection at all, including a genuine
+ * `WebCodecsUnavailableForAudioEncodingError` from `encodeAudio` itself,
+ * not just a single asset's own decode failure - see
+ * `runBrowserHeadlessAudioMixdown`'s own doc for that distinction) is
+ * caught by this function's own caller (`runEncodedRenderJob`) and treated
+ * as "no audio for this render," logged via `onLog`, not a reason to fail
+ * an otherwise-successful video render over an audio-only problem.
+ */
+async function runAudioMixdownAttempt(
+  launcher: BrowserLauncher,
+  entrySource: string,
+  config: BrowserAudioMixdownConfigArg,
+  onLog: OnLogFn | undefined,
+  timeoutMs: number,
+): Promise<SerializedAudioMixdownResult | undefined> {
+  let browser: HeadlessBrowserLike | undefined;
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timeoutHandle = setTimeout(() => {
+      reject(new Error(`submitEncodedRenderJob: audio mixdown did not finish within ${timeoutMs}ms.`));
+    }, timeoutMs);
+    (timeoutHandle as unknown as { unref?: () => void }).unref?.();
+  });
+  timeoutPromise.catch(() => {});
+
+  try {
+    browser = await launcher({});
+
+    const crashed = new Promise<never>((_resolve, reject) => {
+      browser?.onDisconnected(() => {
+        reject(
+          new Error(
+            "submitEncodedRenderJob: the headless browser disconnected/crashed before the audio mixdown completed.",
+          ),
+        );
+      });
+    });
+    crashed.catch(() => {});
+
+    const page = await browser.newPage();
+    page.onConsoleMessage((message) => {
+      onLog?.({ level: message.type(), message: message.text() });
+    });
+    page.onPageError((error) => {
+      onLog?.({ level: "error", message: error.message });
+    });
+
+    await page.addScript(entrySource);
+
+    const mixdownDone = page.evaluate(
+      (arg: { config: BrowserAudioMixdownConfigArg; globalName: string }) => {
+        const entry = (
+          window as unknown as Record<
+            string,
+            | {
+                runBrowserHeadlessAudioMixdown: (
+                  config: BrowserAudioMixdownConfigArg,
+                ) => Promise<SerializedAudioMixdownResult | undefined>;
+              }
+            | undefined
+          >
+        )[arg.globalName];
+        if (entry === undefined) {
+          throw new Error(
+            `submitEncodedRenderJob: window["${arg.globalName}"] was not defined; the bundled entry script did not load correctly before evaluate() ran.`,
+          );
+        }
+        return entry.runBrowserHeadlessAudioMixdown(arg.config);
+      },
+      { config, globalName: BROWSER_ENTRY_GLOBAL_NAME },
+    );
+
+    return await Promise.race([mixdownDone, crashed, timeoutPromise]);
+  } finally {
+    clearTimeout(timeoutHandle);
+    // See runOneRangeAttempt's own identical doc for why browser.close()
+    // itself races a bounded grace ceiling rather than being awaited
+    // unconditionally.
+    if (browser !== undefined) {
+      await Promise.race([
+        browser.close().catch(() => {}),
+        new Promise<void>((resolve) => {
+          const handle = setTimeout(resolve, BROWSER_CLOSE_GRACE_MS);
+          (handle as unknown as { unref?: () => void }).unref?.();
+        }),
+      ]);
+    }
+  }
+}
+
+/**
  * Concatenates every range's `SerializedEncodedChunk[]` (already in frame
  * order, since `@cadra/headless`'s job `result` resolves with every range's
  * segment ordered by `rangeIndex`) into one flat, frame-ordered
@@ -706,10 +895,38 @@ function resolveFirstChunkCodec(chunks: readonly EncodedChunkResult[]): string {
   return "avc1.42001f";
 }
 
+/** Adapts an in-memory `EncodedAudioChunkResult[]` into the `AsyncGenerator` shape `MuxMp4AudioTrackOptions`/`MuxWebmAudioTrackOptions` accept, mirroring `toAsyncGenerator`'s own video-side purpose. */
+async function* toAudioAsyncGenerator(
+  chunks: readonly EncodedAudioChunkResult[],
+): AsyncGenerator<EncodedAudioChunkResult> {
+  for (const chunk of chunks) {
+    yield chunk;
+  }
+}
+
+/** Deserializes `result` (`runAudioMixdownAttempt`'s own return value) into the `MuxMp4AudioTrackOptions`/`MuxWebmAudioTrackOptions` shape `muxToMp4Stream`/`muxToWebmStream` both accept as their shared `audio` argument shape. */
+function toMuxAudioTrackOptions(
+  result: SerializedAudioMixdownResult,
+): MuxMp4AudioTrackOptions | MuxWebmAudioTrackOptions {
+  const chunks = result.chunks.map((chunk) => deserializeEncodedAudioChunkResult(chunk));
+  return {
+    chunks: toAudioAsyncGenerator(chunks),
+    codec: result.codec,
+    numberOfChannels: result.numberOfChannels,
+    sampleRate: result.sampleRate,
+  };
+}
+
 /**
  * Once every range has succeeded (`renderResult`), concatenates every
  * range's segment and performs the single final mux pass into
- * `destination`, then calls `destination.end()`.
+ * `destination`, then calls `destination.end()`. `audio` (`runEncodedRenderJob`'s
+ * own `runAudioMixdownAttempt` result, if the composition had any audio
+ * content at all) is threaded into `muxToMp4Stream`/`muxToWebmStream`'s
+ * own optional `audio` argument; omitted entirely (not an empty track)
+ * produces the exact same video-only file this function always produced
+ * before audio existed, matching `renderAudioMixdown`'s own "a caller
+ * decides whether a silent mixdown is worth encoding" contract.
  */
 async function muxConcatenatedSegments(
   segments: readonly SerializedEncodedChunk[][],
@@ -718,6 +935,7 @@ async function muxConcatenatedSegments(
     destination: HeadlessServerFileWriteStreamLike;
     project: Project;
     compositionId: string;
+    audio?: SerializedAudioMixdownResult;
   },
 ): Promise<void> {
   const composition = options.project.compositions.find(
@@ -743,11 +961,24 @@ async function muxConcatenatedSegments(
   // destination's lifecycle end to end.
   const nodeDestination: NodeWritableLike = options.destination;
   const chunksGenerator = toAsyncGenerator(flatChunks);
+  const audio = options.audio !== undefined ? toMuxAudioTrackOptions(options.audio) : undefined;
 
   if (options.format === "mp4") {
-    await muxToMp4Stream(chunksGenerator, muxOptions, firstChunkCodec, nodeDestination);
+    await muxToMp4Stream(
+      chunksGenerator,
+      muxOptions,
+      firstChunkCodec,
+      nodeDestination,
+      audio as MuxMp4AudioTrackOptions | undefined,
+    );
   } else {
-    await muxToWebmStream(chunksGenerator, muxOptions, firstChunkCodec, nodeDestination);
+    await muxToWebmStream(
+      chunksGenerator,
+      muxOptions,
+      firstChunkCodec,
+      nodeDestination,
+      audio as MuxWebmAudioTrackOptions | undefined,
+    );
   }
 
   await new Promise<void>((resolve) => {
@@ -786,6 +1017,49 @@ async function runEncodedRenderJob(
     options.fetchAssetBytes,
   );
 
+  // Kicked off alongside the video ranges below (not awaited here), since
+  // whole-composition audio mixdown/encoding has no range to align against
+  // and no dependency on any video range's own output - see
+  // runAudioMixdownAttempt's own doc. A composition with no audio content
+  // at all (resolveAudioMixdown's own segments empty) launches no browser
+  // for this at all. Any failure here (including the browser task itself
+  // rejecting, not just a single asset's own decode failure) degrades to
+  // "no audio for this render" rather than failing the whole job: an audio
+  // problem should never take down an otherwise-successful video render.
+  const audioBitrate = options.audioBitrate ?? DEFAULT_AUDIO_BITRATE;
+  const audioMixdownPromise: Promise<SerializedAudioMixdownResult | undefined> = (async () => {
+    if (resolveAudioMixdown(options.project, options.compositionId).segments.length === 0) {
+      return undefined;
+    }
+    const audioAssetEntries = await prepareAudioMixdownAssetEntries(
+      options.project,
+      options.compositionId,
+      options.fetchAssetBytes,
+    );
+    try {
+      return await runAudioMixdownAttempt(
+        launcher,
+        entrySource,
+        {
+          project: options.project,
+          compositionId: options.compositionId,
+          container: options.format,
+          bitrate: audioBitrate,
+          audioAssetEntries,
+        },
+        options.onLog,
+        timeoutMs,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      options.onLog?.({
+        level: "error",
+        message: `submitEncodedRenderJob: audio mixdown failed, rendering without audio instead (${message}).`,
+      });
+      return undefined;
+    }
+  })();
+
   const renderRange = (range: {
     rangeIndex: number;
     startFrame: number;
@@ -812,13 +1086,20 @@ async function runEncodedRenderJob(
   const handle = dispatch(renderRange, durationInFrames);
 
   const result = handle.result.then(
-    (segments) =>
-      muxConcatenatedSegments(segments, {
+    async (segments) => {
+      // Awaited here (not earlier): every video range and the audio
+      // mixdown run fully concurrently regardless of which finishes first,
+      // so this adds no extra latency the audio task's own duration wasn't
+      // already going to cost regardless of when it's awaited.
+      const audio = await audioMixdownPromise;
+      return muxConcatenatedSegments(segments, {
         format: options.format,
         destination: options.destination,
         project: options.project,
         compositionId: options.compositionId,
-      }),
+        ...(audio !== undefined && { audio }),
+      });
+    },
     (error: unknown) => {
       // A permanently-failed range means no mux pass ever runs (per this
       // module's own "single final mux, only once every range succeeds"
