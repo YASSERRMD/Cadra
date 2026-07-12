@@ -256,22 +256,28 @@ importers:
       '@cadra/providers':
         specifier: workspace:*
         version: link:../providers
+      '@cadra/renderer':
+        specifier: workspace:*
+        version: link:../renderer
       '@cadra/schema':
         specifier: workspace:*
         version: link:../schema
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.4.3)
+      pngjs:
+        specifier: ^7.0.0
+        version: 7.0.0
       zod:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
-      '@cadra/renderer':
-        specifier: workspace:*
-        version: link:../renderer
       '@types/node':
         specifier: ^26.1.0
         version: 26.1.0
+      '@types/pngjs':
+        specifier: ^6.0.5
+        version: 6.0.5
       playwright:
         specifier: ^1.61.1
         version: 1.61.1
