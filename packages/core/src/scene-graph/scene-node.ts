@@ -692,15 +692,19 @@ export type VideoBlendMode = "normal" | "add" | "multiply" | "screen";
  * for a generated layer that needs to combine with a synthetic one by more
  * than plain alpha (e.g. an additive glow, or a masked cutout).
  *
- * `blendMode` and `maskRef` are deliberately modeled and validated here
+ * `blendMode` and `maskRef` were originally modeled and validated here
  * (round-tripping through the scene DSL, so an agent can express and read
- * back "blend this generated shot additively, masked by this shape") without
- * requiring the renderer to already implement the corresponding GPU
- * blend/mask math: `packages/renderer`'s `"video"` node handling is still a
- * fixed-color placeholder plane (see this doc comment's own precedent, and
- * that module's `node-factory.ts`), so leaving these two fields as
- * validated-but-not-yet-rendered data is consistent with that existing scope
- * boundary, not a regression introduced by this phase.
+ * back "blend this generated shot additively, masked by this shape") ahead
+ * of the renderer implementing the corresponding GPU blend/mask math.
+ * `blendMode` has since been wired up (`packages/renderer`'s
+ * `node-factory.ts` applies it via the same `SatoriBlendMode`-sharing
+ * `THREE.Material.blending` logic `SatoriNode.blendMode` already used, now
+ * that `"video"` node handling renders real decoded frames rather than a
+ * fixed-color placeholder - see that module's `applyVideoNodeProperties`).
+ * `maskRef` remains validated-but-not-yet-rendered: unlike blending, no
+ * masking/alpha-cutout infrastructure exists anywhere in the renderer yet,
+ * so leaving it as data-only is still a real scope boundary, not a
+ * regression.
  */
 export interface VideoNode extends SceneNodeBase<"video"> {
   assetRef: string;
@@ -717,7 +721,9 @@ export interface VideoNode extends SceneNodeBase<"video"> {
    * matte cutting a generated shot into a non-rectangular shape before it
    * composites with a synthetic layer beneath it. Omitted means no masking:
    * the whole (fit-mode-adjusted) rectangular plane is eligible to show,
-   * exactly like every video layer authored before Phase 36.
+   * exactly like every video layer authored before Phase 36. Not yet
+   * rendered (see this interface's own doc comment) - validated, but every
+   * video layer currently renders as if unmasked regardless of this field.
    */
   maskRef?: string;
   /** Source-video-local frame the trimmed range starts at, inclusive. Defaults to `0`. */
@@ -738,6 +744,15 @@ export interface VideoNode extends SceneNodeBase<"video"> {
    * full layer (as opposed to `ImageNode`, which has no fit-mode concept at
    * all yet), and cropping a few edge pixels is rarely as visually jarring
    * as the letterboxing bars `'contain'` would introduce by default.
+   *
+   * Not yet rendered: `node-factory.ts`'s own `applyVideoNodeProperties`
+   * always sizes the plane to the decoded frame's own native aspect ratio
+   * (i.e. always behaves as `'none'`, not this field's own documented
+   * `'cover'` default), since implementing `'cover'`/`'contain'`/`'fill'`
+   * correctly needs an independently-sized target plane (UV remapping
+   * against a fixed-size box) that does not exist yet - there is no
+   * regression here relative to any prior behavior, but every value of
+   * this field is currently equivalent.
    */
   fitMode?: VideoFitMode;
   /**
