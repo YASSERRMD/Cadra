@@ -5,11 +5,14 @@ import {
   renderComposition,
 } from "@cadra/headless";
 import {
+  createImageTexture,
   createInMemoryTextRenderRegistry,
+  createInMemoryTextureRegistry,
   createPixelReadableRenderer,
   createRenderer,
   type PixelBuffer,
   type TextRenderRegistry,
+  type TextureRegistry,
 } from "@cadra/renderer";
 import type { PositionedGlyph } from "@cadra/text/browser";
 
@@ -97,7 +100,7 @@ interface SerializedTextRenderData {
  * `@cadra/renderer`), prepared ahead of time on the Node side (font
  * loading, HarfBuzz shaping, and MSDF atlas generation are all
  * Node-only-dependency-laden work that cannot run inside this bundled
- * browser page — see `@cadra/text/browser`'s own module doc for why) and
+ * browser page - see `@cadra/text/browser`'s own module doc for why) and
  * carried across `page.evaluate`'s structured-clone boundary as plain,
  * serializable data.
  */
@@ -133,6 +136,63 @@ function buildTextRenderRegistry(entries: readonly SerializedTextRenderEntry[]):
   return registry;
 }
 
+/**
+ * One `TextureRegistry` entry for an `ImageNode.assetRef` (see that
+ * interface's own doc in `@cadra/renderer`): the asset's raw, still-encoded
+ * bytes (PNG/JPEG/etc, whatever was actually uploaded), fetched ahead of
+ * time on the Node side (`@cadra/encode`'s own `render-job.ts`, via
+ * `SubmitEncodedRenderJobOptions.fetchAssetBytes`) and carried across
+ * `page.evaluate`'s structured-clone boundary as plain, serializable data -
+ * mirroring `SerializedTextRenderEntry`'s own purpose, one step simpler:
+ * decoding itself happens here, in the page (`buildTextureRegistry` below),
+ * not ahead of time, since (unlike font shaping/MSDF atlas generation) a
+ * real browser's own `createImageBitmap` is the *only* correct decoder for
+ * "whatever arbitrary image format an agent might upload," and that
+ * decoder does not exist outside a real browser page.
+ */
+export interface SerializedImageRenderEntry {
+  /** The `ImageNode.assetRef` this entry serves. */
+  assetRef: string;
+  /** The asset's raw, still-encoded bytes. */
+  bytes: number[];
+}
+
+/**
+ * Reconstructs a real, in-page `TextureRegistry` from `entries`: decodes
+ * each one's raw bytes via a real browser `createImageBitmap` (a real
+ * Chromium page's own decoder, so this covers PNG/JPEG/WebP/GIF alike, no
+ * per-format branching needed here), then wraps the result as a
+ * `THREE.Texture` via `@cadra/renderer`'s own `createImageTexture`.
+ *
+ * One entry failing to decode (corrupt bytes, or a format this browser's
+ * own `createImageBitmap` does not support) is caught and logged via
+ * `console.error` - which still surfaces to the Node side through
+ * `runOneRangeAttempt`'s own `page.onConsoleMessage`/`onLog` relay - rather
+ * than rejecting this function or the render job as a whole: that one
+ * `ImageNode` simply falls through to the renderer's own documented gray
+ * placeholder instead, matching `TextureRegistry.resolve`'s own "unresolved
+ * is an expected runtime state, not a programming error" contract.
+ */
+async function buildTextureRegistry(
+  entries: readonly SerializedImageRenderEntry[],
+): Promise<TextureRegistry> {
+  const registry = createInMemoryTextureRegistry();
+
+  await Promise.all(
+    entries.map(async (entry) => {
+      try {
+        const blob = new Blob([Uint8Array.from(entry.bytes)]);
+        const bitmap = await createImageBitmap(blob);
+        registry.register(entry.assetRef, createImageTexture(bitmap));
+      } catch (error) {
+        console.error(`Failed to decode image asset "${entry.assetRef}":`, error);
+      }
+    }),
+  );
+
+  return registry;
+}
+
 /** Config this entry function accepts, structured-cloned in from the Node orchestrator via `page.evaluate`. */
 export interface BrowserHeadlessRenderConfig {
   /** The project to render, i.e. `renderComposition`'s own `options.project`. */
@@ -147,6 +207,8 @@ export interface BrowserHeadlessRenderConfig {
   bitrate: number;
   /** Every `TextNode` render entry this project needs, prepared ahead of time on the Node side; see `SerializedTextRenderEntry`'s own doc. Omitted/empty means every text node renders as an empty placeholder, matching `createRenderer`'s own no-registry default. */
   textRenderEntries?: readonly SerializedTextRenderEntry[];
+  /** Every `ImageNode` asset this project needs, fetched ahead of time on the Node side; see `SerializedImageRenderEntry`'s own doc. Omitted/empty means every image node renders as the documented gray placeholder, matching `createRenderer`'s own no-registry default. */
+  imageRenderEntries?: readonly SerializedImageRenderEntry[];
 }
 
 /**
@@ -180,6 +242,8 @@ export interface BrowserHeadlessRenderRangeConfig {
   keyframeIntervalFrames?: number;
   /** Every `TextNode` render entry this project needs, prepared ahead of time on the Node side; see `SerializedTextRenderEntry`'s own doc. Omitted/empty means every text node renders as an empty placeholder, matching `createRenderer`'s own no-registry default. */
   textRenderEntries?: readonly SerializedTextRenderEntry[];
+  /** Every `ImageNode` asset this project needs, fetched ahead of time on the Node side; see `SerializedImageRenderEntry`'s own doc. Omitted/empty means every image node renders as the documented gray placeholder, matching `createRenderer`'s own no-registry default. */
+  imageRenderEntries?: readonly SerializedImageRenderEntry[];
 }
 
 /**
@@ -312,20 +376,34 @@ function createBridgedOnProgress(): OnProgressFn {
  * defaults exactly), using `keyframeIntervalFrames` if given (otherwise
  * `encodeFrames`'s own default, `DEFAULT_KEYFRAME_INTERVAL_FRAMES`).
  *
+ * `async` (unlike text rendering, `buildTextureRegistry` must decode real
+ * image bytes via `createImageBitmap`, which has no synchronous form, so
+ * `createRenderer`'s own `textureRegistry` cannot be built without an
+ * `await` first) - but this `await` only decodes bytes; it starts no frame
+ * render and reports no progress, so it does not reintroduce the "eagerly
+ * starting the render before a caller has had a chance to attach
+ * `onProgress`/error handling" problem the *returned generator itself*
+ * still exists specifically to avoid (see `encodedChunksGenerator`'s own
+ * doc immediately below). Every caller was already `async` regardless (see
+ * `runBrowserHeadlessRender`/`runBrowserHeadlessRenderRange`'s own bodies),
+ * so awaiting this function's own result adds no new "a promise of a
+ * generator" awkwardness on their end.
+ *
  * @throws {CompositionNotFoundForRenderError} if `compositionId` does not
  *   exist in `project`.
  */
-function buildEncodedChunksForRange(
+async function buildEncodedChunksForRange(
   project: Project,
   compositionId: string,
   seed: string | number,
   bitrate: number,
   range: { startFrame?: number; endFrame?: number; keyframeIntervalFrames?: number } = {},
   textRenderEntries: readonly SerializedTextRenderEntry[] = [],
-): {
+  imageRenderEntries: readonly SerializedImageRenderEntry[] = [],
+): Promise<{
   composition: { width: number; height: number; fps: number };
   encodedChunks: AsyncGenerator<EncodedChunkResult>;
-} {
+}> {
   const foundComposition = project.compositions.find((candidate) => candidate.id === compositionId);
   if (foundComposition === undefined) {
     throw new CompositionNotFoundForRenderError(compositionId);
@@ -344,22 +422,23 @@ function buildEncodedChunksForRange(
   canvas.width = composition.width;
   canvas.height = composition.height;
 
-  const innerRenderer = createRenderer({ textRenderRegistry: buildTextRenderRegistry(textRenderEntries) });
+  const textureRegistry = await buildTextureRegistry(imageRenderEntries);
+  const innerRenderer = createRenderer({
+    textRenderRegistry: buildTextRenderRegistry(textRenderEntries),
+    textureRegistry,
+  });
   const renderer = createPixelReadableRenderer({
     renderer: innerRenderer,
     readPixels: createRealReadPixels(),
   });
 
-  // `init` cannot be awaited here (this function is intentionally
-  // synchronous up to its returned generator: the generator itself performs
-  // every asynchronous step, including `init`, lazily on first pull) without
-  // either making this function `async` (which would then require every
-  // caller to unwrap a further outer promise around the returned generator
-  // itself, an awkward "a promise of a generator" shape) or eagerly starting
-  // the render before a caller has had a chance to attach `onProgress`/error
-  // handling. Instead, `init` is awaited as the generator's own first
-  // action, which every consumer already awaits naturally via `for await`/
-  // `.next()`.
+  // `init` cannot be awaited here (the *generator* is intentionally left
+  // synchronous to construct up to this point: it performs every remaining
+  // asynchronous step, including `init`, lazily on first pull) without
+  // eagerly starting the render before a caller has had a chance to attach
+  // `onProgress`/error handling. Instead, `init` is awaited as the
+  // generator's own first action, which every consumer already awaits
+  // naturally via `for await`/`.next()`.
   async function* encodedChunksGenerator(): AsyncGenerator<EncodedChunkResult> {
     await renderer.init(canvas, { width: composition.width, height: composition.height });
 
@@ -415,13 +494,14 @@ function buildEncodedChunksForRange(
  */
 export async function runBrowserHeadlessRender(config: BrowserHeadlessRenderConfig): Promise<void> {
   try {
-    const { composition, encodedChunks } = buildEncodedChunksForRange(
+    const { composition, encodedChunks } = await buildEncodedChunksForRange(
       config.project,
       config.compositionId,
       config.seed,
       config.bitrate,
       {},
       config.textRenderEntries,
+      config.imageRenderEntries,
     );
 
     const destination = createBridgedWriteTarget();
@@ -491,7 +571,7 @@ export async function runBrowserHeadlessRenderRange(
   config: BrowserHeadlessRenderRangeConfig,
 ): Promise<SerializedEncodedChunk[]> {
   try {
-    const { encodedChunks } = buildEncodedChunksForRange(
+    const { encodedChunks } = await buildEncodedChunksForRange(
       config.project,
       config.compositionId,
       config.seed,
@@ -502,6 +582,7 @@ export async function runBrowserHeadlessRenderRange(
         keyframeIntervalFrames: config.keyframeIntervalFrames,
       },
       config.textRenderEntries,
+      config.imageRenderEntries,
     );
 
     const serialized: SerializedEncodedChunk[] = [];

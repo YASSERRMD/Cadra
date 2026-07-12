@@ -29,15 +29,20 @@
  * default `@anthropic-ai/sdk`-backed adapter. A single minimal `ping`
  * diagnostic tool remains registered alongside them all.
  *
- * Scope boundary: every other `providerKeys` entry (Veo, Runway, Kling,
- * Luma, Pika) remains a typed, unwired placeholder ahead of Phase 34's
- * actual generative-video provider integrations.
- *
- * Phase 34 adds those five generative-video provider adapters in
- * `@cadra/providers` (`VideoProvider`, submit/poll), and Phase 35 adds
+ * Phase 34 adds five generative-video provider adapters in
+ * `@cadra/providers` (`VideoProvider`, submit/poll: Veo, Runway, Kling,
+ * Luma, Pika). `./provider-registry.ts`'s `buildVideoProviderRegistry`
+ * constructs whichever of those five `createCadraMcpServer` actually has a
+ * configured key for from `providerKeys` (`CADRA_PROVIDER_KEY_VEO`,
+ * `_RUNWAY`, `_LUMA`, `_PIKA` each a single key; `_KLING_ACCESS` +
+ * `_KLING_SECRET` together, matching Kling's own AK/SK auth scheme) and
+ * passes the result into the shared `GenerationStore` `server.ts`
+ * constructs - an unconfigured vendor is simply absent from that registry,
+ * so requesting it still fails with a descriptive `UnknownProviderError`
+ * rather than a crash from a half-configured adapter. Phase 35 adds
  * `get_generation_status`: reports a generative-video slot's current status
- * against a `@cadra/providers` `GenerationStore` (a content-hash-keyed dedup
- * cache plus caller-named generation slots) - a placeholder descriptor while
+ * against that `GenerationStore` (a content-hash-keyed dedup cache plus
+ * caller-named generation slots) - a placeholder descriptor while
  * generating, the finished clip's `outputUrl` once ready, or a failure
  * reason.
  *

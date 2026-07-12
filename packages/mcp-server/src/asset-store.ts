@@ -389,6 +389,31 @@ export async function readAssetBytes(
 }
 
 /**
+ * Builds a `(assetRef) => Promise<Uint8Array | undefined>` resolver, bound
+ * to `workspaceRoot`, ready to hand to `@cadra/encode`'s own
+ * `SubmitEncodedRenderJobOptions.fetchAssetBytes`: parses `assetRef` back to
+ * its content hash ({@link parseAssetRef}) and reads its stored bytes
+ * ({@link readAssetBytes}). Returns `undefined` (never throws) both for a
+ * `ref` outside this module's own `cadra-asset://` scheme and for a
+ * `cadra-asset://` ref whose asset is not actually stored - the same
+ * "unresolved is an expected runtime state, not a programming error"
+ * contract `TextureRegistry.resolve` itself already documents, so an
+ * `ImageNode` whose `assetRef` cannot be fetched here still falls all the
+ * way through to the renderer's own gray placeholder, never a crashed job.
+ */
+export function createAssetBytesFetcher(
+  workspaceRoot: string,
+): (assetRef: string) => Promise<Uint8Array | undefined> {
+  return async (assetRef: string): Promise<Uint8Array | undefined> => {
+    const hash = parseAssetRef(assetRef);
+    if (hash === undefined) {
+      return undefined;
+    }
+    return readAssetBytes(workspaceRoot, hash);
+  };
+}
+
+/**
  * Lists every stored asset under `workspaceRoot`'s `assets` directory as a
  * {@link StoredAssetSummary}, or an empty array if the directory does not
  * exist yet (a workspace with no assets uploaded is not an error). Entries

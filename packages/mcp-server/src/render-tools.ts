@@ -39,6 +39,7 @@ import { createWriteStream } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 
+import type { Composition, Project } from "@cadra/core";
 import {
   BROWSER_HEADLESS_RENDER_ENTRY_PATH,
   getEncodedRenderJobStatus,
@@ -50,6 +51,7 @@ import { compositionRenderModeSchema, parseScene, pathTracingConfigSchema } from
 import type { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+import { createAssetBytesFetcher } from "./asset-store.js";
 import type { CadraMcpServerConfig } from "./config.js";
 import {
   bindReadyGenerationsForScene,
@@ -72,6 +74,13 @@ export const RENDER_SCENE_TOOL_NAME = "render_scene";
 export const GET_RENDER_STATUS_TOOL_NAME = "get_render_status";
 /** Registered tool name for fetching a finished render job's output reference. */
 export const GET_RENDER_OUTPUT_TOOL_NAME = "get_render_output";
+/** Registered tool name for submitting a fast, low-resolution draft render job. */
+export const PROBE_RENDER_TOOL_NAME = "probe_render";
+
+/** `probe_render`'s default `resolutionScale` when the caller omits one: half linear size (a quarter the pixel count), a reasonable "fast but still legible" default. */
+export const DEFAULT_PROBE_RESOLUTION_SCALE = 0.5;
+/** `probe_render`'s fixed bitrate: low enough to encode fast at a draft's own reduced resolution, matching its "fast return" purpose - not a caller-tunable field, since a draft's own visual quality is not the point. */
+export const DEFAULT_PROBE_BITRATE = 500_000;
 
 /** Options accepted by {@link registerCadraRenderTools}, beyond the `(server, config, logger)` triple every other tool-registration function in this package already takes. */
 export interface RegisterCadraRenderToolsOptions {
@@ -138,6 +147,28 @@ interface RenderOutputSuccessPayload {
   format: "mp4" | "webm";
 }
 
+/** `probe_render`'s success payload: the job id (poll/fetch it exactly like `render_scene`'s own), plus the actual (post-scaling/capping) parameters this draft render used. */
+interface ProbeRenderSuccessPayload {
+  success: true;
+  jobId: string;
+  sceneId: string;
+  compositionId: string;
+  format: "mp4" | "webm";
+  width: number;
+  height: number;
+  durationInFrames: number;
+}
+
+/**
+ * Scales `value` by `scale`, rounded to the nearest even integer (several
+ * video codecs require even width/height for 4:2:0 chroma subsampling),
+ * clamped to a minimum of 2 (0 is never a valid dimension).
+ */
+function scaleDimension(value: number, scale: number): number {
+  const scaled = Math.round((value * scale) / 2) * 2;
+  return Math.max(2, scaled);
+}
+
 /**
  * Ensures `path`'s parent directory exists (creating it, and any missing
  * ancestors, if needed) before a write stream is opened onto it; mirrors
@@ -146,6 +177,118 @@ interface RenderOutputSuccessPayload {
  */
 async function ensureParentDirectoryExists(path: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
+}
+
+/** `loadRenderableComposition`'s result once every check has passed: the resolved scene id plus the generation-binding-applied project and the target composition within it. */
+interface LoadRenderableCompositionSuccess {
+  ok: true;
+  sceneId: string;
+  project: Project;
+  composition: Composition;
+}
+
+/** `loadRenderableComposition`'s result when any check fails, carrying the exact payload a caller should return as-is. */
+interface LoadRenderableCompositionFailure {
+  ok: false;
+  payload: RenderToolFailurePayload;
+}
+
+type LoadRenderableCompositionResult = LoadRenderableCompositionSuccess | LoadRenderableCompositionFailure;
+
+/**
+ * Loads `sceneId`'s persisted document, validates it still parses and has a
+ * `compositionId` composition, and runs the generation-readiness pre-flight
+ * (binds any newly-ready generation slot, refuses if any generation-backed
+ * node in the target composition is still pending) - every check
+ * `render_scene`'s own handler ran inline before `probe_render` needed the
+ * exact same sequence too. See `registerCadraRenderTools`'s own top-level
+ * doc for why this check happens here (an outer MCP-tool pre-flight) rather
+ * than deep inside `submitEncodedRenderJob`'s own render loop.
+ */
+async function loadRenderableComposition(
+  workspaceRoot: string,
+  toolLogger: Logger,
+  generationStore: GenerationStore,
+  sceneId: string,
+  compositionId: string,
+): Promise<LoadRenderableCompositionResult> {
+  const idValidation = sanitizeSceneId(sceneId);
+  if (!idValidation.valid) {
+    return { ok: false, payload: { success: false, message: idValidation.reason } };
+  }
+
+  const file = await readSceneFile(workspaceRoot, idValidation.sceneId);
+  if (file === undefined) {
+    return {
+      ok: false,
+      payload: {
+        success: false,
+        message:
+          `No scene with id "${idValidation.sceneId}" was found in this workspace. Call ` +
+          "list_scenes to see every scene id currently persisted, or create_scene to create it first.",
+      },
+    };
+  }
+
+  const parsed = parseScene(file.raw);
+  if (!parsed.success) {
+    toolLogger.warn("render tool found a persisted scene file that no longer validates", {
+      sceneId: idValidation.sceneId,
+      diagnosticCount: parsed.diagnostics.length,
+    });
+    return {
+      ok: false,
+      payload: {
+        success: false,
+        message:
+          `Scene "${idValidation.sceneId}" is persisted but no longer validates against the ` +
+          "current scene schema; call get_scene or validate_scene for full diagnostics.",
+      },
+    };
+  }
+
+  const composition = parsed.document.project.compositions.find((c) => c.id === compositionId);
+  if (composition === undefined) {
+    const availableIds = parsed.document.project.compositions.map((c) => c.id);
+    return {
+      ok: false,
+      payload: {
+        success: false,
+        message:
+          `Scene "${idValidation.sceneId}" has no composition with id "${compositionId}". ` +
+          `Available composition ids: ${availableIds.length > 0 ? availableIds.join(", ") : "(none)"}.`,
+      },
+    };
+  }
+
+  const bindingResult = await bindReadyGenerationsForScene(
+    workspaceRoot,
+    idValidation.sceneId,
+    generationStore,
+    toolLogger,
+  );
+  const effectiveProject = bindingResult?.document.project ?? parsed.document.project;
+  const stillPendingInComposition = findPendingGenerationNodes({
+    ...effectiveProject,
+    compositions: effectiveProject.compositions.filter((c) => c.id === compositionId),
+  });
+  if (stillPendingInComposition.length > 0) {
+    const nodeIds = stillPendingInComposition.map((pending) => pending.node.id).join(", ");
+    return {
+      ok: false,
+      payload: {
+        success: false,
+        message:
+          `Composition "${compositionId}" of scene "${idValidation.sceneId}" has ` +
+          `${stillPendingInComposition.length} VideoNode(s) still waiting on a generation job (${nodeIds}). ` +
+          "Call get_generation_status for each slot id (matching the node's own id) to check on it, " +
+          "and submit render_scene again once every one reports ready.",
+      },
+    };
+  }
+
+  const effectiveComposition = effectiveProject.compositions.find((c) => c.id === compositionId)!;
+  return { ok: true, sceneId: idValidation.sceneId, project: effectiveProject, composition: effectiveComposition };
 }
 
 /**
@@ -228,81 +371,17 @@ export function registerCadraRenderTools(
       renderMode,
       pathTracing,
     }) => {
-      const idValidation = sanitizeSceneId(sceneId);
-      if (!idValidation.valid) {
-        return jsonResult({
-          success: false,
-          message: idValidation.reason,
-        } satisfies RenderToolFailurePayload);
-      }
-
-      const file = await readSceneFile(config.workspaceRoot, idValidation.sceneId);
-      if (file === undefined) {
-        return jsonResult({
-          success: false,
-          message:
-            `No scene with id "${idValidation.sceneId}" was found in this workspace. Call ` +
-            "list_scenes to see every scene id currently persisted, or create_scene to create it first.",
-        } satisfies RenderToolFailurePayload);
-      }
-
-      const parsed = parseScene(file.raw);
-      if (!parsed.success) {
-        toolLogger.warn("render_scene found a persisted scene file that no longer validates", {
-          sceneId: idValidation.sceneId,
-          diagnosticCount: parsed.diagnostics.length,
-        });
-        return jsonResult({
-          success: false,
-          message:
-            `Scene "${idValidation.sceneId}" is persisted but no longer validates against the ` +
-            "current scene schema; call get_scene or validate_scene for full diagnostics.",
-        } satisfies RenderToolFailurePayload);
-      }
-
-      const composition = parsed.document.project.compositions.find((c) => c.id === compositionId);
-      if (composition === undefined) {
-        const availableIds = parsed.document.project.compositions.map((c) => c.id);
-        return jsonResult({
-          success: false,
-          message:
-            `Scene "${idValidation.sceneId}" has no composition with id "${compositionId}". ` +
-            `Available composition ids: ${availableIds.length > 0 ? availableIds.join(", ") : "(none)"}.`,
-        } satisfies RenderToolFailurePayload);
-      }
-
-      // Generation-readiness pre-flight (Phase 36): bindReadyGenerationsForScene
-      // rewrites any newly-ready generation slot's node onto a real asset
-      // ref and persists that rewrite (this call site is exactly one of the
-      // "something already checks a slot's status" triggers the "bind on
-      // completion" rewrite fires from). Then refuse to render if the
-      // target composition still has any node left waiting on a
-      // not-yet-ready generation, rather than submitting a render against a
-      // broken/placeholder ref. See this module's own doc for why this
-      // check happens here (an outer MCP-tool pre-flight) rather than deep
-      // inside submitEncodedRenderJob's own render loop.
-      const bindingResult = await bindReadyGenerationsForScene(
+      const loaded = await loadRenderableComposition(
         config.workspaceRoot,
-        idValidation.sceneId,
-        generationStore,
         toolLogger,
+        generationStore,
+        sceneId,
+        compositionId,
       );
-      const effectiveProject = bindingResult?.document.project ?? parsed.document.project;
-      const stillPendingInComposition = findPendingGenerationNodes({
-        ...effectiveProject,
-        compositions: effectiveProject.compositions.filter((c) => c.id === compositionId),
-      });
-      if (stillPendingInComposition.length > 0) {
-        const nodeIds = stillPendingInComposition.map((pending) => pending.node.id).join(", ");
-        return jsonResult({
-          success: false,
-          message:
-            `Composition "${compositionId}" of scene "${idValidation.sceneId}" has ` +
-            `${stillPendingInComposition.length} VideoNode(s) still waiting on a generation job (${nodeIds}). ` +
-            "Call get_generation_status for each slot id (matching the node's own id) to check on it, " +
-            "and submit render_scene again once every one reports ready.",
-        } satisfies RenderToolFailurePayload);
+      if (!loaded.ok) {
+        return jsonResult(loaded.payload);
       }
+      const { sceneId: resolvedSceneId, project: effectiveProject } = loaded;
 
       // Applies this call's own optional renderMode/pathTracing override onto
       // the target composition only, without persisting either onto the
@@ -340,13 +419,14 @@ export function registerCadraRenderTools(
           bitrate,
           destination,
           entryFilePath: BROWSER_HEADLESS_RENDER_ENTRY_PATH,
+          fetchAssetBytes: createAssetBytesFetcher(config.workspaceRoot),
           ...(rangeSizeFrames !== undefined ? { rangeSizeFrames } : {}),
           ...(maxConcurrency !== undefined ? { maxConcurrency } : {}),
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         toolLogger.error("render_scene failed to submit the render job", {
-          sceneId: idValidation.sceneId,
+          sceneId: resolvedSceneId,
           compositionId,
           message,
         });
@@ -356,7 +436,7 @@ export function registerCadraRenderTools(
       registerRenderJob({
         jobId,
         encodedJobId: handle.jobId,
-        sceneId: idValidation.sceneId,
+        sceneId: resolvedSceneId,
         compositionId,
         format,
         outputPath,
@@ -367,7 +447,7 @@ export function registerCadraRenderTools(
       toolLogger.info("render_scene submitted a render job", {
         jobId,
         encodedJobId: handle.jobId,
-        sceneId: idValidation.sceneId,
+        sceneId: resolvedSceneId,
         compositionId,
         format,
       });
@@ -375,7 +455,7 @@ export function registerCadraRenderTools(
       return jsonResult({
         success: true,
         jobId,
-        sceneId: idValidation.sceneId,
+        sceneId: resolvedSceneId,
         compositionId,
         format,
       } satisfies RenderSceneSuccessPayload);
@@ -485,5 +565,169 @@ export function registerCadraRenderTools(
     },
   );
 
-  return [renderSceneTool, getRenderStatusTool, getRenderOutputTool];
+  const probeRenderTool = server.registerTool(
+    PROBE_RENDER_TOOL_NAME,
+    {
+      title: "Probe render",
+      description:
+        "Submits a fast, low-resolution draft render of a scene's composition - the same " +
+        "job/poll/fetch flow as render_scene (use get_render_status/get_render_output with the " +
+        "returned jobId), just at a smaller frame size and, optionally, a shorter duration, so the " +
+        "whole thing renders much faster. Use this to sanity-check timing/motion/overall " +
+        "composition before committing to a full render_scene call; use render_frames instead if " +
+        "you only need to see specific frames, not a full clip.",
+      inputSchema: {
+        sceneId: z
+          .string()
+          .describe("Id of the scene (as persisted by create_scene/update_scene) to render."),
+        compositionId: z.string().describe("Id of the composition, within that scene, to render."),
+        seed: z
+          .union([z.string(), z.number()])
+          .optional()
+          .describe('Base seed for every frame\'s rendering. Defaults to "probe" - a draft render\'s own determinism rarely matters.'),
+        resolutionScale: z
+          .number()
+          .positive()
+          .max(1)
+          .optional()
+          .describe(
+            "Scales the composition's own width/height by this factor (each rounded to the " +
+              `nearest even pixel count, minimum 2). Defaults to ${DEFAULT_PROBE_RESOLUTION_SCALE}.`,
+          ),
+        maxDurationInFrames: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe(
+            "Caps the render to at most this many frames from the start (frame 0). Omitted " +
+              "renders the composition's own full duration.",
+          ),
+        format: z
+          .enum(["mp4", "webm"])
+          .optional()
+          .describe('Output container format. Defaults to "mp4".'),
+        renderMode: compositionRenderModeSchema
+          .optional()
+          .describe(
+            "Overrides the target composition's own renderMode for this render call only; see " +
+              "render_scene's own field of the same name.",
+          ),
+        pathTracing: pathTracingConfigSchema
+          .optional()
+          .describe(
+            "Overrides the target composition's own path-traced tuning for this render call " +
+              "only; see render_scene's own field of the same name.",
+          ),
+      },
+    },
+    async ({
+      sceneId,
+      compositionId,
+      seed,
+      resolutionScale,
+      maxDurationInFrames,
+      format,
+      renderMode,
+      pathTracing,
+    }) => {
+      const loaded = await loadRenderableComposition(
+        config.workspaceRoot,
+        toolLogger,
+        generationStore,
+        sceneId,
+        compositionId,
+      );
+      if (!loaded.ok) {
+        return jsonResult(loaded.payload);
+      }
+      const { sceneId: resolvedSceneId, project: effectiveProject, composition } = loaded;
+
+      const effectiveFormat = format ?? "mp4";
+      const effectiveSeed = seed ?? "probe";
+      const probeWidth = scaleDimension(composition.width, resolutionScale ?? DEFAULT_PROBE_RESOLUTION_SCALE);
+      const probeHeight = scaleDimension(composition.height, resolutionScale ?? DEFAULT_PROBE_RESOLUTION_SCALE);
+      const probeDurationInFrames =
+        maxDurationInFrames !== undefined
+          ? Math.min(maxDurationInFrames, composition.durationInFrames)
+          : composition.durationInFrames;
+
+      const projectToRender = {
+        ...effectiveProject,
+        compositions: effectiveProject.compositions.map((c) =>
+          c.id === compositionId
+            ? {
+                ...c,
+                width: probeWidth,
+                height: probeHeight,
+                durationInFrames: probeDurationInFrames,
+                ...(renderMode !== undefined && { renderMode }),
+                ...(pathTracing !== undefined && { pathTracing }),
+              }
+            : c,
+        ),
+      };
+
+      const jobId = mintRenderJobId();
+      const outputPath = resolveRenderOutputPath(config.outputDirectory, jobId, effectiveFormat);
+      await ensureParentDirectoryExists(outputPath);
+      const destination = createWriteStream(outputPath);
+
+      let handle;
+      try {
+        handle = await submitEncodedRenderJob({
+          project: projectToRender,
+          compositionId,
+          seed: effectiveSeed,
+          format: effectiveFormat,
+          bitrate: DEFAULT_PROBE_BITRATE,
+          destination,
+          entryFilePath: BROWSER_HEADLESS_RENDER_ENTRY_PATH,
+          fetchAssetBytes: createAssetBytesFetcher(config.workspaceRoot),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        toolLogger.error("probe_render failed to submit the render job", {
+          sceneId: resolvedSceneId,
+          compositionId,
+          message,
+        });
+        return jsonResult({ success: false, message } satisfies RenderToolFailurePayload);
+      }
+
+      registerRenderJob({
+        jobId,
+        encodedJobId: handle.jobId,
+        sceneId: resolvedSceneId,
+        compositionId,
+        format: effectiveFormat,
+        outputPath,
+        submittedAt: new Date().toISOString(),
+      });
+      trackRenderJobOutcome(jobId, handle);
+
+      toolLogger.info("probe_render submitted a draft render job", {
+        jobId,
+        encodedJobId: handle.jobId,
+        sceneId: resolvedSceneId,
+        compositionId,
+        width: probeWidth,
+        height: probeHeight,
+        durationInFrames: probeDurationInFrames,
+      });
+
+      return jsonResult({
+        success: true,
+        jobId,
+        sceneId: resolvedSceneId,
+        compositionId,
+        format: effectiveFormat,
+        width: probeWidth,
+        height: probeHeight,
+        durationInFrames: probeDurationInFrames,
+      } satisfies ProbeRenderSuccessPayload);
+    },
+  );
+
+  return [renderSceneTool, getRenderStatusTool, getRenderOutputTool, probeRenderTool];
 }

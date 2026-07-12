@@ -34,6 +34,23 @@ describe("createCadraMcpServer", () => {
     expect(lines).toContain("Cadra MCP server constructed");
   });
 
+  it("constructs without throwing when given a full set of real video-provider keys, including kling's two-key pair", () => {
+    expect(() =>
+      createCadraMcpServer({
+        config: {
+          providerKeys: {
+            veo: "veo-key",
+            runway: "runway-key",
+            luma: "luma-key",
+            pika: "pika-key",
+            kling_access: "kling-ak",
+            kling_secret: "kling-sk",
+          },
+        },
+      }),
+    ).not.toThrow();
+  });
+
   it("advertises a stable name/version for the MCP handshake", () => {
     expect(SERVER_NAME).toBe("cadra-mcp-server");
     expect(SERVER_VERSION).toBe("0.0.0");

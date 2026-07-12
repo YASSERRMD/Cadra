@@ -1,3 +1,8 @@
+import {
+  aspectRatio9x16Scene,
+  aspectRatio16x9Scene,
+  aspectRatio21x9Scene,
+} from "./aspect-ratio-scene.js";
 import type { GoldenScene } from "./golden-scene.js";
 import { lightingScene } from "./lighting-scene.js";
 import { materialsScene } from "./materials-scene.js";
@@ -5,8 +10,14 @@ import { minimalDefaultsScene } from "./minimal-defaults-scene.js";
 import { motionBlurScene } from "./motion-blur-scene.js";
 import { pathTracedScene } from "./path-traced-scene.js";
 import { postProcessingScene } from "./post-processing-scene.js";
+import { textPunctuationScene } from "./text-punctuation-scene.js";
 import { textFontkitScene, textOpentypeScene } from "./text-scene.js";
 
+export {
+  aspectRatio9x16Scene,
+  aspectRatio16x9Scene,
+  aspectRatio21x9Scene,
+} from "./aspect-ratio-scene.js";
 export type { GoldenScene, GoldenSceneDriver, GoldenSceneTextRequirement } from "./golden-scene.js";
 export { lightingScene } from "./lighting-scene.js";
 export { materialsScene } from "./materials-scene.js";
@@ -14,6 +25,7 @@ export { minimalDefaultsScene } from "./minimal-defaults-scene.js";
 export { motionBlurScene } from "./motion-blur-scene.js";
 export { pathTracedScene } from "./path-traced-scene.js";
 export { postProcessingScene } from "./post-processing-scene.js";
+export { textPunctuationScene } from "./text-punctuation-scene.js";
 export { textFontkitScene, textOpentypeScene } from "./text-scene.js";
 
 /**
@@ -33,5 +45,9 @@ export const GOLDEN_SCENES: readonly GoldenScene[] = [
   pathTracedScene,
   textOpentypeScene,
   textFontkitScene,
+  textPunctuationScene,
   minimalDefaultsScene,
+  aspectRatio16x9Scene,
+  aspectRatio9x16Scene,
+  aspectRatio21x9Scene,
 ];

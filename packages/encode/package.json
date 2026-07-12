@@ -31,7 +31,9 @@
     "webm-muxer": "^5.1.4"
   },
   "devDependencies": {
+    "@types/pngjs": "^6.0.5",
     "playwright": "^1.61.1",
+    "pngjs": "^7.0.0",
     "typescript": "^5.7.3",
     "vitest": "^2.1.8"
   }

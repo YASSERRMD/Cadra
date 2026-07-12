@@ -21,6 +21,7 @@ import type { SceneDocument } from "@cadra/schema";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { chromium } from "playwright";
+import { PNG } from "pngjs";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ASSET_REF_SCHEME } from "./asset-store.js";
@@ -50,16 +51,21 @@ import { createCadraMcpServer } from "./server.js";
  * hang or fail the suite) when no real Chromium is available in this
  * environment.
  *
- * The rendered composition itself deliberately uses the same proven
- * lit-box pattern `render-job.e2e.test.ts`/`render-composition-headless-
- * server.e2e.test.ts` already use (shape + camera + ambient/directional
- * lights), not the uploaded image asset: `packages/renderer` does not yet
- * implement an `image` node's actual draw path (only the scene-graph/schema
- * primitive exists so far), so this test proves "an uploaded asset's ref is
- * usable in a scene by ref" the way Phase 30's own acceptance criteria
- * states it (persisted in the scene document, addressable by
- * `cadra-asset://<hash>`), without depending on unrelated, not-yet-built
- * image-rendering support for the render itself to succeed.
+ * The rendered composition itself uses the same proven lit-box pattern
+ * `render-job.e2e.test.ts`/`render-composition-headless-server.e2e.test.ts`
+ * already use (shape + camera + ambient/directional lights), not the
+ * uploaded image asset: this test's own purpose is proving "an uploaded
+ * asset's ref is usable in a scene by ref" (persisted in the scene document,
+ * addressable by `cadra-asset://<hash>`), a narrower claim than "an
+ * `ImageNode` actually renders its own real texture," which has its own
+ * dedicated, pixel-level-verified coverage instead (real image bytes,
+ * decoded and checked right-side-up against a known two-tone source, in
+ * `@cadra/encode`'s own `browser-headless-render-entry.e2e.test.ts`) plus
+ * this file's own separate "two renders differ by asset content alone"
+ * check below (`describe("render_scene: real image asset bytes reach the
+ * renderer", ...)`), which proves the full upload_asset -> render_scene
+ * tool-surface wiring specifically (not just the lower-level rendering
+ * mechanics already covered above).
  */
 
 const FPS = 10;
@@ -540,3 +546,235 @@ function buildFullSceneDocument(): SceneDocument {
 
   return { schemaVersion: 1, project } as SceneDocument;
 }
+
+/** A solid-color square PNG, real and valid (`pngjs`-encoded, not arbitrary bytes mislabeled as an image, unlike this file's own `byBytesBytes`/`byUrlBody` fixtures above - those only need to round-trip as opaque bytes, never actually decoded as an image). */
+function buildSolidColorPng(size: number, color: readonly [number, number, number]): Buffer {
+  const png = new PNG({ width: size, height: size });
+  for (let i = 0; i < size * size; i += 1) {
+    const index = i << 2;
+    png.data[index] = color[0];
+    png.data[index + 1] = color[1];
+    png.data[index + 2] = color[2];
+    png.data[index + 3] = 255;
+  }
+  return PNG.sync.write(png);
+}
+
+/**
+ * A minimal scene document with one `Camera` (default 50deg fov, 5 units
+ * from the origin) and one `ImageNode` referencing `assetRef`, scaled large
+ * enough (`transform.scale: [8,8,8]`, matching `@cadra/encode`'s own
+ * `browser-headless-render-entry.e2e.test.ts`'s identical `IMAGE_SIZE`/fov/
+ * distance reasoning - see that file's own doc for the exact frustum-size
+ * math) to fill the entire frame with margin: no light node needed (an
+ * `ImageNode`'s `MeshBasicMaterial` is unlit) and no other geometry, so
+ * every pixel of the rendered output is this one image's own real texture
+ * content, unambiguously.
+ */
+function buildImageFillsFrameSceneDocument(
+  sceneId: string,
+  compositionId: string,
+  durationInFrames: number,
+  fps: number,
+  size: number,
+  assetRef: string,
+): SceneDocument {
+  const image = Image({
+    id: "image-1",
+    assetRef,
+    transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [8, 8, 8] },
+  });
+  const camera = Camera({
+    id: "camera-1",
+    transform: { position: [0, 0, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  });
+
+  const composition = createComposition({
+    id: compositionId,
+    name: "Main",
+    fps,
+    durationInFrames,
+    width: size,
+    height: size,
+    tracks: [
+      {
+        id: "track-image",
+        clips: [Sequence({ id: "clip-image", from: 0, durationInFrames, content: image })],
+      },
+      {
+        id: "track-camera",
+        clips: [Sequence({ id: "clip-camera", from: 0, durationInFrames, content: camera })],
+      },
+    ],
+  });
+  const withActiveCameraTrack: Composition = {
+    ...composition,
+    activeCameraTrack: [{ startFrame: 0, durationInFrames, cameraNodeId: "camera-1" }],
+  };
+
+  const project: Project = createProject({
+    id: sceneId,
+    name: "Image asset e2e scene",
+    compositions: [withActiveCameraTrack],
+  });
+
+  return { schemaVersion: 1, project } as SceneDocument;
+}
+
+/**
+ * Proves the full `upload_asset` -> `render_scene` tool-surface wiring
+ * specifically delivers real asset bytes to the renderer - narrower in
+ * scope than, and a necessary complement to, `browser-headless-render-
+ * entry.e2e.test.ts`'s own pixel-level, orientation-verified coverage of
+ * the underlying rendering mechanics (see this file's own top-level doc):
+ * that suite calls `runBrowserHeadlessRenderRange` directly with hand-built
+ * `imageRenderEntries`, never exercising `render-tools.ts`'s own
+ * `createAssetBytesFetcher(config.workspaceRoot)` wiring or the real
+ * asset-store round trip (`upload_asset` persisting bytes to disk,
+ * `readAssetBytes` reading them back) at all.
+ *
+ * Renders the exact same scene shape, seed, and composition twice, varying
+ * only which of two real, distinctly-colored uploaded image assets the
+ * lone `ImageNode` references. If the real bytes never reached the
+ * renderer (e.g. a wiring mistake left every image on its gray placeholder
+ * regardless of `assetRef`), both renders would encode to identical bytes;
+ * asserting they differ is this test's own real, meaningful pass/fail
+ * signal, without needing to decode the produced MP4's own video stream
+ * back to pixels (`browser-headless-render-entry.e2e.test.ts`'s own job).
+ */
+describe("render_scene: real image asset bytes reach the renderer", () => {
+  let workspaceRoot: string | undefined;
+  let client: Client | undefined;
+
+  afterEach(async () => {
+    await client?.close();
+    client = undefined;
+    if (workspaceRoot !== undefined) {
+      await rm(workspaceRoot, { recursive: true, force: true });
+      workspaceRoot = undefined;
+    }
+  });
+
+  it(
+    "renders visibly different output for two scenes whose only difference is which uploaded image asset their ImageNode references",
+    async () => {
+      if (!chromiumAvailable) {
+        console.log(
+          "render_scene image-asset-bytes e2e test: skipping, real Chromium not found (no cached Playwright browser in this environment).",
+        );
+        return;
+      }
+
+      workspaceRoot = await mkdtemp(join(tmpdir(), "cadra-render-image-e2e-test-"));
+      const outputDirectory = join(workspaceRoot, "out");
+
+      const { server } = createCadraMcpServer({
+        config: { workspaceRoot, outputDirectory },
+        logger: createLogger("test", {}, () => {
+          // Swallow log output in tests.
+        }),
+      });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const connectedClient = new Client({ name: "test-client", version: "0.0.0" });
+      await Promise.all([server.connect(serverTransport), connectedClient.connect(clientTransport)]);
+      client = connectedClient;
+
+      const redPng = buildSolidColorPng(8, [255, 0, 0]);
+      const bluePng = buildSolidColorPng(8, [0, 0, 255]);
+
+      const uploadRedResult = await connectedClient.callTool({
+        name: UPLOAD_ASSET_TOOL_NAME,
+        arguments: { bytesBase64: redPng.toString("base64"), contentType: "image/png" },
+      });
+      const redPayload = parseToolResult<UploadAssetPayload>(uploadRedResult as ToolTextResult);
+      expect(redPayload.success).toBe(true);
+
+      const uploadBlueResult = await connectedClient.callTool({
+        name: UPLOAD_ASSET_TOOL_NAME,
+        arguments: { bytesBase64: bluePng.toString("base64"), contentType: "image/png" },
+      });
+      const bluePayload = parseToolResult<UploadAssetPayload>(uploadBlueResult as ToolTextResult);
+      expect(bluePayload.success).toBe(true);
+
+      const compositionId = "comp-1";
+      const durationInFrames = 3;
+      const fps = 10;
+      const size = 16;
+
+      async function renderSceneWithImage(sceneId: string, assetRef: string): Promise<Buffer> {
+        const createResult = await connectedClient.callTool({
+          name: CREATE_SCENE_TOOL_NAME,
+          arguments: {
+            sceneId,
+            name: "Image asset e2e scene",
+            composition: { id: compositionId, name: "Main", fps, durationInFrames, width: size, height: size },
+          },
+        });
+        expect(parseToolResult<{ success: boolean }>(createResult as ToolTextResult).success).toBe(true);
+
+        const replaceResult = await connectedClient.callTool({
+          name: UPDATE_SCENE_TOOL_NAME,
+          arguments: {
+            sceneId,
+            mode: "replace",
+            document: buildImageFillsFrameSceneDocument(
+              sceneId,
+              compositionId,
+              durationInFrames,
+              fps,
+              size,
+              assetRef,
+            ),
+          },
+        });
+        expect(parseToolResult<{ success: boolean }>(replaceResult as ToolTextResult).success).toBe(true);
+
+        const renderResult = await connectedClient.callTool({
+          name: RENDER_SCENE_TOOL_NAME,
+          arguments: {
+            sceneId,
+            compositionId,
+            seed: "fixed-image-asset-seed",
+            format: "mp4",
+            bitrate: 1_000_000,
+          },
+        });
+        const renderPayload = parseToolResult<RenderScenePayload>(renderResult as ToolTextResult);
+        expect(renderPayload.success).toBe(true);
+        const jobId = renderPayload.jobId;
+
+        const pollDeadline = Date.now() + 60_000;
+        let finalStatus: RenderStatusPayload | undefined;
+        while (Date.now() < pollDeadline) {
+          const statusResult = await connectedClient.callTool({
+            name: GET_RENDER_STATUS_TOOL_NAME,
+            arguments: { jobId },
+          });
+          const statusPayload = parseToolResult<RenderStatusPayload>(statusResult as ToolTextResult);
+          if (statusPayload.outcome !== undefined) {
+            finalStatus = statusPayload;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+        expect(finalStatus?.outcome).toEqual({ ok: true });
+
+        const outputResult = await connectedClient.callTool({
+          name: GET_RENDER_OUTPUT_TOOL_NAME,
+          arguments: { jobId },
+        });
+        const outputPayload = parseToolResult<RenderOutputPayload>(outputResult as ToolTextResult);
+        expect(outputPayload.success).toBe(true);
+        return readFile(outputPayload.outputPath!);
+      }
+
+      const redOutput = await renderSceneWithImage("scene-red-image", redPayload.assetRef!);
+      const blueOutput = await renderSceneWithImage("scene-blue-image", bluePayload.assetRef!);
+
+      expect(redOutput.byteLength).toBeGreaterThan(512);
+      expect(blueOutput.byteLength).toBeGreaterThan(512);
+      expect(Buffer.compare(redOutput, blueOutput)).not.toBe(0);
+    },
+    120_000,
+  );
+});

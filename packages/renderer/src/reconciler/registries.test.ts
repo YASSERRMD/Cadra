@@ -5,6 +5,8 @@ import {
   createDefaultGeometryRegistry,
   createDefaultMaterialRegistry,
   createDefaultTextureRegistry,
+  createImageTexture,
+  createInMemoryTextureRegistry,
   DEFAULT_GEOMETRY_REFS,
   DEFAULT_MATERIAL_REFS,
 } from "./registries.js";
@@ -66,9 +68,58 @@ describe("createDefaultMaterialRegistry", () => {
 });
 
 describe("createDefaultTextureRegistry", () => {
-  it("resolves every ref to undefined (no texture asset pipeline seeded yet)", () => {
+  it("resolves every ref to undefined (the no-registry-injected fallback)", () => {
     const registry = createDefaultTextureRegistry();
     expect(registry.resolve("normal-1")).toBeUndefined();
     expect(registry.resolve("does-not-exist")).toBeUndefined();
+  });
+});
+
+describe("createInMemoryTextureRegistry", () => {
+  it("resolves an unregistered ref to undefined", () => {
+    const registry = createInMemoryTextureRegistry();
+    expect(registry.resolve("does-not-exist")).toBeUndefined();
+  });
+
+  it("resolves a registered ref to the exact texture instance it was registered with", () => {
+    const registry = createInMemoryTextureRegistry();
+    const texture = new THREE.Texture();
+    registry.register("cadra-asset://abc123", texture);
+    expect(registry.resolve("cadra-asset://abc123")).toBe(texture);
+  });
+
+  it("gives each registry instance its own entries, not shared across registries", () => {
+    const registryA = createInMemoryTextureRegistry();
+    const registryB = createInMemoryTextureRegistry();
+    registryA.register("shared-ref", new THREE.Texture());
+    expect(registryB.resolve("shared-ref")).toBeUndefined();
+  });
+});
+
+describe("createImageTexture", () => {
+  function fakeImageBitmap(width: number, height: number): ImageBitmap {
+    return { width, height } as unknown as ImageBitmap;
+  }
+
+  it("wraps the given ImageBitmap as the texture's own .image", () => {
+    const bitmap = fakeImageBitmap(64, 32);
+    const texture = createImageTexture(bitmap);
+    expect(texture).toBeInstanceOf(THREE.Texture);
+    expect(texture.image).toBe(bitmap);
+  });
+
+  it("tags the texture sRGB (real, visible color, not a colorless data channel)", () => {
+    const texture = createImageTexture(fakeImageBitmap(4, 4));
+    expect(texture.colorSpace).toBe(THREE.SRGBColorSpace);
+  });
+
+  it("marks the texture ready for GPU upload", () => {
+    // `needsUpdate` is write-only in Three.js (setting it bumps `.version`
+    // internally; reading it back always yields `undefined`, verified
+    // directly against the real three package), so `.version` having
+    // advanced past its freshly-constructed `0` is the only observable
+    // proof `needsUpdate = true` was actually set.
+    const texture = createImageTexture(fakeImageBitmap(4, 4));
+    expect(texture.version).toBeGreaterThan(0);
   });
 });

@@ -20,8 +20,17 @@ import {
   resumeRenderJob as resumeHeadlessRenderJob,
   submitRenderJob as submitHeadlessRenderJob,
 } from "@cadra/headless";
-import { computeTextNodeRenderKey } from "@cadra/renderer";
-import { createFontRegistry, type PositionedGlyph, prepareTextRenderData } from "@cadra/text";
+import {
+  computeTextNodeRenderKey,
+  createInMemoryTextRenderRegistry,
+  type TextRenderRegistry,
+} from "@cadra/renderer";
+import {
+  createFontRegistry,
+  type PositionedGlyph,
+  prepareTextRenderData,
+  type TextRenderData,
+} from "@cadra/text";
 
 import type { EncodedChunkResult } from "./encode-frames.js";
 import { DEFAULT_KEYFRAME_INTERVAL_FRAMES } from "./encode-frames.js";
@@ -140,6 +149,15 @@ export interface SubmitEncodedRenderJobOptions {
   bundleEntry?: (options: { entryFilePath: string }) => Promise<string>;
   /** Milliseconds allowed for one range attempt before it is treated as timed out and retried. Defaults to `DEFAULT_RANGE_TIMEOUT_MS`. */
   timeoutMs?: number;
+  /**
+   * Resolves an `ImageNode.assetRef` to that asset's own raw bytes, e.g.
+   * `@cadra/mcp-server`'s own `createAssetBytesFetcher(workspaceRoot)`.
+   * Omitted means every `ImageNode` in `project` renders as the renderer's
+   * own documented gray placeholder, matching this option's pre-existing
+   * behavior before it existed at all - see `buildImageRenderEntriesForProject`'s
+   * own doc for the full "unresolved is an expected runtime state" contract.
+   */
+  fetchAssetBytes?: (assetRef: string) => Promise<Uint8Array | undefined>;
 }
 
 /** Milliseconds allowed for one range attempt by default: 2 minutes. Shorter than `renderCompositionHeadlessServer`'s own 5-minute default, since a single range is, by construction, a fraction of a whole composition's frames. */
@@ -189,6 +207,12 @@ interface SerializedMsdfAtlasPage {
   png: number[];
 }
 
+/** Mirrors `browser-headless-render-entry.ts`'s own `SerializedImageRenderEntry`; duplicated (not imported) for the same reason `BrowserRangeConfigArg` below is - see its own doc. */
+interface SerializedImageRenderEntry {
+  assetRef: string;
+  bytes: number[];
+}
+
 /** Mirrors `browser-headless-render-entry.ts`'s own `SerializedTextRenderData`. */
 interface SerializedTextRenderData {
   atlasPages: SerializedMsdfAtlasPage[];
@@ -214,6 +238,7 @@ interface BrowserRangeConfigArg {
   endFrame: number;
   keyframeIntervalFrames: number;
   textRenderEntries: SerializedTextRenderEntry[];
+  imageRenderEntries: SerializedImageRenderEntry[];
 }
 
 /**
@@ -237,29 +262,39 @@ function collectTextNodes(node: SceneNode, out: TextNode[]): void {
   }
 }
 
+/** Recursively collects every distinct `ImageNode.assetRef` in `node`'s own subtree into `out`. */
+function collectImageAssetRefs(node: SceneNode, out: Set<string>): void {
+  if (node.kind === "image") {
+    out.add(node.assetRef);
+  }
+  for (const child of node.children) {
+    collectImageAssetRefs(child, out);
+  }
+}
+
+/** One prepared, real (non-serialized) `TextRenderRegistry` entry - `prepareTextRenderEntriesForProject`'s own output shape, shared by both of its callers below. */
+interface PreparedTextRenderEntry {
+  cacheKey: string;
+  data: TextRenderData;
+  fontBytes: Buffer;
+  fontContentHash: string;
+}
+
 /**
- * Prepares a `SerializedTextRenderEntry` for every distinct `TextNode`
+ * Prepares a `PreparedTextRenderEntry` for every distinct `TextNode`
  * (deduped by `computeTextNodeRenderKey(node, 0)`, mirroring
  * `TextRenderRegistry`'s own resolve-by-key contract) found anywhere in
- * `project`'s own scene graph, across every composition/track/clip.
- *
- * Fixes the gap this package's own render path had: `createRenderer()`
- * (called from `browser-headless-render-entry.ts`, the actual entry
- * `submitEncodedRenderJob` bundles and runs per range) was never handed a
- * `TextRenderRegistry` at all, so every `TextNode` resolved to an empty,
- * glyph-less `THREE.Group()` (see `node-factory.ts`'s own `buildTextObject`)
- * - correctly reproducing the mesh/light/post-processing pipeline while
- * silently rendering zero text, with no thrown error anywhere in that
- * path. Font loading, HarfBuzz shaping, and MSDF atlas generation are all
+ * `project`'s own scene graph, across every composition/track/clip. Font
+ * loading, HarfBuzz shaping, and MSDF atlas generation are all
  * Node-only-dependency-laden work (`fontkit`'s `Buffer` usage,
- * `msdfgen-wasm`'s `createRequire`, `subset-font`'s `fs`) that cannot run
- * inside the browser-bundled render page itself (see `@cadra/text/browser`'s
- * own module doc for why that package's browser-safe subset deliberately
- * omits `prepareTextRenderData`/`createFontRegistry`), so this runs here,
- * server-side, once per job (not once per range/attempt - every range
- * needs the exact same entries, mirroring how `entrySource` itself is
- * bundled once and reused), with the result carried into the page as
- * plain, `page.evaluate`-structured-clone-safe data.
+ * `msdfgen-wasm`'s `createRequire`, `subset-font`'s `fs`), so this always
+ * runs here, server-side, in real Node - see this module's two callers for
+ * why each needs that: `buildTextRenderEntriesForProject` (below) further
+ * serializes this result to cross a `page.evaluate` structured-clone
+ * boundary into a bundled browser page; `buildTextRenderRegistryForProject`
+ * (exported) registers it directly into a `TextRenderRegistry` for a
+ * same-process renderer (`@cadra/headless`'s native-GPU-headless path, no
+ * browser, no serialization boundary at all) instead.
  *
  * Every node currently uses this module's own bundled default font
  * regardless of whether it set its own `fontRef`: resolving `fontRef`
@@ -268,9 +303,9 @@ function collectTextNodes(node: SceneNode, out: TextNode[]): void {
  * MCP-server callers have no such registry wired through to here yet
  * either), not something dropped by mistake.
  */
-async function buildTextRenderEntriesForProject(
+async function prepareTextRenderEntriesForProject(
   project: Project,
-): Promise<SerializedTextRenderEntry[]> {
+): Promise<PreparedTextRenderEntry[]> {
   const textNodes: TextNode[] = [];
   for (const composition of project.compositions) {
     for (const track of composition.tracks) {
@@ -285,7 +320,6 @@ async function buildTextRenderEntriesForProject(
   }
 
   const fontBytes = readFileSync(DEFAULT_FONT_PATH);
-  const fontBytesArray = Array.from(fontBytes);
   // "opentype" (not "fontkit"): the only backend @cadra/text/browser's own
   // doc confirms works when bundled for a browser target, matching
   // createFontRegistry's own doc ("pass 'opentype' ... for registries that
@@ -296,7 +330,7 @@ async function buildTextRenderEntriesForProject(
   const fontRegistry = createFontRegistry("opentype");
   const font = await fontRegistry.registerBytes(fontBytes).ready;
 
-  const entries = new Map<string, SerializedTextRenderEntry>();
+  const entries = new Map<string, PreparedTextRenderEntry>();
   for (const node of textNodes) {
     const cacheKey = computeTextNodeRenderKey(node, 0);
     if (entries.has(cacheKey)) {
@@ -313,24 +347,118 @@ async function buildTextRenderEntriesForProject(
     const data = await prepareTextRenderData(font, node.content, {
       atlasOptions: { fontSize: 128 },
     });
-    entries.set(cacheKey, {
-      cacheKey,
-      data: {
-        atlasPages: data.atlasPages.map((page) => ({
-          width: page.width,
-          height: page.height,
-          pixels: Array.from(page.pixels),
-          png: Array.from(page.png),
-        })),
-        glyphs: data.glyphs,
-        lineCount: data.lineCount,
-      },
-      fontBytes: fontBytesArray,
-      fontContentHash: font.contentHash,
-    });
+    entries.set(cacheKey, { cacheKey, data, fontBytes, fontContentHash: font.contentHash });
   }
 
   return Array.from(entries.values());
+}
+
+/**
+ * Serializes `prepareTextRenderEntriesForProject`'s output to cross a
+ * `page.evaluate` structured-clone boundary, for `runOneRangeAttempt`'s own
+ * bundled browser-page render path (see that function's doc). Runs once per
+ * job (not once per range/attempt - every range needs the exact same
+ * entries, mirroring how `entrySource` itself is bundled once and reused).
+ */
+async function buildTextRenderEntriesForProject(
+  project: Project,
+): Promise<SerializedTextRenderEntry[]> {
+  const entries = await prepareTextRenderEntriesForProject(project);
+  return entries.map((entry) => ({
+    cacheKey: entry.cacheKey,
+    data: {
+      atlasPages: entry.data.atlasPages.map((page) => ({
+        width: page.width,
+        height: page.height,
+        pixels: Array.from(page.pixels),
+        png: Array.from(page.png),
+      })),
+      glyphs: entry.data.glyphs,
+      lineCount: entry.data.lineCount,
+    },
+    fontBytes: Array.from(entry.fontBytes),
+    fontContentHash: entry.fontContentHash,
+  }));
+}
+
+/**
+ * Fetches every distinct `ImageNode.assetRef` found anywhere in `project`'s
+ * own scene graph (deduped, across every composition/track/clip) via
+ * `fetchAssetBytes`, and serializes the result to cross a `page.evaluate`
+ * structured-clone boundary - mirroring `buildTextRenderEntriesForProject`'s
+ * own purpose, one step simpler: no Node-only decoding happens here at all
+ * (a real browser's own `createImageBitmap` does that decoding, inside
+ * `browser-headless-render-entry.ts`'s own `buildTextureRegistry`), this
+ * only fetches and serializes raw bytes.
+ *
+ * `fetchAssetBytes` is optional and, when omitted, this returns `[]`
+ * immediately: a caller with no asset store to fetch from (e.g. a test, or
+ * any future caller with no asset-backed images at all) gets exactly
+ * `submitEncodedRenderJob`'s pre-Layer-2 behavior back, not a crash. An
+ * `assetRef` `fetchAssetBytes` itself cannot resolve (not actually stored,
+ * or any other lookup failure it chooses to report as `undefined` rather
+ * than throw) is silently omitted, not an error - matching
+ * `TextureRegistry.resolve`'s own "unresolved is an expected runtime state"
+ * contract: that `ImageNode` renders as the documented gray placeholder
+ * instead of failing the whole render job over one missing asset.
+ */
+async function buildImageRenderEntriesForProject(
+  project: Project,
+  fetchAssetBytes?: (assetRef: string) => Promise<Uint8Array | undefined>,
+): Promise<SerializedImageRenderEntry[]> {
+  if (fetchAssetBytes === undefined) {
+    return [];
+  }
+
+  const assetRefs = new Set<string>();
+  for (const composition of project.compositions) {
+    for (const track of composition.tracks) {
+      for (const clip of track.clips) {
+        collectImageAssetRefs(clip.node, assetRefs);
+      }
+    }
+  }
+
+  const entries: SerializedImageRenderEntry[] = [];
+  for (const assetRef of assetRefs) {
+    const bytes = await fetchAssetBytes(assetRef);
+    if (bytes === undefined) {
+      continue;
+    }
+    entries.push({ assetRef, bytes: Array.from(bytes) });
+  }
+  return entries;
+}
+
+/**
+ * Builds a real (non-serialized) `TextRenderRegistry` for `project`, via the
+ * same `prepareTextRenderEntriesForProject` every `TextNode` in this module
+ * ultimately renders through - for a caller driving a same-process renderer
+ * directly (e.g. `@cadra/headless`'s `createNativeGpuHeadlessRenderer`, no
+ * browser page and therefore no structured-clone boundary to serialize
+ * across at all), rather than this module's own bundled-browser-page range
+ * pipeline. Returns `undefined` (not an empty registry) when `project` has
+ * no text nodes at all, matching `TextRenderRegistry`'s own "omit entirely
+ * for a text-less scene" convention elsewhere in this codebase (e.g.
+ * `@cadra/golden-frames`' `render-raster-scene.ts`).
+ */
+export async function buildTextRenderRegistryForProject(
+  project: Project,
+): Promise<TextRenderRegistry | undefined> {
+  const entries = await prepareTextRenderEntriesForProject(project);
+  if (entries.length === 0) {
+    return undefined;
+  }
+
+  const registry = createInMemoryTextRenderRegistry();
+  for (const entry of entries) {
+    registry.register(entry.cacheKey, {
+      data: entry.data,
+      fontBytes: entry.fontBytes,
+      fontContentHash: entry.fontContentHash,
+    });
+  }
+  return registry;
 }
 
 /**
@@ -580,6 +708,10 @@ async function runEncodedRenderJob(
   // the exact same entries (see buildTextRenderEntriesForProject's own
   // doc), mirroring entrySource itself being bundled once and reused.
   const textRenderEntries = await buildTextRenderEntriesForProject(options.project);
+  const imageRenderEntries = await buildImageRenderEntriesForProject(
+    options.project,
+    options.fetchAssetBytes,
+  );
 
   const renderRange = (range: {
     rangeIndex: number;
@@ -596,6 +728,7 @@ async function runEncodedRenderJob(
         bitrate: options.bitrate,
         keyframeIntervalFrames,
         textRenderEntries,
+        imageRenderEntries,
       },
       range,
       options.onProgress,

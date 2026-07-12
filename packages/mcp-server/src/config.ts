@@ -22,7 +22,9 @@
  * constructor default), so an operator relying on that variable already
  * being set in the server's process environment needs no Cadra-specific
  * configuration at all. Every other provider key (Veo, Runway, Kling, Luma,
- * Pika) remains Phase 34's job, unwired to any tool in this phase.
+ * Pika) is `./provider-registry.ts`'s `buildVideoProviderRegistry`'s job,
+ * consumed by `./server.ts` to build the shared `GenerationStore`
+ * `add_generated_clip`/`get_generation_status`/`render_scene` all read.
  */
 
 /**
@@ -60,7 +62,11 @@ export const OUTPUT_DIRECTORY_ENV_VAR = "CADRA_OUTPUT_DIRECTORY";
  * this module's own doc), `CADRA_PROVIDER_KEY_VEO=...` becomes
  * `providerKeys.veo`, `CADRA_PROVIDER_KEY_RUNWAY=...` becomes
  * `providerKeys.runway`, and so on. The provider identifier is lowercased
- * from the remainder of the variable name.
+ * from the remainder of the variable name - including Kling's two-key
+ * `CADRA_PROVIDER_KEY_KLING_ACCESS`/`CADRA_PROVIDER_KEY_KLING_SECRET`,
+ * which fall out of this same generic scan as `providerKeys.kling_access`/
+ * `.kling_secret` with no special-casing needed here (see
+ * `./provider-registry.ts` for why Kling alone needs two keys).
  */
 export const PROVIDER_KEY_ENV_VAR_PREFIX = "CADRA_PROVIDER_KEY_";
 

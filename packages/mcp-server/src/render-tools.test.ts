@@ -10,6 +10,7 @@ import { createLogger } from "./logger.js";
 import {
   GET_RENDER_OUTPUT_TOOL_NAME,
   GET_RENDER_STATUS_TOOL_NAME,
+  PROBE_RENDER_TOOL_NAME,
   RENDER_SCENE_TOOL_NAME,
 } from "./render-tools.js";
 import { CREATE_SCENE_TOOL_NAME } from "./scene-tools.js";
@@ -73,6 +74,7 @@ describe("Cadra MCP render tools", () => {
         RENDER_SCENE_TOOL_NAME,
         GET_RENDER_STATUS_TOOL_NAME,
         GET_RENDER_OUTPUT_TOOL_NAME,
+        PROBE_RENDER_TOOL_NAME,
       ]),
     );
   });
@@ -147,6 +149,41 @@ describe("Cadra MCP render tools", () => {
       expect(payload.success).toBe(false);
       expect(payload.message).toContain("comp-does-not-exist");
       expect(payload.message).toContain("comp-real");
+    });
+  });
+
+  describe("probe_render validation", () => {
+    it("rejects a scene id that does not exist in this workspace", async () => {
+      const connectedClient = await connectClient();
+      const result = await connectedClient.callTool({
+        name: PROBE_RENDER_TOOL_NAME,
+        arguments: { sceneId: "no-such-scene", compositionId: "comp-1" },
+      });
+      const payload = parseToolResult<FailurePayload>(result as ToolTextResult);
+
+      expect(payload.success).toBe(false);
+      expect(payload.message).toContain("no-such-scene");
+    });
+
+    it("rejects a composition id that does not exist within an existing scene", async () => {
+      const connectedClient = await connectClient();
+      await connectedClient.callTool({
+        name: CREATE_SCENE_TOOL_NAME,
+        arguments: {
+          sceneId: "scene-probe",
+          name: "Scene Probe",
+          composition: { id: "comp-real", name: "Main", fps: 30, durationInFrames: 10, width: 64, height: 64 },
+        },
+      });
+
+      const result = await connectedClient.callTool({
+        name: PROBE_RENDER_TOOL_NAME,
+        arguments: { sceneId: "scene-probe", compositionId: "comp-does-not-exist" },
+      });
+      const payload = parseToolResult<FailurePayload>(result as ToolTextResult);
+
+      expect(payload.success).toBe(false);
+      expect(payload.message).toContain("comp-does-not-exist");
     });
   });
 
