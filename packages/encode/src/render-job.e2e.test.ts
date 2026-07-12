@@ -18,7 +18,12 @@ import { describe, expect, it } from "vitest";
 
 import { BROWSER_HEADLESS_RENDER_ENTRY_PATH } from "./browser-headless-render-entry-path.js";
 import { expectedMp4DurationTicks } from "./mux-timescale.js";
-import { readMp4FragmentedDurationTicks, readMp4TrackTimescale } from "./mux-validate-mp4.js";
+import {
+  readMp4AudioFragmentedDurationTicks,
+  readMp4AudioTrackTimescale,
+  readMp4FragmentedDurationTicks,
+  readMp4TrackTimescale,
+} from "./mux-validate-mp4.js";
 import { submitEncodedRenderJob } from "./render-job.js";
 import type { SerializedEncodedChunk } from "./serialized-encoded-chunk.js";
 
@@ -464,4 +469,189 @@ describe("range render vs. sequential render: raw encoded chunk byte comparison"
       expect(chunk.data.length).toBeGreaterThan(0);
     }
   }, 120_000);
+});
+
+/** A real, valid, uncompressed WAV file, mirroring `browser-headless-render-entry.e2e.test.ts`'s own identical `buildSineWaveWav` (duplicated, not imported/shared, matching this codebase's own convention of small per-file test fixture builders - see that file's own `buildTwoToneTestPng`/`render-e2e.test.ts`'s `buildSolidColorPng` for the same pattern already established for images). */
+function buildSineWaveWav(durationSeconds: number, frequencyHz: number, sampleRate = 44_100): Uint8Array {
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const numSamples = Math.floor(durationSeconds * sampleRate);
+  const blockAlign = numChannels * (bitsPerSample / 8);
+  const dataSize = numSamples * blockAlign;
+
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  const writeAscii = (offset: number, text: string): void => {
+    for (let i = 0; i < text.length; i += 1) {
+      view.setUint8(offset + i, text.charCodeAt(i));
+    }
+  };
+
+  writeAscii(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeAscii(8, "WAVE");
+  writeAscii(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  writeAscii(36, "data");
+  view.setUint32(40, dataSize, true);
+
+  for (let i = 0; i < numSamples; i += 1) {
+    const t = i / sampleRate;
+    const sample = Math.sin(2 * Math.PI * frequencyHz * t) * 0.8;
+    view.setInt16(44 + i * blockAlign, Math.round(sample * 32_767), true);
+  }
+
+  return new Uint8Array(buffer);
+}
+
+/**
+ * Proves the full `submitEncodedRenderJob` orchestration - asset fetch,
+ * the dedicated audio-mixdown browser task, and the final mux pass all
+ * threaded together correctly - produces a real MP4 with a real,
+ * correctly-sized audio track, not just a video-only file silently
+ * ignoring the composition's own `audioTracks`. Complements (does not
+ * duplicate) `browser-headless-render-entry.e2e.test.ts`'s own
+ * `runBrowserHeadlessAudioMixdown` test: that one verifies the actual
+ * decoded audio *content* is real and non-silent; this one verifies the
+ * *orchestration* around it - fetching the right asset bytes, launching
+ * the dedicated browser task alongside the video ranges, and correctly
+ * threading its result into the final muxed container - the layer this
+ * suite's own sibling describe blocks above already apply to the
+ * video-only path.
+ */
+describe("submitEncodedRenderJob: real audio track in the final muxed output", () => {
+  it(
+    "produces an MP4 with a real audio track whose own duration matches the composition",
+    async () => {
+      if (!chromiumAvailable) {
+        console.log(
+          "submitEncodedRenderJob audio e2e test: skipping, real Chromium not found (no cached Playwright browser in this environment).",
+        );
+        return;
+      }
+
+      const fps = 10;
+      const durationInFrames = 12;
+      const assetRef = "cadra-asset://sine-tone";
+      const wavBytes = buildSineWaveWav(durationInFrames / fps, 440);
+
+      const composition = createComposition({
+        id: "comp-1",
+        name: "Main",
+        fps,
+        durationInFrames,
+        width: WIDTH,
+        height: HEIGHT,
+        tracks: [
+          {
+            id: "track-shape",
+            clips: [
+              Sequence({
+                id: "clip-shape",
+                from: 0,
+                durationInFrames,
+                content: Shape({ id: "shape-1" }),
+              }),
+            ],
+          },
+        ],
+      });
+      const withAudioTrack: Composition = {
+        ...composition,
+        audioTracks: [
+          {
+            id: "audio-track-1",
+            clips: [{ id: "audio-clip-1", startFrame: 0, durationInFrames, assetRef }],
+          },
+        ],
+      };
+      const project = createProject({
+        id: "audio-job-e2e",
+        name: "Audio job e2e",
+        compositions: [withAudioTrack],
+      });
+
+      const fetchAssetBytes = async (ref: string): Promise<Uint8Array | undefined> =>
+        ref === assetRef ? wavBytes : undefined;
+
+      const bytes = await renderToTempFile((destination) =>
+        submitEncodedRenderJob({
+          project,
+          compositionId: "comp-1",
+          seed: "audio-job-e2e-seed",
+          format: "mp4",
+          bitrate: 200_000,
+          destination,
+          entryFilePath: BROWSER_HEADLESS_RENDER_ENTRY_PATH,
+          fetchAssetBytes,
+        }).then((handle) => handle.result),
+      );
+
+      expect(bytes.byteLength).toBeGreaterThan(512);
+
+      const videoTimescale = readMp4TrackTimescale(bytes);
+      expect(videoTimescale).toBeGreaterThan(0);
+      const videoDurationSeconds = readMp4FragmentedDurationTicks(bytes) / videoTimescale;
+      expect(videoDurationSeconds).toBeCloseTo(durationInFrames / fps, 5);
+
+      const audioTimescale = readMp4AudioTrackTimescale(bytes);
+      expect(audioTimescale).toBeDefined();
+      expect(audioTimescale!).toBeGreaterThan(0);
+      const audioDurationTicks = readMp4AudioFragmentedDurationTicks(bytes);
+      expect(audioDurationTicks).toBeDefined();
+      const audioDurationSeconds = audioDurationTicks! / audioTimescale!;
+
+      // Real, meaningful audio duration - close to the composition's own
+      // duration, not zero and not some unrelated fixed value a broken
+      // pipeline might have produced instead. A generous tolerance (audio
+      // frame boundaries do not divide evenly at every fps/sample-rate
+      // combination, so the encoded track's own duration can round to the
+      // nearest whole encoder chunk rather than the exact requested length).
+      expect(audioDurationSeconds).toBeGreaterThan(durationInFrames / fps - 0.25);
+      expect(audioDurationSeconds).toBeLessThan(durationInFrames / fps + 0.25);
+    },
+    60_000,
+  );
+
+  it(
+    "produces an ordinary video-only MP4 (no audio track) for a composition with no audioTracks at all",
+    async () => {
+      if (!chromiumAvailable) {
+        console.log(
+          "submitEncodedRenderJob no-audio e2e test: skipping, real Chromium not found (no cached Playwright browser in this environment).",
+        );
+        return;
+      }
+
+      const project = buildProject();
+
+      const bytes = await renderToTempFile((destination) =>
+        submitEncodedRenderJob({
+          project,
+          compositionId: "comp-1",
+          seed: "no-audio-seed",
+          format: "mp4",
+          bitrate: 200_000,
+          destination,
+          entryFilePath: BROWSER_HEADLESS_RENDER_ENTRY_PATH,
+        }).then((handle) => handle.result),
+      );
+
+      expect(readMp4TrackTimescale(bytes)).toBeGreaterThan(0);
+      // No audioTracks on this composition at all (buildProject's own
+      // shape): resolveAudioMixdown's own segments come back empty, so no
+      // audio browser task ever launches and no audio argument ever
+      // reaches muxToMp4Stream - proven here by the muxed file itself
+      // genuinely having no audio track, not merely by this job not
+      // throwing.
+      expect(readMp4AudioTrackTimescale(bytes)).toBeUndefined();
+    },
+    60_000,
+  );
 });

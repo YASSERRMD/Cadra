@@ -1,5 +1,6 @@
+import type { EncodedAudioChunkResult } from "./encode-audio.js";
 import type { EncodedChunkResult } from "./encode-frames.js";
-import { extractRawChunkBytes } from "./mux-chunk-bytes.js";
+import { extractRawAudioChunkBytes, extractRawChunkBytes } from "./mux-chunk-bytes.js";
 
 /**
  * A plain-data, structured-clone-safe rendering of one `EncodedChunkResult`,
@@ -135,4 +136,85 @@ export function deserializeEncodedChunkResult(
       : undefined;
 
   return { frame: serialized.frame, chunk, metadata };
+}
+
+/**
+ * The audio-side counterpart to `SerializedEncodedChunk`: same purpose
+ * (crossing a `page.evaluate` boundary with no live WebCodecs object in
+ * it), same field shapes, `chunkIndex` in place of `frame` (mirroring
+ * `EncodedAudioChunkResult`'s own field name - an audio chunk has no frame
+ * index of its own to carry).
+ */
+export interface SerializedEncodedAudioChunk {
+  /** Same as `EncodedAudioChunkResult.chunkIndex`. */
+  chunkIndex: number;
+  /** Same as `EncodedAudioChunk.type`. */
+  type: "key" | "delta";
+  /** Same as `EncodedAudioChunk.timestamp` (whole microseconds). */
+  timestamp: number;
+  /** Same as `EncodedAudioChunk.duration` (whole microseconds); never `null` here (see `extractRawAudioChunkBytes`'s own doc: a `null` duration throws before reaching this function). */
+  duration: number;
+  /** This chunk's compressed bytes, as a plain array of byte values (0-255), reconstructable via `Uint8Array.from(data)`. */
+  data: number[];
+  /** `EncodedAudioChunkResult.metadata?.decoderConfig?.codec`, if present. */
+  codec: string | undefined;
+  /** `EncodedAudioChunkResult.metadata?.decoderConfig?.description`'s bytes, flattened to a plain array (0-255 values), if a description was present at all. */
+  description: number[] | undefined;
+}
+
+/** Audio-side counterpart to `serializeEncodedChunk`; see that function's own doc. */
+export function serializeEncodedAudioChunk(
+  chunkResult: EncodedAudioChunkResult,
+): SerializedEncodedAudioChunk {
+  const raw = extractRawAudioChunkBytes(chunkResult.chunk, chunkResult.chunkIndex);
+  const decoderConfig = chunkResult.metadata?.decoderConfig;
+
+  return {
+    chunkIndex: chunkResult.chunkIndex,
+    type: raw.type,
+    timestamp: raw.timestamp,
+    duration: raw.duration,
+    data: Array.from(raw.data),
+    codec: decoderConfig?.codec,
+    description:
+      decoderConfig?.description !== undefined ? toByteArray(decoderConfig.description) : undefined,
+  };
+}
+
+/** Audio-side counterpart to `deserializeEncodedChunkResult`; see that function's own doc. */
+export function deserializeEncodedAudioChunkResult(
+  serialized: SerializedEncodedAudioChunk,
+): EncodedAudioChunkResult {
+  const bytes = Uint8Array.from(serialized.data);
+  const chunk = {
+    type: serialized.type,
+    timestamp: serialized.timestamp,
+    duration: serialized.duration,
+    byteLength: bytes.byteLength,
+    copyTo: (destination: Uint8Array) => {
+      destination.set(bytes);
+    },
+  } as unknown as EncodedAudioChunk;
+
+  // The cast (like `chunk`'s own above) is deliberate: a real
+  // `AudioDecoderConfig` also requires `numberOfChannels`/`sampleRate`,
+  // which `MuxMp4AudioTrackOptions`/`MuxWebmAudioTrackOptions` already
+  // carry as their own top-level fields instead (see this module's own
+  // caller, `render-job.ts`'s `muxConcatenatedSegments`) - nothing in this
+  // codebase's own mux path reads a chunk's per-chunk decoderConfig for
+  // anything beyond `.codec` (mirroring the video-side reconstruction's
+  // own identical scope).
+  const metadata: EncodedAudioChunkMetadata | undefined =
+    serialized.codec !== undefined
+      ? ({
+          decoderConfig: {
+            codec: serialized.codec,
+            ...(serialized.description !== undefined && {
+              description: Uint8Array.from(serialized.description),
+            }),
+          },
+        } as unknown as EncodedAudioChunkMetadata)
+      : undefined;
+
+  return { chunkIndex: serialized.chunkIndex, chunk, metadata };
 }

@@ -1,4 +1,5 @@
 import type { Project } from "@cadra/core";
+import { resolveAudioMixdown } from "@cadra/core";
 import {
   CompositionNotFoundForRenderError,
   type OnProgressFn,
@@ -17,12 +18,15 @@ import {
 import type { PositionedGlyph } from "@cadra/text/browser";
 
 import { type CapturedVideoFrame, captureFrames } from "./capture-frames.js";
+import { encodeAudio, type EncodeAudioOptions, type EncodedAudioChunkResult } from "./encode-audio.js";
 import { type EncodedChunkResult, encodeFrames } from "./encode-frames.js";
 import { muxToMp4Stream } from "./mux-mp4.js";
 import type { WebWritableStreamLike } from "./mux-stream-target.js";
 import { muxToWebmStream } from "./mux-webm.js";
-import type { SerializedEncodedChunk } from "./serialized-encoded-chunk.js";
-import { serializeEncodedChunk } from "./serialized-encoded-chunk.js";
+import type { AudioBufferLike } from "./offline-audio-context-like.js";
+import { renderAudioMixdown } from "./render-audio-mixdown.js";
+import type { SerializedEncodedAudioChunk, SerializedEncodedChunk } from "./serialized-encoded-chunk.js";
+import { serializeEncodedAudioChunk, serializeEncodedChunk } from "./serialized-encoded-chunk.js";
 
 /**
  * This module is never imported by other TypeScript source in this
@@ -51,13 +55,24 @@ import { serializeEncodedChunk } from "./serialized-encoded-chunk.js";
  * `render-composition-headless-server.ts`'s own doc for the full bridge
  * protocol this function's `window` globals are named after).
  *
- * Video-only for this phase: a composition's `audioTracks` are not yet
- * rendered/muxed on this path (see this package's own `renderAudioMixdown`/
- * `encodeAudio`, which this entry point does not call). Wiring those in is a
- * mechanical follow-up once a browser-side asset-fetching bridge for
- * `resolveAudioBuffer` exists; nothing about this function's shape
- * (`muxToMp4Stream`/`muxToWebmStream` already accept an optional audio
- * track argument) needs to change to add it later.
+ * Video-only itself: this function's own `muxToMp4Stream`/`muxToWebmStream`
+ * calls never pass an `audio` argument, so a composition's `audioTracks`
+ * never reach the file this function alone produces. This is not the same
+ * as "this module renders no audio at all" - see this file's own
+ * `runBrowserHeadlessAudioMixdown` below, a separate, standalone entry
+ * point `render-job.ts` invokes in its own dedicated browser page,
+ * independent of (and possibly concurrent with) every range's own call to
+ * `runBrowserHeadlessRenderRange`; its own encoded result is what the
+ * Node-side final mux pass (`render-job.ts`'s own `muxConcatenatedSegments`)
+ * actually threads into `muxToMp4Stream`/`muxToWebmStream`'s optional
+ * `audio` argument. `runBrowserHeadlessRender` (this function) has no
+ * per-range/whole-composition split to reconcile audio against in the
+ * first place (unlike the range-parallel job path), so wiring audio into
+ * it directly instead remains exactly the "mechanical follow-up" this
+ * comment used to describe, if a caller of this specific function ever
+ * needs it - `render_scene`/`probe_render` (this codebase's own real
+ * callers) do not, since they only ever go through the range-parallel
+ * `submitEncodedRenderJob` path instead.
  */
 
 /** Bridges a `WebWritableStreamLike` write/close pair to Node-exposed `window` functions. */
@@ -590,6 +605,152 @@ export async function runBrowserHeadlessRenderRange(
       serialized.push(serializeEncodedChunk(chunkResult));
     }
     return serialized;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(message);
+  }
+}
+
+/**
+ * One audio asset this project needs, fetched ahead of time on the Node
+ * side (`@cadra/encode`'s own `render-job.ts`, via the same
+ * `fetchAssetBytes` seam `SerializedImageRenderEntry` already uses - audio
+ * and image assets are resolved through the exact same asset store, just
+ * decoded differently once here) and carried across `page.evaluate`'s
+ * structured-clone boundary as plain, serializable data.
+ */
+export interface SerializedAudioAssetEntry {
+  /** The `AudioMixdownSegment.assetRef` this entry serves. */
+  assetRef: string;
+  /** The asset's raw, still-encoded bytes. */
+  bytes: number[];
+}
+
+/** Config `runBrowserHeadlessAudioMixdown` accepts, structured-cloned in from the Node orchestrator via `page.evaluate`. */
+export interface BrowserHeadlessAudioMixdownConfig {
+  /** The project to resolve the audio mixdown from, i.e. `resolveAudioMixdown`'s own `project`. */
+  project: Project;
+  /** Which of `project`'s compositions to mix down. */
+  compositionId: string;
+  /** Target container: selects AAC (`"mp4"`) or Opus (`"webm"`), matching this same job's own video container. */
+  container: "mp4" | "webm";
+  /** Target bitrate in bits per second for the audio encoder. */
+  bitrate: number;
+  /** Every audio asset this project's mixdown needs, fetched ahead of time on the Node side; see `SerializedAudioAssetEntry`'s own doc. An asset this list omits (not fetched, or the fetch failed) renders as silence for every segment referencing it, matching `ResolveAudioBufferFn`'s own "not available is expected" contract. */
+  audioAssetEntries: readonly SerializedAudioAssetEntry[];
+}
+
+/** `runBrowserHeadlessAudioMixdown`'s own result: the whole composition's audio, already encoded, ready for `render-job.ts`'s final mux pass to thread into `muxToMp4Stream`/`muxToWebmStream`'s optional `audio` argument. */
+export interface SerializedAudioMixdownResult {
+  /** The encoded audio chunk stream, serialized. */
+  chunks: SerializedEncodedAudioChunk[];
+  /** WebCodecs codec string, from the first chunk's own `metadata.decoderConfig.codec`. */
+  codec: string;
+  /** Number of channels the mixdown was actually rendered at. */
+  numberOfChannels: number;
+  /** Sample rate (Hz) the mixdown was actually rendered at. */
+  sampleRate: number;
+}
+
+/**
+ * Renders `config.project`'s own composition `config.compositionId`'s full
+ * audio mixdown (`@cadra/core`'s `resolveAudioMixdown`) to a single encoded
+ * chunk stream, entirely inside this page: decodes each of
+ * `config.audioAssetEntries`'s own raw bytes into a real `AudioBuffer` via
+ * a throwaway `OfflineAudioContext`'s own `decodeAudioData` (the one real
+ * Web Audio decoder capable of "whatever format an agent uploaded" - the
+ * audio-side counterpart to `buildTextureRegistry`'s own `createImageBitmap`
+ * use for images), builds the synchronous `resolveAudioBuffer` map
+ * `renderAudioMixdown` needs from the results, renders the full-composition
+ * mixdown, then encodes it via `encodeAudio`.
+ *
+ * Returns `undefined` (not an empty chunk list) when the mixdown has no
+ * segments at all (a composition with no `audioTracks`, or only empty
+ * ones): `renderAudioMixdown`'s own doc explicitly leaves "skip encoding a
+ * silent composition's audio entirely" to a caller, and this is that
+ * caller - avoiding the wasted encode of a track nobody needs, and letting
+ * `render-job.ts`'s own final mux pass omit `muxToMp4Stream`/
+ * `muxToWebmStream`'s optional `audio` argument entirely for a silent
+ * composition, exactly as if this function had never been called.
+ *
+ * One audio asset failing to decode (corrupt bytes, or a format this
+ * browser's own `decodeAudioData` does not support) is caught and logged
+ * via `console.error` rather than rejecting this function or the render as
+ * a whole: every segment referencing that one asset renders as silence for
+ * its own window instead (see `ResolveAudioBufferFn`'s own "not available
+ * is an expected runtime state" contract), matching the same resilience
+ * `buildTextureRegistry` already applies per image asset. A genuine
+ * mixdown/encode failure (e.g. `WebCodecsUnavailableForAudioEncodingError`)
+ * is not caught here, unlike a single asset's own decode failure: it
+ * propagates to this function's own caller, which treats it as "no audio
+ * for this render" at the whole-job level (see `render-job.ts`'s own doc),
+ * not a reason to fail an otherwise-successful video render.
+ *
+ * Rejects with a real `Error`, mirroring `runBrowserHeadlessRender`'s own
+ * rationale for why (see its doc).
+ */
+export async function runBrowserHeadlessAudioMixdown(
+  config: BrowserHeadlessAudioMixdownConfig,
+): Promise<SerializedAudioMixdownResult | undefined> {
+  try {
+    const composition = config.project.compositions.find(
+      (candidate) => candidate.id === config.compositionId,
+    );
+    if (composition === undefined) {
+      throw new CompositionNotFoundForRenderError(config.compositionId);
+    }
+
+    const mixdown = resolveAudioMixdown(config.project, config.compositionId);
+    if (mixdown.segments.length === 0) {
+      return undefined;
+    }
+
+    // A throwaway context, used only for its own real decodeAudioData
+    // (a BaseAudioContext method, so any concrete subclass has it) - never
+    // rendered, never reused for renderAudioMixdown's own actual mixdown
+    // pass below (that one needs its own context sized to the composition's
+    // full duration, constructed by renderAudioMixdown itself).
+    const decodeContext = new OfflineAudioContext(1, 1, 44_100);
+    const decodedBuffers = new Map<string, AudioBufferLike>();
+    for (const entry of config.audioAssetEntries) {
+      try {
+        const arrayBuffer = Uint8Array.from(entry.bytes).buffer;
+        const decoded = await decodeContext.decodeAudioData(arrayBuffer);
+        decodedBuffers.set(entry.assetRef, decoded);
+      } catch (error) {
+        console.error(`Failed to decode audio asset "${entry.assetRef}":`, error);
+      }
+    }
+
+    const mixedBuffer = await renderAudioMixdown({
+      mixdown,
+      fps: composition.fps,
+      durationInFrames: composition.durationInFrames,
+      resolveAudioBuffer: (assetRef) => decodedBuffers.get(assetRef),
+    });
+
+    const encodeOptions: EncodeAudioOptions = {
+      container: config.container,
+      bitrate: config.bitrate,
+    };
+    const chunks: EncodedAudioChunkResult[] = [];
+    for await (const chunkResult of encodeAudio(mixedBuffer, encodeOptions)) {
+      chunks.push(chunkResult);
+    }
+
+    const codec = chunks[0]?.metadata?.decoderConfig?.codec;
+    if (codec === undefined) {
+      throw new Error(
+        "runBrowserHeadlessAudioMixdown: encodeAudio produced no chunk carrying a decoderConfig.codec.",
+      );
+    }
+
+    return {
+      chunks: chunks.map((chunkResult) => serializeEncodedAudioChunk(chunkResult)),
+      codec,
+      numberOfChannels: mixedBuffer.numberOfChannels,
+      sampleRate: mixedBuffer.sampleRate,
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(message);

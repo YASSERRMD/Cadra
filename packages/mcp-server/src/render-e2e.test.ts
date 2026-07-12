@@ -16,7 +16,12 @@ import {
   Sequence,
   Shape,
 } from "@cadra/core";
-import { readMp4FragmentedDurationTicks, readMp4TrackTimescale } from "@cadra/encode";
+import {
+  readMp4AudioFragmentedDurationTicks,
+  readMp4AudioTrackTimescale,
+  readMp4FragmentedDurationTicks,
+  readMp4TrackTimescale,
+} from "@cadra/encode";
 import type { SceneDocument } from "@cadra/schema";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -774,6 +779,192 @@ describe("render_scene: real image asset bytes reach the renderer", () => {
       expect(redOutput.byteLength).toBeGreaterThan(512);
       expect(blueOutput.byteLength).toBeGreaterThan(512);
       expect(Buffer.compare(redOutput, blueOutput)).not.toBe(0);
+    },
+    120_000,
+  );
+});
+
+/** A real, valid, uncompressed WAV file, mirroring `@cadra/encode`'s own identical `buildSineWaveWav` (duplicated, not imported/shared - see this file's own `buildSolidColorPng` for the same established per-file-fixture convention). */
+function buildSineWaveWav(durationSeconds: number, frequencyHz: number, sampleRate = 44_100): Buffer {
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const numSamples = Math.floor(durationSeconds * sampleRate);
+  const blockAlign = numChannels * (bitsPerSample / 8);
+  const dataSize = numSamples * blockAlign;
+
+  const buffer = Buffer.alloc(44 + dataSize);
+  buffer.write("RIFF", 0, "ascii");
+  buffer.writeUInt32LE(36 + dataSize, 4);
+  buffer.write("WAVE", 8, "ascii");
+  buffer.write("fmt ", 12, "ascii");
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20); // PCM
+  buffer.writeUInt16LE(numChannels, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(sampleRate * blockAlign, 28);
+  buffer.writeUInt16LE(blockAlign, 32);
+  buffer.writeUInt16LE(bitsPerSample, 34);
+  buffer.write("data", 36, "ascii");
+  buffer.writeUInt32LE(dataSize, 40);
+
+  for (let i = 0; i < numSamples; i += 1) {
+    const t = i / sampleRate;
+    const sample = Math.sin(2 * Math.PI * frequencyHz * t) * 0.8;
+    buffer.writeInt16LE(Math.round(sample * 32_767), 44 + i * blockAlign);
+  }
+
+  return buffer;
+}
+
+/**
+ * Proves the full `upload_asset -> render_scene` tool surface delivers
+ * real audio, not just real images: closes the loop this file's own
+ * `render_scene: real image asset bytes reach the renderer` describe block
+ * already closed for images, for the audio pipeline instead. Complements
+ * (does not duplicate) `@cadra/encode`'s own lower-level audio e2e
+ * coverage (`browser-headless-render-entry.e2e.test.ts`'s real-decoded-
+ * samples check, `render-job.e2e.test.ts`'s own `submitEncodedRenderJob`
+ * orchestration check): this is the one layer neither of those exercises
+ * at all - `render-tools.ts`'s own `createAssetBytesFetcher(config.workspaceRoot)`
+ * wiring and the real scene-schema round trip for a scene document's own
+ * `audioTracks`, via the real MCP tool surface an agent actually calls.
+ */
+describe("render_scene: real audio asset bytes reach the renderer", () => {
+  let workspaceRoot: string | undefined;
+  let client: Client | undefined;
+
+  afterEach(async () => {
+    await client?.close();
+    client = undefined;
+    if (workspaceRoot !== undefined) {
+      await rm(workspaceRoot, { recursive: true, force: true });
+      workspaceRoot = undefined;
+    }
+  });
+
+  it(
+    "renders a real audio track whose duration matches the composition, from a real uploaded audio asset",
+    async () => {
+      if (!chromiumAvailable) {
+        console.log(
+          "render_scene audio-asset-bytes e2e test: skipping, real Chromium not found (no cached Playwright browser in this environment).",
+        );
+        return;
+      }
+
+      workspaceRoot = await mkdtemp(join(tmpdir(), "cadra-render-audio-e2e-test-"));
+      const outputDirectory = join(workspaceRoot, "out");
+
+      const { server } = createCadraMcpServer({
+        config: { workspaceRoot, outputDirectory },
+        logger: createLogger("test", {}, () => {
+          // Swallow log output in tests.
+        }),
+      });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const connectedClient = new Client({ name: "test-client", version: "0.0.0" });
+      await Promise.all([server.connect(serverTransport), connectedClient.connect(clientTransport)]);
+      client = connectedClient;
+
+      const fps = 10;
+      const durationInFrames = 12;
+      const wavBytes = buildSineWaveWav(durationInFrames / fps, 440);
+
+      const uploadResult = await connectedClient.callTool({
+        name: UPLOAD_ASSET_TOOL_NAME,
+        arguments: { bytesBase64: wavBytes.toString("base64"), contentType: "audio/wav" },
+      });
+      const uploadPayload = parseToolResult<UploadAssetPayload>(uploadResult as ToolTextResult);
+      expect(uploadPayload.success).toBe(true);
+      const assetRef = uploadPayload.assetRef!;
+
+      const sceneId = "audio-e2e-scene";
+      const compositionId = "comp-1";
+      const createResult = await connectedClient.callTool({
+        name: CREATE_SCENE_TOOL_NAME,
+        arguments: {
+          sceneId,
+          name: "Audio e2e scene",
+          composition: { id: compositionId, name: "Main", fps, durationInFrames, width: 16, height: 16 },
+        },
+      });
+      expect(parseToolResult<{ success: boolean }>(createResult as ToolTextResult).success).toBe(true);
+
+      const shape = Shape({ id: "shape-1" });
+      const composition = createComposition({
+        id: compositionId,
+        name: "Main",
+        fps,
+        durationInFrames,
+        width: 16,
+        height: 16,
+        tracks: [
+          {
+            id: "track-shape",
+            clips: [Sequence({ id: "clip-shape", from: 0, durationInFrames, content: shape })],
+          },
+        ],
+      });
+      const withAudioTrack: Composition = {
+        ...composition,
+        audioTracks: [
+          {
+            id: "audio-track-1",
+            clips: [{ id: "audio-clip-1", startFrame: 0, durationInFrames, assetRef }],
+          },
+        ],
+      };
+      const document: SceneDocument = {
+        schemaVersion: 1,
+        project: createProject({ id: sceneId, name: "Audio e2e scene", compositions: [withAudioTrack] }),
+      };
+
+      const replaceResult = await connectedClient.callTool({
+        name: UPDATE_SCENE_TOOL_NAME,
+        arguments: { sceneId, mode: "replace", document },
+      });
+      expect(parseToolResult<{ success: boolean }>(replaceResult as ToolTextResult).success).toBe(true);
+
+      const renderResult = await connectedClient.callTool({
+        name: RENDER_SCENE_TOOL_NAME,
+        arguments: { sceneId, compositionId, seed: "audio-e2e-seed", format: "mp4", bitrate: 200_000 },
+      });
+      const renderPayload = parseToolResult<RenderScenePayload>(renderResult as ToolTextResult);
+      expect(renderPayload.success).toBe(true);
+      const jobId = renderPayload.jobId;
+
+      const pollDeadline = Date.now() + 60_000;
+      let finalStatus: RenderStatusPayload | undefined;
+      while (Date.now() < pollDeadline) {
+        const statusResult = await connectedClient.callTool({
+          name: GET_RENDER_STATUS_TOOL_NAME,
+          arguments: { jobId },
+        });
+        const statusPayload = parseToolResult<RenderStatusPayload>(statusResult as ToolTextResult);
+        if (statusPayload.outcome !== undefined) {
+          finalStatus = statusPayload;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      expect(finalStatus?.outcome).toEqual({ ok: true });
+
+      const outputResult = await connectedClient.callTool({
+        name: GET_RENDER_OUTPUT_TOOL_NAME,
+        arguments: { jobId },
+      });
+      const outputPayload = parseToolResult<RenderOutputPayload>(outputResult as ToolTextResult);
+      expect(outputPayload.success).toBe(true);
+      const outputBytes = await readFile(outputPayload.outputPath!);
+
+      const audioTimescale = readMp4AudioTrackTimescale(outputBytes);
+      expect(audioTimescale).toBeDefined();
+      expect(audioTimescale!).toBeGreaterThan(0);
+      const audioDurationTicks = readMp4AudioFragmentedDurationTicks(outputBytes);
+      expect(audioDurationTicks).toBeDefined();
+      const audioDurationSeconds = audioDurationTicks! / audioTimescale!;
+      expect(audioDurationSeconds).toBeGreaterThan(durationInFrames / fps - 0.25);
+      expect(audioDurationSeconds).toBeLessThan(durationInFrames / fps + 0.25);
     },
     120_000,
   );
