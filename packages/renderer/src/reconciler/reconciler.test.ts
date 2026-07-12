@@ -518,6 +518,24 @@ describe("createReconciler: add, update, remove", () => {
     expect(materialDisposeSpy).toHaveBeenCalledTimes(1);
     expect(textureDisposeSpy).toHaveBeenCalledTimes(1);
   });
+
+  it("reconcile(null) disposes a resolved image node's own per-node geometry and material, but never its registry-owned texture", () => {
+    const texture = new THREE.Texture({ width: 10, height: 10 } as unknown as HTMLImageElement);
+    const reconciler = createReconciler({ textureRegistry: { resolve: () => texture } });
+    const mesh = reconciler.reconcile(image("i1"), 0) as THREE.Mesh;
+    const geometryDisposeSpy = vi.spyOn(mesh.geometry, "dispose");
+    const materialDisposeSpy = vi.spyOn(mesh.material as THREE.Material, "dispose");
+    const textureDisposeSpy = vi.spyOn(texture, "dispose");
+
+    reconciler.reconcile(null, 0);
+
+    expect(geometryDisposeSpy).toHaveBeenCalledTimes(1);
+    expect(materialDisposeSpy).toHaveBeenCalledTimes(1);
+    // The texture came from textureRegistry, matching normalMapRef/aoMapRef's
+    // own established contract: only whatever populated the registry owns
+    // its lifetime, never the reconciler - see TextureRegistry's own doc.
+    expect(textureDisposeSpy).not.toHaveBeenCalled();
+  });
 });
 
 describe("createReconciler: kind change on the same id", () => {

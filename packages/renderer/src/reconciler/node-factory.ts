@@ -1,5 +1,6 @@
 import {
   type AnimatableTransform,
+  type ImageNode,
   type LightNode,
   type LightShadowConfig,
   type LightType,
@@ -263,6 +264,17 @@ export interface OwnedResources {
    * for why disposing them here would be wrong).
    */
   model?: ModelOwnedResources;
+  /**
+   * An `image` node's own geometry, sized to its resolved texture's own
+   * aspect ratio (a plane 1 unit wide, `naturalHeight / naturalWidth`
+   * units tall - an author scales the node's own `transform.scale` for a
+   * specific final size). Only populated once `ctx.textureRegistry`
+   * actually resolves this node's `assetRef`; the material for both the
+   * resolved and not-yet-resolved-placeholder cases alike has always lived
+   * in `OwnedResources.material` above. `undefined` (no per-node geometry
+   * to dispose) while still on the shared `PLACEHOLDER_PLANE_GEOMETRY`.
+   */
+  image?: { geometry: THREE.BufferGeometry };
 }
 
 /**
@@ -344,11 +356,8 @@ function buildThreeObject(node: SceneNode, ctx: NodeFactoryContext): BuiltObject
     case "text":
       return buildTextObject(node, ctx);
 
-    case "image": {
-      const material = new THREE.MeshBasicMaterial({ color: IMAGE_PLACEHOLDER_COLOR });
-      const mesh = new THREE.Mesh(PLACEHOLDER_PLANE_GEOMETRY, material);
-      return { object3D: mesh, owned: { material } };
-    }
+    case "image":
+      return buildImageObject(node, ctx);
 
     case "video": {
       // Real video texture decoding/display is out of scope for this phase
@@ -535,6 +544,43 @@ function buildVolumeMaterial(node: VolumeNode): VolumeNodeMaterial {
 }
 
 /**
+ * Builds an `image` node's `Object3D`: a real textured plane when
+ * `ctx.textureRegistry` resolves `node.assetRef`, or the documented gray
+ * placeholder plane otherwise (no registry injected at all, or this
+ * specific `assetRef` not yet loaded - the same "not yet loaded is an
+ * expected runtime state, not a programming error" contract every other
+ * registry-resolved node kind in this file already follows).
+ *
+ * The resolved-texture path builds its own geometry (not the shared
+ * `PLACEHOLDER_PLANE_GEOMETRY`) sized to the texture's own natural aspect
+ * ratio - 1 unit wide, `naturalHeight / naturalWidth` units tall - so a
+ * non-square image renders at its own true proportions rather than
+ * stretched into a square; an author wanting a specific final size scales
+ * the node's own `transform.scale`, exactly like every other node kind's
+ * own size convention. `ImageNode` has no `width`/`height` field of its own
+ * to size from instead (see its own doc in `@cadra/core`).
+ */
+function buildImageObject(node: ImageNode, ctx: NodeFactoryContext): BuiltObject {
+  const texture = ctx.textureRegistry?.resolve(node.assetRef);
+  if (texture === undefined) {
+    const material = new THREE.MeshBasicMaterial({ color: IMAGE_PLACEHOLDER_COLOR });
+    const mesh = new THREE.Mesh(PLACEHOLDER_PLANE_GEOMETRY, material);
+    return { object3D: mesh, owned: { material } };
+  }
+
+  const naturalWidth: number | undefined = (texture.image as { width?: number } | undefined)?.width;
+  const naturalHeight: number | undefined = (texture.image as { height?: number } | undefined)?.height;
+  const aspect =
+    naturalWidth !== undefined && naturalHeight !== undefined && naturalHeight > 0
+      ? naturalWidth / naturalHeight
+      : 1;
+  const geometry = new THREE.PlaneGeometry(1, 1 / aspect);
+  const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
+  const mesh = new THREE.Mesh(geometry, material);
+  return { object3D: mesh, owned: { material, image: { geometry } } };
+}
+
+/**
  * Builds a `text` node's `Object3D`: an empty `THREE.Group` if its
  * `TextRenderEntry` is not yet registered (an expected "asset not ready"
  * runtime state, not a programming error - mirrors `image`/`video`'s own
@@ -547,8 +593,9 @@ function buildVolumeMaterial(node: VolumeNode): VolumeNodeMaterial {
  * only remakes when the node is rebuilt (a new node id, or a kind change),
  * not per frame - the same scope boundary `content`/`fontRef` themselves
  * are already under (changing either on a *persisting* node id without a
- * kind change does not yet trigger a rebuild; this mirrors `image`/`video`
- * still being placeholders rather than a regression this phase introduces).
+ * kind change does not yet trigger a rebuild; this mirrors `image`'s own
+ * `assetRef` and `video` more broadly being resolved once at build time
+ * rather than reactively, not a regression this phase introduces).
  * `fill`/`outline`/`glow`/`shadow` (Phase 53) are *presence* (structural,
  * decided once here, same as `extrudeDepth > 0`) plus *value* (re-resolved
  * every frame in `applyNodeProperties`, same as `color`) - only whether
@@ -693,8 +740,11 @@ export function applyNodeProperties(
     }
 
     case "image":
-      // Fixed placeholder color; assetRef cannot resolve to real image data
-      // until Phase 12's asset pipeline exists, so there is nothing to react to.
+      // assetRef is a plain string, not a Property<T>: it cannot change
+      // frame to frame on a persisting node id (a new/different assetRef
+      // means a new node id in practice), so texture resolution happens
+      // once, in buildImageObject, not here. Nothing else on ImageNode is
+      // reactive either (see its own doc: no width/height/opacity field).
       return;
 
     case "video": {

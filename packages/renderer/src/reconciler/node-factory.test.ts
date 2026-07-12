@@ -105,6 +105,95 @@ describe("node-factory: unresolved mesh refs fall back to shared singletons, not
   });
 });
 
+describe("node-factory: image texture rendering", () => {
+  function makeCtxWithTexture(entries: Record<string, THREE.Texture>): NodeFactoryContext {
+    return {
+      ...makeCtx(),
+      textureRegistry: {
+        resolve: (ref: string) => entries[ref],
+      },
+    };
+  }
+
+  function fakeTexture(width: number, height: number): THREE.Texture {
+    // A plain { width, height } object satisfies everything this
+    // reconciler's own image-sizing logic reads off `texture.image`; a
+    // real ImageBitmap/HTMLImageElement is a browser-only construct this
+    // Node test environment cannot create, exactly like every other
+    // registry-resolved-texture fixture in this file (see satori's own
+    // `fakeTexture` a few describe blocks below for the same pattern).
+    return new THREE.Texture({ width, height } as unknown as HTMLImageElement);
+  }
+
+  it("falls back to the gray placeholder when no textureRegistry is injected at all", () => {
+    const ctx = makeCtx();
+    const built = createThreeObject(
+      { id: "img", kind: "image", assetRef: "photo", transform: createIdentityTransform(), visible: true, children: [] },
+      ctx,
+    );
+    const mesh = built.object3D as THREE.Mesh;
+    expect((mesh.material as THREE.MeshBasicMaterial).map).toBeNull();
+    expect(built.owned?.image).toBeUndefined();
+  });
+
+  it("falls back to the gray placeholder when textureRegistry does not resolve this node's own assetRef", () => {
+    const ctx = makeCtxWithTexture({ "other-asset": fakeTexture(100, 100) });
+    const built = createThreeObject(
+      { id: "img", kind: "image", assetRef: "photo", transform: createIdentityTransform(), visible: true, children: [] },
+      ctx,
+    );
+    const mesh = built.object3D as THREE.Mesh;
+    expect((mesh.material as THREE.MeshBasicMaterial).map).toBeNull();
+  });
+
+  it("renders the real resolved texture, sized to its own aspect ratio, when textureRegistry resolves this node's assetRef", () => {
+    const texture = fakeTexture(1920, 1080);
+    const ctx = makeCtxWithTexture({ photo: texture });
+    const built = createThreeObject(
+      { id: "img", kind: "image", assetRef: "photo", transform: createIdentityTransform(), visible: true, children: [] },
+      ctx,
+    );
+    const mesh = built.object3D as THREE.Mesh;
+
+    expect((mesh.material as THREE.MeshBasicMaterial).map).toBe(texture);
+    const geometry = mesh.geometry as THREE.PlaneGeometry;
+    expect(geometry.parameters.width).toBe(1);
+    expect(geometry.parameters.height).toBeCloseTo(1080 / 1920, 5);
+    expect(built.owned?.image?.geometry).toBe(geometry);
+  });
+
+  it("gives every resolved image node its own geometry instance, never the shared placeholder singleton", () => {
+    const texture = fakeTexture(200, 100);
+    const ctx = makeCtxWithTexture({ photo: texture });
+    const first = createThreeObject(
+      { id: "img-1", kind: "image", assetRef: "photo", transform: createIdentityTransform(), visible: true, children: [] },
+      ctx,
+    ).object3D as THREE.Mesh;
+    const second = createThreeObject(
+      { id: "img-2", kind: "image", assetRef: "photo", transform: createIdentityTransform(), visible: true, children: [] },
+      ctx,
+    ).object3D as THREE.Mesh;
+
+    // Same texture (registry-shared, correctly), but each node's own plane
+    // geometry is its own instance, not aliased - a future per-node size
+    // override (e.g. a differently-cropped aspect) must never leak across
+    // two nodes that merely happen to share one assetRef today.
+    expect(first.geometry).not.toBe(second.geometry);
+  });
+
+  it("still renders a real texture when its own natural width/height cannot be read (falls back to a 1:1 aspect, not a crash)", () => {
+    const texture = new THREE.Texture({} as unknown as HTMLImageElement);
+    const ctx = makeCtxWithTexture({ photo: texture });
+    const built = createThreeObject(
+      { id: "img", kind: "image", assetRef: "photo", transform: createIdentityTransform(), visible: true, children: [] },
+      ctx,
+    );
+    const geometry = (built.object3D as THREE.Mesh).geometry as THREE.PlaneGeometry;
+    expect(geometry.parameters.width).toBe(1);
+    expect(geometry.parameters.height).toBe(1);
+  });
+});
+
 describe("node-factory: createThreeObject tags object3D.name with the originating SceneNode.id", () => {
   it("sets .name to the node's id for a mesh node", () => {
     const ctx = makeCtx();

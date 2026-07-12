@@ -56,6 +56,7 @@ import {
   resolvePostProcessing,
 } from "./post-processing/post-processing-pipeline.js";
 import { createReconciler, type Reconciler } from "./reconciler/reconciler.js";
+import type { TextureRegistry } from "./reconciler/registries.js";
 import type {
   Renderer,
   RendererBackend,
@@ -657,6 +658,7 @@ export class ThreeRenderer implements Renderer {
   private readonly modelRegistry: ModelRegistry;
   private readonly textRenderRegistry: TextRenderRegistry | undefined;
   private readonly satoriLayerRenderRegistry: SatoriLayerRenderRegistry | undefined;
+  private readonly textureRegistry: TextureRegistry | undefined;
   private threeRenderer: ThreeRendererLike | undefined;
   private resolvedBackend: RendererBackend | undefined;
   private wasFallback = false;
@@ -776,6 +778,7 @@ export class ThreeRenderer implements Renderer {
     modelRegistry: ModelRegistry = createDefaultModelRegistry(),
     textRenderRegistry?: TextRenderRegistry,
     satoriLayerRenderRegistry?: SatoriLayerRenderRegistry,
+    textureRegistry?: TextureRegistry,
   ) {
     this.deps = deps;
     this.environmentRegistry = environmentRegistry;
@@ -783,10 +786,12 @@ export class ThreeRenderer implements Renderer {
     this.modelRegistry = modelRegistry;
     this.textRenderRegistry = textRenderRegistry;
     this.satoriLayerRenderRegistry = satoriLayerRenderRegistry;
+    this.textureRegistry = textureRegistry;
     this.reconciler = createReconciler({
       modelRegistry,
       ...(textRenderRegistry !== undefined && { textRenderRegistry }),
       ...(satoriLayerRenderRegistry !== undefined && { satoriLayerRenderRegistry }),
+      ...(textureRegistry !== undefined && { textureRegistry }),
     });
     this.defaultCamera.position.set(0, 0, 5);
   }

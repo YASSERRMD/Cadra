@@ -17,6 +17,7 @@ import {
   createDefaultMaterialRegistry,
   type GeometryRegistry,
   type MaterialRegistry,
+  type TextureRegistry,
 } from "./registries.js";
 
 /** What the reconciler remembers about one previously-built `SceneNode`. */
@@ -34,7 +35,10 @@ interface ReconciledEntry {
  * `satori` node renders as an empty group (see `node-factory.ts`'s
  * `buildTextObject`/`buildThreeObject`'s own `"satori"` case).
  * `modelRegistry` is optional the same way; omitted, every `"model"` node
- * renders as an empty group too.
+ * renders as an empty group too. `textureRegistry` is optional the same
+ * way again; omitted, every `"image"` node (and every mesh's own
+ * `normalMapRef`/`aoMapRef`) renders as its own documented fallback (see
+ * `TextureRegistry`'s own doc).
  */
 export interface ReconcilerOptions {
   geometryRegistry?: GeometryRegistry;
@@ -42,6 +46,7 @@ export interface ReconcilerOptions {
   textRenderRegistry?: TextRenderRegistry;
   satoriLayerRenderRegistry?: SatoriLayerRenderRegistry;
   modelRegistry?: ModelRegistry;
+  textureRegistry?: TextureRegistry;
 }
 
 /**
@@ -122,6 +127,7 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
       satoriLayerRenderRegistry: options.satoriLayerRenderRegistry,
     }),
     ...(options.modelRegistry !== undefined && { modelRegistry: options.modelRegistry }),
+    ...(options.textureRegistry !== undefined && { textureRegistry: options.textureRegistry }),
   };
 
   const entries = new Map<string, ReconciledEntry>();
@@ -326,6 +332,16 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
     if (entry.owned?.volume !== undefined) {
       entry.owned.volume.geometry.dispose();
       entry.owned.volume.material.dispose();
+    }
+    if (entry.owned?.image !== undefined) {
+      // Only the geometry: a resolved image's own THREE.Texture came from
+      // textureRegistry and is never disposed here, same non-disposal
+      // contract as TextureRegistry's own doc establishes for
+      // normalMapRef/aoMapRef (the registry - or whatever populated it -
+      // owns that lifetime, not the reconciler). The material is already
+      // covered by entry.owned.material above (image's per-node material,
+      // real-texture or placeholder alike, has always lived there).
+      entry.owned.image.geometry.dispose();
     }
     if (entry.owned?.model !== undefined) {
       // Geometries/materials/textures are never disposed here: they are
