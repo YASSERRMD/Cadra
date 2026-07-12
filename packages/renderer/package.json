@@ -11,6 +11,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./svg-layer/prepare-satori-layer-render-data.js": {
+      "types": "./dist/svg-layer/prepare-satori-layer-render-data.d.ts",
+      "default": "./dist/svg-layer/prepare-satori-layer-render-data.js"
     }
   },
   "files": [

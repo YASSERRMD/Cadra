@@ -21,11 +21,19 @@
  * since this tool's whole point is having no browser page to decode in at
  * all; any non-PNG asset (or corrupt PNG bytes) falls back to the
  * renderer's own documented gray placeholder instead of failing the call,
- * exactly like an unresolved `assetRef` already does.
+ * exactly like an unresolved `assetRef` already does. Satori (`"satori"`
+ * scene nodes) are prepared via `buildSatoriLayerRenderRegistryForProject`,
+ * pre-rendered and rasterized at every one of this call's own `frames`
+ * (unlike text/image, a satori layer's own pixels can vary by frame - see
+ * that function's own doc).
  */
 import type { Project } from "@cadra/core";
 import { createFrameContext, resolveSceneAtFrame } from "@cadra/core";
-import { buildTextRenderRegistryForProject, buildTextureRegistryForProject } from "@cadra/encode";
+import {
+  buildSatoriLayerRenderRegistryForProject,
+  buildTextRenderRegistryForProject,
+  buildTextureRegistryForProject,
+} from "@cadra/encode";
 import {
   createNativeGpuHeadlessRenderer,
   NativeGpuAdapterUnavailableError,
@@ -180,14 +188,21 @@ export function registerCadraRenderFramesTools(
       }
 
       const project = parsed.document.project;
-      const textRenderRegistry = await buildTextRenderRegistryForProject(project);
-      const textureRegistry = await buildTextureRegistryForProject(
-        project,
-        createAssetBytesFetcher(config.workspaceRoot),
-      );
-      const renderer = createNativeGpuHeadlessRenderer({ textRenderRegistry, textureRegistry });
+      let renderer: PixelReadableRenderer | undefined;
 
       try {
+        const textRenderRegistry = await buildTextRenderRegistryForProject(project);
+        const textureRegistry = await buildTextureRegistryForProject(
+          project,
+          createAssetBytesFetcher(config.workspaceRoot),
+        );
+        const satoriLayerRenderRegistry = await buildSatoriLayerRenderRegistryForProject(project, frames);
+        renderer = createNativeGpuHeadlessRenderer({
+          textRenderRegistry,
+          textureRegistry,
+          satoriLayerRenderRegistry,
+        });
+
         await renderer.init(
           {} as unknown as RenderTarget,
           { width: composition.width, height: composition.height },
@@ -245,7 +260,10 @@ export function registerCadraRenderFramesTools(
         toolLogger.error("render_frames failed", { sceneId: idValidation.sceneId, compositionId, message });
         return jsonAndImages({ success: false, message });
       } finally {
-        renderer.dispose();
+        // undefined if registry preparation itself threw before
+        // createNativeGpuHeadlessRenderer was ever called - nothing to
+        // dispose in that case.
+        renderer?.dispose();
       }
     },
   );

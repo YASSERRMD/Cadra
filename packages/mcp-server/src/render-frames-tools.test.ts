@@ -10,6 +10,7 @@ import {
   Image,
   Light,
   type Project,
+  Satori,
   Sequence,
   Shape,
   Text,
@@ -504,6 +505,201 @@ describe("render_frames: real ImageNode texture rendering", () => {
 
     const redOutput = await renderWithImage("frames-red-image", redAssetRef);
     const blueOutput = await renderWithImage("frames-blue-image", blueAssetRef);
+
+    expect(Buffer.compare(redOutput, blueOutput)).not.toBe(0);
+  }, 30_000);
+});
+
+/**
+ * A minimal scene document with one `SatoriNode` whose own `layer` is a
+ * single solid-color `div` (no text at all, so no font-family-matching
+ * question to worry about - see `buildSatoriLayerRenderRegistryForProject`'s
+ * own doc) and a `CameraNode`, no lights (a satori layer's own rasterized
+ * texture, applied via `MeshBasicMaterial`, is unlit). Unlike
+ * `buildImageFillsFrameDocument`, a satori node's own geometry is sized
+ * directly from its own `width`/`height` in world units (not normalized to
+ * 1 unit wide - see `node-factory.ts`'s own satori mesh construction), so a
+ * generously large, fixed `width`/`height` (independent of the
+ * composition's own pixel size) trivially guarantees it fills the whole
+ * camera frustum with no background pixel anywhere to accidentally sample,
+ * with no camera-distance math needed at all.
+ */
+function buildSatoriFillsFrameDocument(
+  sceneId: string,
+  compositionId: string,
+  compositionSize: number,
+  layerColor: string,
+): SceneDocument {
+  const satori = Satori({
+    id: "satori-1",
+    layer: {
+      type: "div",
+      style: { width: "100%", height: "100%", backgroundColor: layerColor, display: "flex" },
+    },
+    width: 400,
+    height: 400,
+  });
+  const camera = Camera({
+    id: "camera-1",
+    transform: { position: [0, 0, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  });
+  const composition = createComposition({
+    id: compositionId,
+    name: "Main",
+    fps: FPS,
+    durationInFrames: 1,
+    width: compositionSize,
+    height: compositionSize,
+    tracks: [
+      { id: "track-satori", clips: [Sequence({ id: "clip-satori", from: 0, durationInFrames: 1, content: satori })] },
+      { id: "track-camera", clips: [Sequence({ id: "clip-camera", from: 0, durationInFrames: 1, content: camera })] },
+    ],
+  });
+  const withActiveCameraTrack: Composition = {
+    ...composition,
+    activeCameraTrack: [{ startFrame: 0, durationInFrames: 1, cameraNodeId: "camera-1" }],
+  };
+  const project: Project = createProject({ id: sceneId, name: "Frames satori scene", compositions: [withActiveCameraTrack] });
+  return { schemaVersion: 1, project } as SceneDocument;
+}
+
+/**
+ * Proves `render_frames`' own native-GPU-headless path actually renders a
+ * real `SatoriNode`, not the documented empty-group placeholder every
+ * `"satori"` node silently fell back to before `buildSatoriLayerRenderRegistryForProject`
+ * existed (the `SatoriLayerRenderRegistry`/`prepareSatoriLayerRenderData`
+ * pipeline was fully built and independently tested - including
+ * `@cadra/svg-raster`'s own real Satori-render-then-resvg-rasterize
+ * end-to-end test - but had zero real callers anywhere in this codebase
+ * until this wiring).
+ */
+describe("render_frames: real SatoriNode rendering", () => {
+  let workspaceRoot: string | undefined;
+  let client: Client | undefined;
+
+  afterEach(async () => {
+    await client?.close();
+    client = undefined;
+    if (workspaceRoot !== undefined) {
+      await rm(workspaceRoot, { recursive: true, force: true });
+      workspaceRoot = undefined;
+    }
+  });
+
+  it("renders a real SatoriNode's own rasterized pixels (a solid-color layer), not the empty placeholder", async () => {
+    try {
+      const device = await createNativeGpuDevice();
+      device.destroy();
+    } catch (error) {
+      console.log(
+        "render_frames SatoriNode e2e test: skipping, a real native WebGPU device could not be " +
+          `acquired on this machine (${String(error)}).`,
+      );
+      return;
+    }
+
+    workspaceRoot = await mkdtemp(join(tmpdir(), "cadra-render-frames-satori-test-"));
+    const { server } = createCadraMcpServer({
+      config: { workspaceRoot, outputDirectory: join(workspaceRoot, "out") },
+      logger: createLogger("test", {}, () => {
+        // Swallow log output in tests.
+      }),
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const connectedClient = new Client({ name: "test-client", version: "0.0.0" });
+    await Promise.all([server.connect(serverTransport), connectedClient.connect(clientTransport)]);
+    client = connectedClient;
+
+    await connectedClient.callTool({
+      name: CREATE_SCENE_TOOL_NAME,
+      arguments: {
+        sceneId: "frames-satori-scene",
+        name: "Frames satori scene",
+        composition: { id: "comp-1", name: "Main", fps: FPS, durationInFrames: 1, width: 32, height: 32 },
+      },
+    });
+    await connectedClient.callTool({
+      name: UPDATE_SCENE_TOOL_NAME,
+      arguments: {
+        sceneId: "frames-satori-scene",
+        mode: "replace",
+        document: buildSatoriFillsFrameDocument("frames-satori-scene", "comp-1", 32, "#ff0000"),
+      },
+    });
+
+    const result = await connectedClient.callTool({
+      name: RENDER_FRAMES_TOOL_NAME,
+      arguments: { sceneId: "frames-satori-scene", compositionId: "comp-1", frames: [0], seed: "frames-satori-seed" },
+    });
+
+    const summary = parseSummary(result as ToolTextResult);
+    expect(summary.success).toBe(true);
+
+    const images = imageBlocks(result as ToolTextResult);
+    expect(images).toHaveLength(1);
+    const png = PNG.sync.read(Buffer.from(images[0]!.data, "base64"));
+
+    const centerPixel = pixelAt(png.data, png.width, 16, 16);
+    // Real, rasterized red - not the placeholder (an empty group renders
+    // nothing at all, leaving this pixel transparent black instead).
+    expect(centerPixel.r).toBeGreaterThan(200);
+    expect(centerPixel.g).toBeLessThan(50);
+    expect(centerPixel.b).toBeLessThan(50);
+    expect(centerPixel.a).toBeGreaterThan(200);
+  }, 30_000);
+
+  it("renders visibly different output for two scenes whose only difference is their SatoriNode's own layer color", async () => {
+    try {
+      const device = await createNativeGpuDevice();
+      device.destroy();
+    } catch (error) {
+      console.log(
+        "render_frames SatoriNode color-diff e2e test: skipping, a real native WebGPU device could " +
+          `not be acquired on this machine (${String(error)}).`,
+      );
+      return;
+    }
+
+    workspaceRoot = await mkdtemp(join(tmpdir(), "cadra-render-frames-satori-diff-test-"));
+    const { server } = createCadraMcpServer({
+      config: { workspaceRoot, outputDirectory: join(workspaceRoot, "out") },
+      logger: createLogger("test", {}, () => {
+        // Swallow log output in tests.
+      }),
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const connectedClient = new Client({ name: "test-client", version: "0.0.0" });
+    await Promise.all([server.connect(serverTransport), connectedClient.connect(clientTransport)]);
+    client = connectedClient;
+
+    async function renderWithColor(sceneId: string, color: string): Promise<Buffer> {
+      await connectedClient.callTool({
+        name: CREATE_SCENE_TOOL_NAME,
+        arguments: {
+          sceneId,
+          name: "Frames satori scene",
+          composition: { id: "comp-1", name: "Main", fps: FPS, durationInFrames: 1, width: 16, height: 16 },
+        },
+      });
+      await connectedClient.callTool({
+        name: UPDATE_SCENE_TOOL_NAME,
+        arguments: {
+          sceneId,
+          mode: "replace",
+          document: buildSatoriFillsFrameDocument(sceneId, "comp-1", 16, color),
+        },
+      });
+      const result = await connectedClient.callTool({
+        name: RENDER_FRAMES_TOOL_NAME,
+        arguments: { sceneId, compositionId: "comp-1", frames: [0], seed: "fixed-seed" },
+      });
+      const images = imageBlocks(result as ToolTextResult);
+      expect(images).toHaveLength(1);
+      return Buffer.from(images[0]!.data, "base64");
+    }
+
+    const redOutput = await renderWithColor("frames-satori-red", "#ff0000");
+    const blueOutput = await renderWithColor("frames-satori-blue", "#0000ff");
 
     expect(Buffer.compare(redOutput, blueOutput)).not.toBe(0);
   }, 30_000);
