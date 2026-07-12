@@ -5,10 +5,12 @@ import type {
   HeadlessPageLike,
 } from "@cadra/headless";
 import { RenderJobFailedError } from "@cadra/headless";
+import { PNG } from "pngjs";
 import { describe, expect, it } from "vitest";
 
 import { readMp4FragmentedDurationTicks, readMp4TrackTimescale } from "./mux-validate-mp4.js";
 import {
+  buildTextureRegistryForProject,
   DEFAULT_RANGE_TIMEOUT_MS,
   type EncodedRenderJobHandle,
   getEncodedRenderJobStatus,
@@ -481,6 +483,93 @@ describe("submitEncodedRenderJob: image asset bytes", () => {
 
     const config = pages[0]?.capturedConfigs[0] as { imageRenderEntries: unknown[] };
     expect(config.imageRenderEntries).toEqual([]);
+  });
+});
+
+/** A solid-color square PNG, real and valid. */
+function buildSolidColorPng(size: number, color: readonly [number, number, number]): Uint8Array {
+  const png = new PNG({ width: size, height: size });
+  for (let i = 0; i < size * size; i += 1) {
+    const index = i << 2;
+    png.data[index] = color[0];
+    png.data[index + 1] = color[1];
+    png.data[index + 2] = color[2];
+    png.data[index + 3] = 255;
+  }
+  return new Uint8Array(PNG.sync.write(png));
+}
+
+describe("buildTextureRegistryForProject", () => {
+  function buildProjectWithImages(): Project {
+    const imageA1 = Image({ id: "img-a1", assetRef: "cadra-asset://aaa" });
+    const imageA2 = Image({ id: "img-a2", assetRef: "cadra-asset://aaa" });
+    const imageB = Image({ id: "img-b", assetRef: "cadra-asset://bbb" });
+    const imageCorrupt = Image({ id: "img-corrupt", assetRef: "cadra-asset://corrupt" });
+    const composition = createComposition({
+      id: "comp-1",
+      name: "Main",
+      fps: 30,
+      durationInFrames: 30,
+      width: 64,
+      height: 36,
+      tracks: [
+        {
+          id: "track-1",
+          clips: [
+            Sequence({ id: "clip-a1", from: 0, durationInFrames: 30, content: imageA1 }),
+            Sequence({ id: "clip-a2", from: 0, durationInFrames: 30, content: imageA2 }),
+            Sequence({ id: "clip-b", from: 0, durationInFrames: 30, content: imageB }),
+            Sequence({ id: "clip-corrupt", from: 0, durationInFrames: 30, content: imageCorrupt }),
+          ],
+        },
+      ],
+    });
+    return createProject({ id: "p1", name: "Project", compositions: [composition] });
+  }
+
+  it("returns undefined when project has no image nodes at all", async () => {
+    const project = createProject({
+      id: "p1",
+      name: "Project",
+      compositions: [
+        createComposition({ id: "comp-1", name: "Main", fps: 30, durationInFrames: 1, width: 4, height: 4, tracks: [] }),
+      ],
+    });
+    const registry = await buildTextureRegistryForProject(project, async () => new Uint8Array());
+    expect(registry).toBeUndefined();
+  });
+
+  it("returns undefined when fetchAssetBytes is not supplied, even though the project has ImageNodes", async () => {
+    const registry = await buildTextureRegistryForProject(buildProjectWithImages());
+    expect(registry).toBeUndefined();
+  });
+
+  it("decodes real PNG bytes into a resolvable texture, dedupes repeated assetRefs, and silently skips an unresolvable/corrupt one", async () => {
+    const bytesByRef: Record<string, Uint8Array> = {
+      "cadra-asset://aaa": buildSolidColorPng(4, [255, 0, 0]),
+      "cadra-asset://bbb": buildSolidColorPng(4, [0, 0, 255]),
+      "cadra-asset://corrupt": new Uint8Array([1, 2, 3, 4]),
+    };
+    const fetchCalls: string[] = [];
+    const fetchAssetBytes = async (assetRef: string): Promise<Uint8Array | undefined> => {
+      fetchCalls.push(assetRef);
+      return bytesByRef[assetRef];
+    };
+
+    const registry = await buildTextureRegistryForProject(buildProjectWithImages(), fetchAssetBytes);
+    expect(registry).toBeDefined();
+
+    // Fetched once per distinct assetRef, not once per node.
+    expect(fetchCalls.sort()).toEqual(["cadra-asset://aaa", "cadra-asset://bbb", "cadra-asset://corrupt"]);
+
+    const aaaTexture = registry!.resolve("cadra-asset://aaa");
+    expect(aaaTexture).toBeDefined();
+    expect((aaaTexture!.image as { width: number }).width).toBe(4);
+    expect((aaaTexture!.image as { height: number }).height).toBe(4);
+
+    expect(registry!.resolve("cadra-asset://bbb")).toBeDefined();
+    // Corrupt PNG bytes fail PNG.sync.read and are silently skipped, not thrown.
+    expect(registry!.resolve("cadra-asset://corrupt")).toBeUndefined();
   });
 });
 

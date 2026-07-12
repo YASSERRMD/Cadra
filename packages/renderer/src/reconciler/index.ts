@@ -23,6 +23,7 @@ export type {
   TextureRegistry,
 } from "./registries.js";
 export {
+  createDataTexture,
   createDefaultGeometryRegistry,
   createDefaultMaterialRegistry,
   createDefaultTextureRegistry,

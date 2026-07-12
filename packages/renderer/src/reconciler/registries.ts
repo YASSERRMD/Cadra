@@ -153,3 +153,32 @@ export function createImageTexture(image: ImageBitmap): THREE.Texture {
   texture.needsUpdate = true;
   return texture;
 }
+
+/**
+ * Wraps an already-decoded raw RGBA8 pixel buffer (e.g. `pngjs`'s own
+ * `PNG.sync.read(bytes).data`, top-left-origin/top-down row order, same
+ * convention as this codebase's own `PixelBuffer`) into a `THREE.Texture`
+ * ready for a `TextureRegistry` to serve - the Node-only-decoder
+ * counterpart to `createImageTexture`'s browser-only `createImageBitmap`
+ * path, for a caller with no browser page to decode in at all (e.g.
+ * `@cadra/headless`'s native-GPU-headless render path).
+ *
+ * `flipY: true` (unlike `createSvgTexture`'s own `THREE.DataTexture`,
+ * which leaves `flipY` at Three.js's own `false` default): verified
+ * empirically (a real two-tone top/bottom test image, rendered through a
+ * real native GPU device and read back) that `pngjs`'s own decoded row
+ * order needs this same top-down-to-GL-bottom-up flip `createImageTexture`
+ * already needs for its own top-down `ImageBitmap` source, or the
+ * rendered output comes out vertically mirrored - the same bug class
+ * `../text/build-text-group.ts`'s own glyph-UV fix (P1) already fixed
+ * once elsewhere in this codebase. `createSvgTexture`'s own rasterizer
+ * evidently produces already-GL-ready row order instead; the two sources
+ * are not interchangeable just because both are "a raw pixel buffer."
+ */
+export function createDataTexture(pixels: Uint8Array, width: number, height: number): THREE.Texture {
+  const texture = new THREE.DataTexture(pixels, width, height, THREE.RGBAFormat);
+  texture.flipY = true;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}

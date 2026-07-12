@@ -22,8 +22,11 @@ import {
 } from "@cadra/headless";
 import {
   computeTextNodeRenderKey,
+  createDataTexture,
   createInMemoryTextRenderRegistry,
+  createInMemoryTextureRegistry,
   type TextRenderRegistry,
+  type TextureRegistry,
 } from "@cadra/renderer";
 import {
   createFontRegistry,
@@ -31,6 +34,7 @@ import {
   prepareTextRenderData,
   type TextRenderData,
 } from "@cadra/text";
+import { PNG } from "pngjs";
 
 import type { EncodedChunkResult } from "./encode-frames.js";
 import { DEFAULT_KEYFRAME_INTERVAL_FRAMES } from "./encode-frames.js";
@@ -381,15 +385,21 @@ async function buildTextRenderEntriesForProject(
   }));
 }
 
+/** One prepared, real (non-serialized) image entry - `prepareImageEntriesForProject`'s own output shape, shared by both of its callers below. */
+interface PreparedImageEntry {
+  assetRef: string;
+  bytes: Uint8Array;
+}
+
 /**
  * Fetches every distinct `ImageNode.assetRef` found anywhere in `project`'s
  * own scene graph (deduped, across every composition/track/clip) via
- * `fetchAssetBytes`, and serializes the result to cross a `page.evaluate`
- * structured-clone boundary - mirroring `buildTextRenderEntriesForProject`'s
- * own purpose, one step simpler: no Node-only decoding happens here at all
- * (a real browser's own `createImageBitmap` does that decoding, inside
- * `browser-headless-render-entry.ts`'s own `buildTextureRegistry`), this
- * only fetches and serializes raw bytes.
+ * `fetchAssetBytes`. Mirrors `prepareTextRenderEntriesForProject`'s own
+ * "one real, non-serialized core, two callers" shape: `buildImageRenderEntriesForProject`
+ * (below) further serializes this result to cross a `page.evaluate`
+ * structured-clone boundary; `buildTextureRegistryForProject` (exported)
+ * decodes it directly into a `TextureRegistry` for a same-process renderer
+ * instead, with no serialization boundary at all - see each one's own doc.
  *
  * `fetchAssetBytes` is optional and, when omitted, this returns `[]`
  * immediately: a caller with no asset store to fetch from (e.g. a test, or
@@ -402,10 +412,10 @@ async function buildTextRenderEntriesForProject(
  * contract: that `ImageNode` renders as the documented gray placeholder
  * instead of failing the whole render job over one missing asset.
  */
-async function buildImageRenderEntriesForProject(
+async function prepareImageEntriesForProject(
   project: Project,
   fetchAssetBytes?: (assetRef: string) => Promise<Uint8Array | undefined>,
-): Promise<SerializedImageRenderEntry[]> {
+): Promise<PreparedImageEntry[]> {
   if (fetchAssetBytes === undefined) {
     return [];
   }
@@ -419,15 +429,31 @@ async function buildImageRenderEntriesForProject(
     }
   }
 
-  const entries: SerializedImageRenderEntry[] = [];
+  const entries: PreparedImageEntry[] = [];
   for (const assetRef of assetRefs) {
     const bytes = await fetchAssetBytes(assetRef);
     if (bytes === undefined) {
       continue;
     }
-    entries.push({ assetRef, bytes: Array.from(bytes) });
+    entries.push({ assetRef, bytes });
   }
   return entries;
+}
+
+/**
+ * Serializes `prepareImageEntriesForProject`'s output to cross a
+ * `page.evaluate` structured-clone boundary, for `runOneRangeAttempt`'s own
+ * bundled browser-page render path (see that function's doc): no Node-only
+ * decoding happens here at all (a real browser's own `createImageBitmap`
+ * does that decoding, inside `browser-headless-render-entry.ts`'s own
+ * `buildTextureRegistry`), this only fetches and serializes raw bytes.
+ */
+async function buildImageRenderEntriesForProject(
+  project: Project,
+  fetchAssetBytes?: (assetRef: string) => Promise<Uint8Array | undefined>,
+): Promise<SerializedImageRenderEntry[]> {
+  const entries = await prepareImageEntriesForProject(project, fetchAssetBytes);
+  return entries.map((entry) => ({ assetRef: entry.assetRef, bytes: Array.from(entry.bytes) }));
 }
 
 /**
@@ -457,6 +483,53 @@ export async function buildTextRenderRegistryForProject(
       fontBytes: entry.fontBytes,
       fontContentHash: entry.fontContentHash,
     });
+  }
+  return registry;
+}
+
+/**
+ * Builds a real (non-serialized) `TextureRegistry` for `project`, via
+ * `prepareImageEntriesForProject`'s own shared collection/fetch logic - the
+ * `TextureRegistry` counterpart to `buildTextRenderRegistryForProject`
+ * immediately above, for the exact same "no browser page, no
+ * `page.evaluate` structured-clone boundary at all" caller
+ * (`@cadra/headless`'s `createNativeGpuHeadlessRenderer`). Returns
+ * `undefined` (not an empty registry) when `project` has no image nodes at
+ * all, or none of them resolve, matching `TextRenderRegistry`'s own "omit
+ * entirely" convention.
+ *
+ * Decodes each entry's raw bytes as PNG via `pngjs` (`PNG.sync.read`) -
+ * unlike `browser-headless-render-entry.ts`'s own `buildTextureRegistry`,
+ * this has no real browser page to hand off to (`createImageBitmap` does
+ * not exist in plain Node), so PNG is the one format this same-process path
+ * can decode at all; any other format (or corrupt PNG bytes) fails this
+ * entry's own `PNG.sync.read` call, caught and logged the same
+ * "unresolved is an expected runtime state" way `buildTextureRegistry`
+ * itself already handles a decode failure - that one `ImageNode` falls
+ * through to the renderer's own documented gray placeholder instead of
+ * failing the whole render.
+ */
+export async function buildTextureRegistryForProject(
+  project: Project,
+  fetchAssetBytes?: (assetRef: string) => Promise<Uint8Array | undefined>,
+): Promise<TextureRegistry | undefined> {
+  const entries = await prepareImageEntriesForProject(project, fetchAssetBytes);
+  if (entries.length === 0) {
+    return undefined;
+  }
+
+  const registry = createInMemoryTextureRegistry();
+  for (const entry of entries) {
+    try {
+      const png = PNG.sync.read(Buffer.from(entry.bytes));
+      registry.register(entry.assetRef, createDataTexture(new Uint8Array(png.data), png.width, png.height));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(
+        `buildTextureRegistryForProject: failed to decode image asset "${entry.assetRef}" as PNG (${message}). ` +
+          "This node renders as the documented gray placeholder instead.",
+      );
+    }
   }
   return registry;
 }

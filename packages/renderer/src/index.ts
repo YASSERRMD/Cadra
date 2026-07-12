@@ -141,6 +141,7 @@ export type {
   TextureRegistry,
 } from "./reconciler/index.js";
 export {
+  createDataTexture,
   createDefaultGeometryRegistry,
   createDefaultMaterialRegistry,
   createDefaultTextureRegistry,
