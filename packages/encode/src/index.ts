@@ -223,6 +223,7 @@ export {
 } from "./render-audio-mixdown.js";
 export type { EncodedRenderJobHandle, SubmitEncodedRenderJobOptions } from "./render-job.js";
 export {
+  buildTextRenderRegistryForProject,
   DEFAULT_RANGE_TIMEOUT_MS,
   getEncodedRenderJobStatus,
   resumeEncodedRenderJob,
