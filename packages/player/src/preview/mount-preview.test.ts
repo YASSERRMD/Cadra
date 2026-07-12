@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import {
+  type AudioTrack,
+  type Composition,
   createComposition,
   createProject,
   type FrameContext,
@@ -11,6 +13,13 @@ import {
 import type { Renderer, RendererCapabilities, RenderSize, RenderTarget } from "@cadra/renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ResolveAudioBufferFn } from "../audio/attach-audio.js";
+import type {
+  AudioBufferSourceNodeLike,
+  AudioContextLike,
+  AudioNodeLike,
+  GainNodeLike,
+} from "../audio/audio-context-like.js";
 import type { NowFn, ScheduleFrameFn } from "../transport.js";
 import { mountPreview, type PreviewHandle } from "./mount-preview.js";
 import type { ObservedSize, ObserveResizeFn, UnobserveResizeFn } from "./resize-observation.js";
@@ -1002,5 +1011,203 @@ describe("mountPreview: dispose", () => {
     handle.seek(50);
 
     expect(renderer.renderFrame).not.toHaveBeenCalled();
+  });
+});
+
+/** A minimal fake `AudioContextLike`: tracks every created source/gain node for inspection, never touches real audio hardware (unavailable in jsdom regardless). Deliberately thinner than `attach-audio.test.ts`'s own fake - these tests only need to observe *whether* mountPreview wires attachAudioToTransport in and disposes it, not attachAudioToTransport's own already-covered internal scheduling correctness (gain envelopes, trim math, etc.). */
+function createFakeAudioContext(): AudioContextLike & {
+  sourceNodes: Array<AudioBufferSourceNodeLike & { startCalls: unknown[][]; stopCalls: unknown[][] }>;
+} {
+  const sourceNodes: Array<AudioBufferSourceNodeLike & { startCalls: unknown[][]; stopCalls: unknown[][] }> =
+    [];
+  const destination: AudioNodeLike = { connect: () => destination, disconnect: () => undefined };
+
+  return {
+    currentTime: 0,
+    destination,
+    sourceNodes,
+    createBufferSource(): AudioBufferSourceNodeLike {
+      const startCalls: unknown[][] = [];
+      const stopCalls: unknown[][] = [];
+      const node = {
+        buffer: null,
+        startCalls,
+        stopCalls,
+        connect: (dest: AudioNodeLike) => dest,
+        disconnect: () => undefined,
+        start: (...args: unknown[]) => {
+          startCalls.push(args);
+        },
+        stop: (...args: unknown[]) => {
+          stopCalls.push(args);
+        },
+      };
+      sourceNodes.push(node);
+      return node;
+    },
+    createGain(): GainNodeLike {
+      const gain = {
+        value: 0,
+        setValueAtTime(_value: number, _time: number) {
+          return this;
+        },
+        linearRampToValueAtTime(_value: number, _time: number) {
+          return this;
+        },
+        cancelScheduledValues(_time: number) {
+          return this;
+        },
+      };
+      const node: GainNodeLike = {
+        gain,
+        connect: (dest: AudioNodeLike) => dest,
+        disconnect: () => undefined,
+      };
+      return node;
+    },
+  };
+}
+
+/** A fake `AudioBuffer`: just enough identity for a test to tell it apart from "unresolved". */
+function createFakeAudioBuffer(): AudioBuffer {
+  return {} as unknown as AudioBuffer;
+}
+
+/** A project with one audio track/clip covering the whole timeline, mirroring `buildProject`'s own visual-only shape plus an `audioTracks` entry. */
+function buildProjectWithAudio(assetRef: string): Project {
+  const shape = Shape({ id: "shape-1" });
+  const composition = createComposition({
+    id: "comp-1",
+    name: "Main",
+    fps: FPS,
+    durationInFrames: DURATION_IN_FRAMES,
+    width: COMPOSITION_WIDTH,
+    height: COMPOSITION_HEIGHT,
+    tracks: [
+      {
+        id: "track-1",
+        clips: [
+          Sequence({ id: "clip-1", from: 0, durationInFrames: DURATION_IN_FRAMES, content: shape }),
+        ],
+      },
+    ],
+  });
+  const audioTrack: AudioTrack = {
+    id: "audio-track-1",
+    clips: [{ id: "audio-clip-1", startFrame: 0, durationInFrames: DURATION_IN_FRAMES, assetRef }],
+  };
+  const withAudioTrack: Composition = { ...composition, audioTracks: [audioTrack] };
+  return createProject({ id: "p1", name: "Project", compositions: [withAudioTrack] });
+}
+
+describe("mountPreview: audio scheduling", () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    container.remove();
+  });
+
+  it("attaches no audio scheduling, and constructs no AudioContext, when neither resolveAudioBuffer nor audioContext is given", async () => {
+    // Regression guard: mountPreview must not unconditionally construct a
+    // real AudioContext (unavailable in this jsdom environment - a real
+    // `new AudioContext()` throws here) for a caller who never opted into
+    // audio at all, even for a composition that does have audioTracks.
+    const project = buildProjectWithAudio("cadra-asset://track");
+    const renderer = createFakeRenderer();
+    const { observeResize } = createFakeResizeObserver();
+
+    const handle = mountPreview(container, { project, compositionId: "comp-1", renderer, observeResize });
+    await flushMicrotasks();
+
+    expect(() => handle.dispose()).not.toThrow();
+  });
+
+  it("schedules and starts a source node for an AudioClip active at the transport's initial frame, once resolveAudioBuffer is given", async () => {
+    const assetRef = "cadra-asset://track";
+    const project = buildProjectWithAudio(assetRef);
+    const renderer = createFakeRenderer();
+    const { observeResize } = createFakeResizeObserver();
+    const audioContext = createFakeAudioContext();
+    const buffer = createFakeAudioBuffer();
+    const resolveAudioBuffer: ResolveAudioBufferFn = (ref) => (ref === assetRef ? buffer : undefined);
+
+    mountPreview(container, {
+      project,
+      compositionId: "comp-1",
+      renderer,
+      observeResize,
+      resolveAudioBuffer,
+      audioContext,
+    });
+    await flushMicrotasks();
+
+    expect(audioContext.sourceNodes).toHaveLength(1);
+    expect(audioContext.sourceNodes[0]!.buffer).toBe(buffer);
+    expect(audioContext.sourceNodes[0]!.startCalls).toHaveLength(1);
+  });
+
+  it("schedules nothing for a clip whose assetRef resolveAudioBuffer cannot resolve", async () => {
+    const project = buildProjectWithAudio("cadra-asset://track");
+    const renderer = createFakeRenderer();
+    const { observeResize } = createFakeResizeObserver();
+    const audioContext = createFakeAudioContext();
+
+    mountPreview(container, {
+      project,
+      compositionId: "comp-1",
+      renderer,
+      observeResize,
+      resolveAudioBuffer: () => undefined,
+      audioContext,
+    });
+    await flushMicrotasks();
+
+    expect(audioContext.sourceNodes).toHaveLength(0);
+  });
+
+  it("stops every scheduled source node when the preview is disposed", async () => {
+    const assetRef = "cadra-asset://track";
+    const project = buildProjectWithAudio(assetRef);
+    const renderer = createFakeRenderer();
+    const { observeResize } = createFakeResizeObserver();
+    const audioContext = createFakeAudioContext();
+    const buffer = createFakeAudioBuffer();
+
+    const handle = mountPreview(container, {
+      project,
+      compositionId: "comp-1",
+      renderer,
+      observeResize,
+      resolveAudioBuffer: (ref) => (ref === assetRef ? buffer : undefined),
+      audioContext,
+    });
+    await flushMicrotasks();
+    expect(audioContext.sourceNodes).toHaveLength(1);
+    expect(audioContext.sourceNodes[0]!.stopCalls).toHaveLength(0);
+
+    handle.dispose();
+
+    expect(audioContext.sourceNodes[0]!.stopCalls).toHaveLength(1);
+  });
+
+  it("attaches audio scheduling (a real, non-throwing AudioContext construction is skipped) when only audioContext is given, with resolveAudioBuffer omitted", async () => {
+    const project = buildProjectWithAudio("cadra-asset://track");
+    const renderer = createFakeRenderer();
+    const { observeResize } = createFakeResizeObserver();
+    const audioContext = createFakeAudioContext();
+
+    mountPreview(container, { project, compositionId: "comp-1", renderer, observeResize, audioContext });
+    await flushMicrotasks();
+
+    // Attached (this fake audioContext's own createGain/createBufferSource
+    // are reachable), but the omitted resolveAudioBuffer means nothing
+    // actually resolves - mirroring the "silent until a real resolver is
+    // wired up" contract this option's own doc describes.
+    expect(audioContext.sourceNodes).toHaveLength(0);
   });
 });
