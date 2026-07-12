@@ -4,6 +4,7 @@ import type {
   RenderSize,
   RenderTarget,
   TextRenderRegistry,
+  TextureRegistry,
   ThreeRendererDependencies,
   ThreeRendererFactory,
 } from "@cadra/renderer";
@@ -487,6 +488,19 @@ export interface CreateNativeGpuHeadlessRendererOptions {
    * `TextRenderRegistry`'s own doc in `@cadra/renderer`).
    */
   textRenderRegistry?: TextRenderRegistry;
+  /**
+   * Resolves an `"image"` node's own `assetRef` (and a mesh's own
+   * `normalMapRef`/`aoMapRef`) to an already-decoded `THREE.Texture`.
+   * Defaults to `undefined`, mirroring `ThreeRenderer`'s own constructor
+   * default - every `"image"` node then renders as the documented gray
+   * placeholder until a caller supplies a real registry populated ahead of
+   * time (see `TextureRegistry`'s own doc in `@cadra/renderer`, and
+   * `@cadra/encode`'s `buildTextureRegistryForProject` for the one real
+   * implementation this codebase's own callers use - PNG decoding via
+   * `pngjs`, since no browser `createImageBitmap` exists on this
+   * no-browser-process render path).
+   */
+  textureRegistry?: TextureRegistry;
 }
 
 /**
@@ -536,6 +550,7 @@ export function createNativeGpuHeadlessRenderer(
   const createDevice = options.createDevice ?? (() => createNativeGpuDevice());
   const modelRegistry = options.modelRegistry ?? createDefaultModelRegistry();
   const textRenderRegistry = options.textRenderRegistry;
+  const textureRegistry = options.textureRegistry;
 
   let headlessTarget: ReturnType<typeof createHeadlessGpuCanvasTarget> | undefined;
   let device: GPUDevice | undefined;
@@ -598,7 +613,15 @@ export function createNativeGpuHeadlessRenderer(
     createParticleRuntime: defaultThreeRendererDependencies.createParticleRuntime,
   };
 
-  const inner = new ThreeRenderer(deps, undefined, undefined, modelRegistry, textRenderRegistry);
+  const inner = new ThreeRenderer(
+    deps,
+    undefined,
+    undefined,
+    modelRegistry,
+    textRenderRegistry,
+    undefined,
+    textureRegistry,
+  );
 
   return {
     async init(_target: RenderTarget, size: RenderSize): Promise<void> {

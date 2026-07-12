@@ -14,11 +14,18 @@
  * tool is meant for. Text nodes are prepared exactly like `render_scene`'s
  * own real render path (`@cadra/encode`'s `buildTextRenderRegistryForProject`,
  * shared with `render-job.ts` so the two paths can never silently diverge
- * on how text renders).
+ * on how text renders). Image nodes are prepared via that same package's
+ * `buildTextureRegistryForProject` instead - a same-process, Node-only-PNG-
+ * decoder counterpart to `render_scene`'s own browser-`createImageBitmap`-
+ * based path (`browser-headless-render-entry.ts`'s `buildTextureRegistry`),
+ * since this tool's whole point is having no browser page to decode in at
+ * all; any non-PNG asset (or corrupt PNG bytes) falls back to the
+ * renderer's own documented gray placeholder instead of failing the call,
+ * exactly like an unresolved `assetRef` already does.
  */
 import type { Project } from "@cadra/core";
 import { createFrameContext, resolveSceneAtFrame } from "@cadra/core";
-import { buildTextRenderRegistryForProject } from "@cadra/encode";
+import { buildTextRenderRegistryForProject, buildTextureRegistryForProject } from "@cadra/encode";
 import {
   createNativeGpuHeadlessRenderer,
   NativeGpuAdapterUnavailableError,
@@ -29,6 +36,7 @@ import type { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server
 import { PNG } from "pngjs";
 import { z } from "zod";
 
+import { createAssetBytesFetcher } from "./asset-store.js";
 import type { CadraMcpServerConfig } from "./config.js";
 import type { Logger } from "./logger.js";
 import { readSceneFile, sanitizeSceneId } from "./scene-store.js";
@@ -173,7 +181,11 @@ export function registerCadraRenderFramesTools(
 
       const project = parsed.document.project;
       const textRenderRegistry = await buildTextRenderRegistryForProject(project);
-      const renderer = createNativeGpuHeadlessRenderer({ textRenderRegistry });
+      const textureRegistry = await buildTextureRegistryForProject(
+        project,
+        createAssetBytesFetcher(config.workspaceRoot),
+      );
+      const renderer = createNativeGpuHeadlessRenderer({ textRenderRegistry, textureRegistry });
 
       try {
         await renderer.init(

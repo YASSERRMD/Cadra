@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 
 import {
+  createDataTexture,
   createDefaultGeometryRegistry,
   createDefaultMaterialRegistry,
   createDefaultTextureRegistry,
@@ -120,6 +121,35 @@ describe("createImageTexture", () => {
     // advanced past its freshly-constructed `0` is the only observable
     // proof `needsUpdate = true` was actually set.
     const texture = createImageTexture(fakeImageBitmap(4, 4));
+    expect(texture.version).toBeGreaterThan(0);
+  });
+});
+
+describe("createDataTexture", () => {
+  it("wraps the given pixel buffer as a DataTexture at the given size", () => {
+    const pixels = new Uint8Array(8 * 4 * 4);
+    const texture = createDataTexture(pixels, 8, 4);
+    expect(texture).toBeInstanceOf(THREE.DataTexture);
+    const image = (texture as THREE.DataTexture).image;
+    expect(image.data).toBe(pixels);
+    expect(image.width).toBe(8);
+    expect(image.height).toBe(4);
+  });
+
+  it("flips Y (top-down source row order, e.g. pngjs's own decoded output, needs this to render right-side up)", () => {
+    const texture = createDataTexture(new Uint8Array(4), 1, 1);
+    expect(texture.flipY).toBe(true);
+  });
+
+  it("tags the texture sRGB (real, visible color, not a colorless data channel)", () => {
+    const texture = createDataTexture(new Uint8Array(4), 1, 1);
+    expect(texture.colorSpace).toBe(THREE.SRGBColorSpace);
+  });
+
+  it("marks the texture ready for GPU upload", () => {
+    // See createImageTexture's own identical test for why .version, not
+    // needsUpdate itself, is the only observable proof here.
+    const texture = createDataTexture(new Uint8Array(4), 1, 1);
     expect(texture.version).toBeGreaterThan(0);
   });
 });

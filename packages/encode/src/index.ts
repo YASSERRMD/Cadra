@@ -224,6 +224,7 @@ export {
 export type { EncodedRenderJobHandle, SubmitEncodedRenderJobOptions } from "./render-job.js";
 export {
   buildTextRenderRegistryForProject,
+  buildTextureRegistryForProject,
   DEFAULT_RANGE_TIMEOUT_MS,
   getEncodedRenderJobStatus,
   resumeEncodedRenderJob,
