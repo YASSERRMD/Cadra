@@ -11,6 +11,14 @@ export interface GoldenSceneTextRequirement {
   backend: FontParseBackend;
 }
 
+/** One `ModelNode.assetRef` a `GoldenScene` needs a real GLB fixture for before it can render correctly (see `render-raster-scene.ts`). */
+export interface GoldenSceneModelRequirement {
+  /** The `ModelNode.assetRef` (in `buildProject()`'s output) this fixture resolves. */
+  assetRef: string;
+  /** Basename of a `.glb` file under this package's own `test-fixtures/models/`. */
+  modelFixtureFileName: string;
+}
+
 /**
  * Which render backend actually produces a `GoldenScene`'s pixels.
  * Deliberately independent of the scene's own `renderMode` ("raster" vs.
@@ -60,4 +68,6 @@ export interface GoldenScene {
   seed: string;
   /** Real text render data this scene's `TextNode`s need registered before rendering; omitted for scenes with no text. */
   textRequirements?: GoldenSceneTextRequirement[];
+  /** Real GLB fixtures this scene's `ModelNode`s need registered before rendering; omitted for scenes with no models. A `SatoriNode`'s own render data needs no comparable declaration - see `render-raster-scene.ts`'s own `buildSatoriLayerRenderRegistry` doc for why. */
+  modelRequirements?: GoldenSceneModelRequirement[];
 }
