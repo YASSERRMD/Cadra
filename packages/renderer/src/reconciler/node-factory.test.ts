@@ -341,6 +341,66 @@ describe("node-factory: video texture rendering", () => {
     expect(geometry.parameters.width).toBe(1);
     expect(geometry.parameters.height).toBe(1);
   });
+
+  it("maps every blendMode to the correct Three.js blending constant, mirroring satori's own mapping", () => {
+    const videoFrameRegistry = createInMemoryVideoFrameRegistry();
+    const ctx: NodeFactoryContext = { ...makeCtx(), videoFrameRegistry };
+
+    const expected: Array<[VideoNode["blendMode"], THREE.Blending]> = [
+      [undefined, THREE.NormalBlending],
+      ["normal", THREE.NormalBlending],
+      ["add", THREE.AdditiveBlending],
+      ["multiply", THREE.MultiplyBlending],
+      ["screen", THREE.CustomBlending],
+    ];
+
+    for (const [blendMode, blending] of expected) {
+      const node = videoNode({ id: `node-${String(blendMode)}`, blendMode });
+      const renderKey = computeVideoFrameRenderKey(node, 0);
+      videoFrameRegistry.register(renderKey, { image: fakeVideoFrame(400, 200) });
+
+      const built = createThreeObject(node, ctx);
+      applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+      const mesh = built.object3D as THREE.Mesh;
+      expect((mesh.material as THREE.MeshBasicMaterial).blending).toBe(blending);
+    }
+  });
+
+  it("implements screen blending with the correct custom blend factors", () => {
+    const videoFrameRegistry = createInMemoryVideoFrameRegistry();
+    const ctx: NodeFactoryContext = { ...makeCtx(), videoFrameRegistry };
+    const node = videoNode({ blendMode: "screen" });
+    const renderKey = computeVideoFrameRenderKey(node, 0);
+    videoFrameRegistry.register(renderKey, { image: fakeVideoFrame(400, 200) });
+
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+    const mesh = built.object3D as THREE.Mesh;
+    const material = mesh.material as THREE.MeshBasicMaterial;
+
+    expect(material.blendEquation).toBe(THREE.AddEquation);
+    expect(material.blendSrc).toBe(THREE.OneMinusDstColorFactor);
+    expect(material.blendDst).toBe(THREE.OneFactor);
+  });
+
+  it("reapplies blendMode every frame, even across frames whose render key does not change", () => {
+    const videoFrameRegistry = createInMemoryVideoFrameRegistry();
+    const ctx: NodeFactoryContext = { ...makeCtx(), videoFrameRegistry };
+    // No inFrame/outFrame trim: frames 0 and 1 both resolve to source frame
+    // 0/1 respectively (distinct keys), but the point here is that
+    // blendMode - not itself a Property<T>, so there is no "same value"
+    // fast path to accidentally skip - is read fresh on every single call,
+    // proving this isn't only applied once at build/first-resolve time.
+    const node = videoNode({ blendMode: "multiply" });
+    videoFrameRegistry.register(computeVideoFrameRenderKey(node, 0), { image: fakeVideoFrame(400, 200) });
+    videoFrameRegistry.register(computeVideoFrameRenderKey(node, 1), { image: fakeVideoFrame(400, 200) });
+
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+    applyNodeProperties(node, built.object3D, ctx, 1, built.owned);
+    const mesh = built.object3D as THREE.Mesh;
+    expect((mesh.material as THREE.MeshBasicMaterial).blending).toBe(THREE.MultiplyBlending);
+  });
 });
 
 describe("node-factory: createThreeObject tags object3D.name with the originating SceneNode.id", () => {

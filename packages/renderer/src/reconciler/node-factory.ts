@@ -16,11 +16,11 @@ import {
   resolveTextOutline,
   resolveTextShadow,
   resolveVector3Property,
-  type SatoriBlendMode,
   type SatoriNode,
   type SceneNode,
   type TextNode,
   toNumericSeed,
+  type VideoBlendMode,
   type VideoNode,
   type VolumeNode,
   type VolumeShape,
@@ -1202,9 +1202,12 @@ function applyLightShadowConfig(light: THREE.Light, shadow: LightShadowConfig | 
  * indefinitely - resolves to the exact same key every subsequent frame,
  * so this never rebuilds anything for it, mirroring
  * `applySatoriLayerProperties`'s own identical "only rebuild on an actual
- * key change" rationale exactly), then applies `opacity` every frame
- * regardless (a genuine `Property<number>`, independent of whether the
- * decoded pixels changed at all this frame).
+ * key change" rationale exactly), then applies `opacity`/`blendMode` every
+ * frame regardless: `opacity` is a genuine `Property<number>`, independent
+ * of whether the decoded pixels changed at all this frame, and
+ * `blendMode`, while not itself animatable, must be reapplied every frame
+ * a rebuild happened anyway, since that replaces `mesh.material` with a
+ * fresh, blend-mode-unset instance.
  *
  * Unlike `applySatoriLayerProperties` (whose own `object3D` is an empty
  * `THREE.Group`, with the real mesh added as a child only once one
@@ -1267,7 +1270,9 @@ function applyVideoNodeProperties(
     owned.video = { geometry, texture, lastRenderKey: renderKey };
   }
 
-  (mesh.material as THREE.MeshBasicMaterial).opacity = resolveNumberProperty(node.opacity, frame);
+  const material = mesh.material as THREE.MeshBasicMaterial;
+  material.opacity = resolveNumberProperty(node.opacity, frame);
+  applyMeshBasicMaterialBlendMode(material, node.blendMode);
 }
 
 /**
@@ -1318,12 +1323,16 @@ function applySatoriLayerProperties(
 
   if (resources.material instanceof THREE.MeshBasicMaterial) {
     resources.material.opacity = resolveNumberProperty(node.opacity, frame);
-    applySatoriBlendMode(resources.material, node.blendMode);
+    applyMeshBasicMaterialBlendMode(resources.material, node.blendMode);
   }
 }
 
 /**
- * Sets a material's Three.js blending mode to match a `SatoriBlendMode`.
+ * Sets a material's Three.js blending mode to match a `VideoBlendMode`
+ * (also `SatoriNode`'s own `blendMode`, since `SatoriBlendMode` is a
+ * literal type alias for `VideoBlendMode` - one shared enum, one shared
+ * implementation, for both node kinds that composite generated/uploaded
+ * pixel content over whatever renders beneath them).
  * `'normal'`/`'add'`/`'multiply'` map directly to Three.js's own built-in
  * blending constants; `'screen'` has no built-in equivalent, so it is
  * expressed via `CustomBlending` with explicit factors implementing the
@@ -1333,7 +1342,7 @@ function applySatoriLayerProperties(
  * (`OneFactor`) gives `src * (1 - dst) + dst * 1 = src + dst - src * dst`,
  * exactly that formula.
  */
-function applySatoriBlendMode(material: THREE.Material, blendMode: SatoriBlendMode | undefined): void {
+function applyMeshBasicMaterialBlendMode(material: THREE.Material, blendMode: VideoBlendMode | undefined): void {
   switch (blendMode ?? "normal") {
     case "normal":
       material.blending = THREE.NormalBlending;
