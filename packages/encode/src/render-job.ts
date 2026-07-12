@@ -244,6 +244,12 @@ interface SerializedImageRenderEntry {
   bytes: number[];
 }
 
+/** Mirrors `browser-headless-render-entry.ts`'s own `SerializedModelAssetEntry`; duplicated for the same reason `SerializedImageRenderEntry` above is. */
+interface SerializedModelAssetEntry {
+  assetRef: string;
+  bytes: number[];
+}
+
 /** Mirrors `browser-headless-render-entry.ts`'s own `SerializedVideoAssetEntry`; duplicated for the same reason `SerializedImageRenderEntry` above is. */
 interface SerializedVideoAssetEntry {
   assetRef: string;
@@ -282,6 +288,7 @@ interface BrowserRangeConfigArg {
   keyframeIntervalFrames: number;
   textRenderEntries: SerializedTextRenderEntry[];
   imageRenderEntries: SerializedImageRenderEntry[];
+  modelRenderEntries: SerializedModelAssetEntry[];
   videoAssetEntries: SerializedVideoAssetEntry[];
   videoSamplesNeeded: VideoSampleRequest[];
 }
@@ -631,6 +638,70 @@ async function buildImageRenderEntriesForProject(
   fetchAssetBytes?: (assetRef: string) => Promise<Uint8Array | undefined>,
 ): Promise<SerializedImageRenderEntry[]> {
   const entries = await prepareImageEntriesForProject(project, fetchAssetBytes);
+  return entries.map((entry) => ({ assetRef: entry.assetRef, bytes: Array.from(entry.bytes) }));
+}
+
+/** Mirrors `PreparedImageEntry`, for the model case. */
+interface PreparedModelEntry {
+  assetRef: string;
+  bytes: Uint8Array;
+}
+
+/**
+ * Fetches every distinct `ModelNode.assetRef` found anywhere in `project`'s
+ * own scene graph (deduped, across every composition/track/clip) via
+ * `fetchAssetBytes` - mirrors `prepareImageEntriesForProject`'s own shape
+ * exactly, including its "computed once per job, reused by every range"
+ * treatment (a `ModelNode`'s own loaded scene/clips never vary by frame, the
+ * same "resolve-only, keyed on the raw assetRef alone" reasoning
+ * `ModelRegistry`'s own doc already gives for the same-process
+ * `render_frames` path).
+ *
+ * Same "omitted `fetchAssetBytes`, or one `assetRef` it cannot resolve, is
+ * not an error" contract as `prepareImageEntriesForProject`'s own doc - see
+ * there for why.
+ */
+async function prepareModelEntriesForProject(
+  project: Project,
+  fetchAssetBytes?: (assetRef: string) => Promise<Uint8Array | undefined>,
+): Promise<PreparedModelEntry[]> {
+  if (fetchAssetBytes === undefined) {
+    return [];
+  }
+
+  const assetRefs = new Set<string>();
+  for (const composition of project.compositions) {
+    for (const track of composition.tracks) {
+      for (const clip of track.clips) {
+        collectModelAssetRefs(clip.node, assetRefs);
+      }
+    }
+  }
+
+  const entries: PreparedModelEntry[] = [];
+  for (const assetRef of assetRefs) {
+    const bytes = await fetchAssetBytes(assetRef);
+    if (bytes === undefined) {
+      continue;
+    }
+    entries.push({ assetRef, bytes });
+  }
+  return entries;
+}
+
+/**
+ * Serializes `prepareModelEntriesForProject`'s output to cross a
+ * `page.evaluate` structured-clone boundary, mirroring
+ * `buildImageRenderEntriesForProject`'s own doc: no Node-only parsing
+ * happens here at all (`browser-headless-render-entry.ts`'s own
+ * `buildModelRegistry` parses each entry's bytes in-page, via
+ * `createDefaultParseGltf`), this only fetches and serializes raw bytes.
+ */
+async function buildModelRenderEntriesForProject(
+  project: Project,
+  fetchAssetBytes?: (assetRef: string) => Promise<Uint8Array | undefined>,
+): Promise<SerializedModelAssetEntry[]> {
+  const entries = await prepareModelEntriesForProject(project, fetchAssetBytes);
   return entries.map((entry) => ({ assetRef: entry.assetRef, bytes: Array.from(entry.bytes) }));
 }
 
@@ -1382,6 +1453,10 @@ async function runEncodedRenderJob(
     options.project,
     options.fetchAssetBytes,
   );
+  const modelRenderEntries = await buildModelRenderEntriesForProject(
+    options.project,
+    options.fetchAssetBytes,
+  );
   const videoAssetEntries = await buildVideoAssetEntriesForProject(
     options.project,
     options.fetchAssetBytes,
@@ -1452,6 +1527,7 @@ async function runEncodedRenderJob(
         keyframeIntervalFrames,
         textRenderEntries,
         imageRenderEntries,
+        modelRenderEntries,
         videoAssetEntries,
       },
       videoNodeMappings,

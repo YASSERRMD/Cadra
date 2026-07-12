@@ -167,9 +167,15 @@ importers:
       '@types/pngjs':
         specifier: ^6.0.5
         version: 6.0.5
+      '@types/three':
+        specifier: ^0.185.0
+        version: 0.185.0
       playwright:
         specifier: ^1.61.1
         version: 1.61.1
+      three:
+        specifier: ^0.185.1
+        version: 0.185.1
       typescript:
         specifier: ^5.7.3
         version: 5.9.3

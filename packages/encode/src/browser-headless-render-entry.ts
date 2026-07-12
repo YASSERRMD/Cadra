@@ -7,13 +7,17 @@ import {
 } from "@cadra/headless";
 import {
   computeVideoFrameCacheKey,
+  createDefaultParseGltf,
   createImageTexture,
+  createInMemoryModelRegistry,
   createInMemoryTextRenderRegistry,
   createInMemoryTextureRegistry,
   createInMemoryVideoFrameRegistry,
   createPixelReadableRenderer,
   createRenderer,
   type DecodeVideo,
+  type LoadedModel,
+  type ModelRegistry,
   type PixelBuffer,
   type SampleAtTimestamp,
   sampleVideoFrame,
@@ -208,6 +212,63 @@ async function buildTextureRegistry(
         registry.register(entry.assetRef, createImageTexture(bitmap));
       } catch (error) {
         console.error(`Failed to decode image asset "${entry.assetRef}":`, error);
+      }
+    }),
+  );
+
+  return registry;
+}
+
+/**
+ * One `ModelNode.assetRef` this project needs, fetched ahead of time on the
+ * Node side (`@cadra/encode`'s own `render-job.ts`, via the same
+ * `fetchAssetBytes` seam `SerializedImageRenderEntry` already uses) and
+ * carried across `page.evaluate`'s structured-clone boundary as plain,
+ * serializable data - mirroring `SerializedImageRenderEntry`'s own purpose,
+ * one difference: unlike an image's `createImageBitmap` (a browser-only
+ * decoder with no Node equivalent), `@cadra/renderer`'s own
+ * `createDefaultParseGltf` (backed by three.js's own `GLTFLoader`) works
+ * identically in a real browser page or plain Node - this package's own
+ * `render-job.ts` already calls it directly on raw bytes for its
+ * same-process `render_frames` path (`buildModelRegistryForProject`).
+ * Parsing still happens here, in the page (`buildModelRegistry` below), not
+ * ahead of time on the Node side, purely to keep every asset kind's own
+ * "fetch raw bytes on the Node side, decode/parse in whichever environment
+ * actually renders" shape uniform, not because parsing here is otherwise
+ * required.
+ */
+export interface SerializedModelAssetEntry {
+  /** The `ModelNode.assetRef` this entry serves. */
+  assetRef: string;
+  /** The asset's raw, still-encoded (`.glb`/`.gltf`) bytes. */
+  bytes: number[];
+}
+
+/**
+ * Reconstructs a real, in-page `ModelRegistry` from `entries`: parses each
+ * one's raw bytes via `createDefaultParseGltf()` (three.js's own
+ * `GLTFLoader`).
+ *
+ * One entry failing to parse (corrupt bytes, or a GLTF/GLB feature this
+ * `GLTFLoader` version does not support) is caught and logged via
+ * `console.error` rather than rejecting this function or the render job as
+ * a whole - mirroring `buildTextureRegistry`'s own per-asset resilience
+ * exactly: that one `ModelNode` simply falls through to an empty group
+ * instead (see `@cadra/renderer`'s own `node-factory.ts` `"model"` case),
+ * matching `ModelRegistry.resolve`'s own "unresolved is an expected runtime
+ * state" contract.
+ */
+async function buildModelRegistry(entries: readonly SerializedModelAssetEntry[]): Promise<ModelRegistry> {
+  const registry = createInMemoryModelRegistry();
+  const parseGltf = createDefaultParseGltf();
+
+  await Promise.all(
+    entries.map(async (entry) => {
+      try {
+        const asset = await parseGltf(Uint8Array.from(entry.bytes));
+        registry.register(entry.assetRef, asset as LoadedModel);
+      } catch (error) {
+        console.error(`Failed to parse model asset "${entry.assetRef}":`, error);
       }
     }),
   );
@@ -426,6 +487,8 @@ export interface BrowserHeadlessRenderConfig {
   textRenderEntries?: readonly SerializedTextRenderEntry[];
   /** Every `ImageNode` asset this project needs, fetched ahead of time on the Node side; see `SerializedImageRenderEntry`'s own doc. Omitted/empty means every image node renders as the documented gray placeholder, matching `createRenderer`'s own no-registry default. */
   imageRenderEntries?: readonly SerializedImageRenderEntry[];
+  /** Every `ModelNode` asset this project needs, fetched ahead of time on the Node side; see `SerializedModelAssetEntry`'s own doc. Omitted/empty means every model node renders as an empty group, matching `createRenderer`'s own no-registry default. */
+  modelRenderEntries?: readonly SerializedModelAssetEntry[];
   /** Every `VideoNode` asset this project needs, fetched ahead of time on the Node side; see `SerializedVideoAssetEntry`'s own doc. Omitted/empty means every video node renders as the documented placeholder, matching `createRenderer`'s own no-registry default. */
   videoAssetEntries?: readonly SerializedVideoAssetEntry[];
   /** Every `(assetRef, sourceFrame)` pair this render's own frames actually need a decoded video frame for; see `VideoSampleRequest`'s own doc. Omitted/empty means no video frame is ever sampled (every video node renders as the documented placeholder for the whole render), independent of whether `videoAssetEntries` itself is populated. */
@@ -465,6 +528,8 @@ export interface BrowserHeadlessRenderRangeConfig {
   textRenderEntries?: readonly SerializedTextRenderEntry[];
   /** Every `ImageNode` asset this project needs, fetched ahead of time on the Node side; see `SerializedImageRenderEntry`'s own doc. Omitted/empty means every image node renders as the documented gray placeholder, matching `createRenderer`'s own no-registry default. */
   imageRenderEntries?: readonly SerializedImageRenderEntry[];
+  /** Every `ModelNode` asset this project needs, fetched ahead of time on the Node side; see `SerializedModelAssetEntry`'s own doc. Omitted/empty means every model node renders as an empty group, matching `createRenderer`'s own no-registry default. */
+  modelRenderEntries?: readonly SerializedModelAssetEntry[];
   /** Every `VideoNode` asset this range needs, fetched ahead of time on the Node side; see `SerializedVideoAssetEntry`'s own doc. Omitted/empty means every video node renders as the documented placeholder, matching `createRenderer`'s own no-registry default. */
   videoAssetEntries?: readonly SerializedVideoAssetEntry[];
   /** Every `(assetRef, sourceFrame)` pair this range's own `[startFrame, endFrame)` actually needs a decoded video frame for; see `VideoSampleRequest`'s own doc. Omitted/empty means no video frame is ever sampled for this range, independent of whether `videoAssetEntries` itself is populated. */
@@ -625,6 +690,7 @@ async function buildEncodedChunksForRange(
   range: { startFrame?: number; endFrame?: number; keyframeIntervalFrames?: number } = {},
   textRenderEntries: readonly SerializedTextRenderEntry[] = [],
   imageRenderEntries: readonly SerializedImageRenderEntry[] = [],
+  modelRenderEntries: readonly SerializedModelAssetEntry[] = [],
   videoAssetEntries: readonly SerializedVideoAssetEntry[] = [],
   videoSamplesNeeded: readonly VideoSampleRequest[] = [],
 ): Promise<{
@@ -650,6 +716,7 @@ async function buildEncodedChunksForRange(
   canvas.height = composition.height;
 
   const textureRegistry = await buildTextureRegistry(imageRenderEntries);
+  const modelRegistry = await buildModelRegistry(modelRenderEntries);
   const videoFrameRegistry = await buildVideoFrameRegistry(
     videoAssetEntries,
     videoSamplesNeeded,
@@ -658,6 +725,7 @@ async function buildEncodedChunksForRange(
   const innerRenderer = createRenderer({
     textRenderRegistry: buildTextRenderRegistry(textRenderEntries),
     textureRegistry,
+    modelRegistry,
     videoFrameRegistry,
   });
   const renderer = createPixelReadableRenderer({
@@ -735,6 +803,7 @@ export async function runBrowserHeadlessRender(config: BrowserHeadlessRenderConf
       {},
       config.textRenderEntries,
       config.imageRenderEntries,
+      config.modelRenderEntries,
       config.videoAssetEntries,
       config.videoSamplesNeeded,
     );
@@ -818,6 +887,7 @@ export async function runBrowserHeadlessRenderRange(
       },
       config.textRenderEntries,
       config.imageRenderEntries,
+      config.modelRenderEntries,
       config.videoAssetEntries,
       config.videoSamplesNeeded,
     );
