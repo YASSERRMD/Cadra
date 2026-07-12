@@ -11,6 +11,17 @@ import type {
   Transport,
 } from "../transport.js";
 import { createTransport } from "../transport.js";
+import {
+  attachFrameAccurateSeeking,
+  type FrameAccurateSeeking,
+} from "../video/attach-frame-accurate-seeking.js";
+import { createVideoFrameReadyCheck } from "../video/create-video-frame-ready-check.js";
+import { createDecodeQueue, type DecodeVideoFrameFn } from "../video/decode-video-frame.js";
+import {
+  attachVideoFramePrefetch,
+  type VideoFramePrefetch,
+} from "../video/prefetch-video-frames.js";
+import { type AssetKindOfFn, createVideoReadinessCache } from "../video/video-readiness.js";
 import { computeAspectFitSize } from "./aspect-fit.js";
 import type { ObserveResizeFn, UnobserveResizeFn } from "./resize-observation.js";
 import { observeResizeWithResizeObserver } from "./resize-observation.js";
@@ -69,6 +80,46 @@ export interface MountPreviewOptions {
    * `assetRef` silent for now.
    */
   audioContext?: AudioContextLike;
+  /**
+   * Decodes (or otherwise makes available) a video-backed node's exact
+   * needed frame, forwarded to `createDecodeQueue`'s own identically-shaped
+   * first argument (see `DecodeVideoFrameFn`'s own doc). Supplying this is
+   * what opts a `mountPreview` call into frame-accurate video seeking and
+   * prefetch at all: with it omitted, none of `attachFrameAccurateSeeking`/
+   * `attachVideoFramePrefetch`/the video-readiness cache is ever
+   * constructed, and `Transport`'s own `isFrameReady` behaves exactly as
+   * `options.isFrameReady` alone already describes - the same "only
+   * construct extra machinery a caller opted into" pattern
+   * `resolveAudioBuffer`'s own doc establishes for audio. `mountPreview`
+   * itself decodes nothing: resolving a `(assetRef, frame)` pair to real,
+   * ready content (e.g. via `@cadra/renderer`'s own `sampleVideoFrame`) is
+   * the caller's job.
+   *
+   * When given, the resulting video-readiness check is composed with
+   * `options.isFrameReady` (if also given) via logical AND - both must
+   * agree a frame is ready, neither silently overrides the other.
+   */
+  decodeVideoFrame?: DecodeVideoFrameFn;
+  /**
+   * Resolves an `assetRef` to its `AssetKind`, forwarded to
+   * `createVideoFrameReadyCheck`/`attachFrameAccurateSeeking`/
+   * `attachVideoFramePrefetch`. Only consulted when `decodeVideoFrame` is
+   * also given (see that option's own doc). Optional even then: omitted
+   * defaults to a function that reports every `assetRef` unknown, which
+   * still correctly detects every real `VideoNode` (its own node kind
+   * alone already means "video", no `assetKindOf` lookup needed - see
+   * `video-readiness.ts`'s own `collectVideoBackedNodes` doc) - this only
+   * needs supplying at all for the legacy case of a video asset placed via
+   * a plain `ImageNode` (see that same doc).
+   */
+  assetKindOf?: AssetKindOfFn;
+  /**
+   * How many frames on either side of the current playhead to proactively
+   * decode, forwarded to `attachVideoFramePrefetch`'s own identically-named
+   * option. Only relevant when `decodeVideoFrame` is also given. Defaults
+   * to `attachVideoFramePrefetch`'s own default (`3`) when omitted.
+   */
+  videoPrefetchWindowSize?: number;
 }
 
 /** Unsubscribes a handler previously registered via `PreviewHandle.onFrameChanged`. */
@@ -162,6 +213,25 @@ function formatFpsReadout(fps: number): string {
  * constructed for a caller who never touches audio. `options.resolveAudioBuffer`
  * is how a caller supplies the actual decoded buffers an `AudioClip.assetRef`
  * resolves to - `mountPreview` itself fetches or decodes nothing on its own.
+ *
+ * Frame-accurate video: only if the caller opts in via
+ * `options.decodeVideoFrame` (see that option's own doc), a shared
+ * `VideoReadinessCache` and `DecodeQueue` back three things together:
+ * `Transport`'s own `isFrameReady` (composed with `options.isFrameReady`,
+ * if also given, via logical AND), `attachFrameAccurateSeeking` (gates
+ * `seek()` on readiness instead of `Transport.seek`'s own default
+ * unconditional render), and `attachVideoFramePrefetch` (proactively warms
+ * the cache around the current playhead so the common case never actually
+ * has to wait). All three read the identical cache, so they can never
+ * disagree about what is ready. Attached after audio (order between the two
+ * does not affect correctness - `attachAudioToTransport`'s own
+ * `frameChanged` subscription self-heals regardless of which one wraps
+ * `Transport.seek` more tightly - but `dispose()` below tears them down in
+ * the exact reverse order for a real reason: `attachAudioToTransport`'s own
+ * wrapped methods never check their own disposed state, so disposing in the
+ * wrong order would leave a stale wrapper reachable through `Transport.seek`
+ * that, if ever invoked again, would create real, permanently leaked Web
+ * Audio nodes).
  */
 export function mountPreview(container: HTMLElement, options: MountPreviewOptions): PreviewHandle {
   const composition = options.project.compositions.find(
@@ -183,6 +253,8 @@ export function mountPreview(container: HTMLElement, options: MountPreviewOption
   let isDisposed = false;
   let transport: Transport | undefined;
   let audioSync: AudioTransportSync | undefined;
+  let frameAccurateSeeking: FrameAccurateSeeking | undefined;
+  let videoFramePrefetch: VideoFramePrefetch | undefined;
   // Queued intents applied once the Transport exists, replayed in the order
   // received. A seek queued after a play (or vice versa) both survive; only
   // repeated seeks collapse to the last one, matching how a user rapidly
@@ -443,6 +515,36 @@ export function mountPreview(container: HTMLElement, options: MountPreviewOption
       return;
     }
 
+    // Only constructed when the caller opted in via decodeVideoFrame (see
+    // that option's own doc): with it omitted, none of this machinery
+    // exists at all, and Transport's own isFrameReady behaves exactly as
+    // options.isFrameReady alone already describes - the same conditional-
+    // construction pattern audio uses just below, and createRenderer uses
+    // for textureRegistry/videoFrameRegistry.
+    let videoReadinessCache: ReturnType<typeof createVideoReadinessCache> | undefined;
+    let videoDecodeQueue: ReturnType<typeof createDecodeQueue> | undefined;
+    let composedIsFrameReady = options.isFrameReady;
+    const assetKindOf: AssetKindOfFn = options.assetKindOf ?? (() => undefined);
+    if (options.decodeVideoFrame !== undefined) {
+      videoReadinessCache = createVideoReadinessCache();
+      videoDecodeQueue = createDecodeQueue(options.decodeVideoFrame, videoReadinessCache);
+      const videoIsFrameReady = createVideoFrameReadyCheck({
+        project: options.project,
+        compositionId: options.compositionId,
+        cache: videoReadinessCache,
+        assetKindOf,
+      });
+      // Composed via AND, not a replacement: a caller supplying its own
+      // isFrameReady for an unrelated readiness concern (e.g. font loading)
+      // still needs that concern satisfied too, not silently dropped once
+      // video readiness enters the picture.
+      const callerIsFrameReady = options.isFrameReady;
+      composedIsFrameReady =
+        callerIsFrameReady !== undefined
+          ? (frame: number) => callerIsFrameReady(frame) && videoIsFrameReady(frame)
+          : videoIsFrameReady;
+    }
+
     const createdTransport = createTransport({
       project: options.project,
       compositionId: options.compositionId,
@@ -453,7 +555,7 @@ export function mountPreview(container: HTMLElement, options: MountPreviewOption
       now: options.now,
       scheduleFrame: options.scheduleFrame,
       cancelFrame: options.cancelFrame,
-      isFrameReady: options.isFrameReady,
+      isFrameReady: composedIsFrameReady,
     });
     transport = createdTransport;
     // Only attached when the caller opted in (resolveAudioBuffer and/or a
@@ -471,6 +573,30 @@ export function mountPreview(container: HTMLElement, options: MountPreviewOption
         transport: createdTransport,
         resolveAudioBuffer: options.resolveAudioBuffer ?? (() => undefined),
         ...(options.audioContext !== undefined && { audioContext: options.audioContext }),
+      });
+    }
+    // Attached after audio (see this function's own top-level doc for why
+    // the order between the two does not affect correctness, but disposal
+    // order below does). videoDecodeQueue/videoReadinessCache are only set
+    // when decodeVideoFrame was given, matching this same conditional-
+    // construction pattern.
+    if (videoDecodeQueue !== undefined && videoReadinessCache !== undefined) {
+      frameAccurateSeeking = attachFrameAccurateSeeking(createdTransport, {
+        project: options.project,
+        compositionId: options.compositionId,
+        cache: videoReadinessCache,
+        assetKindOf,
+        decodeQueue: videoDecodeQueue,
+      });
+      videoFramePrefetch = attachVideoFramePrefetch({
+        project: options.project,
+        compositionId: options.compositionId,
+        transport: createdTransport,
+        decodeQueue: videoDecodeQueue,
+        assetKindOf,
+        ...(options.videoPrefetchWindowSize !== undefined && {
+          windowSize: options.videoPrefetchWindowSize,
+        }),
       });
     }
 
@@ -520,6 +646,15 @@ export function mountPreview(container: HTMLElement, options: MountPreviewOption
       container.removeAttribute("tabindex");
     }
 
+    // Reverse of attachment order (frame-accurate seeking/prefetch attached
+    // after audio, above): attachAudioToTransport's own wrapped play/pause/
+    // seek methods never check their own disposed state, so disposing it
+    // first would leave a stale audio wrapper reachable through
+    // transport.seek once frameAccurateSeeking's own dispose() restores its
+    // own saved "original" (which, since it attached after audio, IS that
+    // audio wrapper) - see this function's own top-level doc.
+    frameAccurateSeeking?.dispose();
+    videoFramePrefetch?.dispose();
     audioSync?.dispose();
     transport?.dispose();
     options.renderer.dispose();
