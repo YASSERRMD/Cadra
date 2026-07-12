@@ -219,13 +219,19 @@ async function handleReplaceMode(
 /**
  * Handles `update_scene`'s "patch" mode: loads the existing document,
  * applies every operation in `operations` in order via
- * `applyScenePatchOperations`, validates the result, and persists it.
+ * `applyScenePatchOperations`, validates the result, and - unless `dryRun`
+ * is `true` - persists it. `dryRun` still runs the full patch-and-validate
+ * pass (so a caller sees the exact same success/diagnostics shape either
+ * way, including the would-be patched `document` on success), it just
+ * skips the final `writeSceneDocument` call, so an agent can check whether
+ * a batch of edits would validate before committing to them.
  */
 async function handlePatchMode(
   workspaceRoot: string,
   toolLogger: Logger,
   sceneId: string,
   operations: ScenePatchOperation[] | undefined,
+  dryRun: boolean,
 ): Promise<{ content: Array<{ type: "text"; text: string }> }> {
   if (operations === undefined || operations.length === 0) {
     return jsonResult(
@@ -263,6 +269,14 @@ async function handlePatchMode(
       diagnosticCount: parsed.diagnostics.length,
     });
     return jsonResult({ success: false, diagnostics: parsed.diagnostics } satisfies ToolFailurePayload);
+  }
+
+  if (dryRun) {
+    toolLogger.debug("update_scene patch dry-run validated without persisting", {
+      sceneId,
+      operationCount: operations.length,
+    });
+    return jsonResult({ success: true, document: parsed.document } satisfies ToolDocumentSuccessPayload);
   }
 
   await writeSceneDocument(workspaceRoot, sceneId, parsed.document);
@@ -391,9 +405,18 @@ export function registerCadraSceneTools(
             "Required (and only used) when mode is 'replace': the complete new scene document, " +
               "in the same { schemaVersion, project } shape get_scene returns.",
           ),
+        dryRun: z
+          .boolean()
+          .optional()
+          .describe(
+            "Only used when mode is 'patch'. When true, applies and validates 'operations' " +
+              "exactly as normal and returns the same success/diagnostics shape, but does not " +
+              "persist the result - use to check whether a batch of edits would validate before " +
+              "committing to them.",
+          ),
       },
     },
-    async ({ sceneId, mode, operations, document }) => {
+    async ({ sceneId, mode, operations, document, dryRun }) => {
       const idResult = validateSceneIdOrFailure(sceneId);
       if (!idResult.ok) {
         return jsonResult(idResult.failure);
@@ -402,7 +425,13 @@ export function registerCadraSceneTools(
       if (mode === "replace") {
         return handleReplaceMode(config.workspaceRoot, toolLogger, idResult.sceneId, document);
       }
-      return handlePatchMode(config.workspaceRoot, toolLogger, idResult.sceneId, operations);
+      return handlePatchMode(
+        config.workspaceRoot,
+        toolLogger,
+        idResult.sceneId,
+        operations,
+        dryRun ?? false,
+      );
     },
   );
 

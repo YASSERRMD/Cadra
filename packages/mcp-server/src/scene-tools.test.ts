@@ -392,6 +392,61 @@ describe("Cadra MCP scene tools", () => {
       }
     });
 
+    it("dryRun: true validates and returns the would-be patched document without persisting it", async () => {
+      const connectedClient = await connectClient();
+      await createSceneWithRootNode(connectedClient, "scene-patch-dry-run");
+
+      const dryRunResult = await connectedClient.callTool({
+        name: UPDATE_SCENE_TOOL_NAME,
+        arguments: {
+          sceneId: "scene-patch-dry-run",
+          mode: "patch",
+          dryRun: true,
+          operations: [{ type: "updateNode", nodeId: "existing-child", fields: { name: "Renamed" } }],
+        },
+      });
+
+      const dryRunPayload = parseToolResult<WritePayload>(dryRunResult as ToolTextResult);
+      expect(dryRunPayload.success).toBe(true);
+      if (dryRunPayload.success) {
+        const rootNode = dryRunPayload.document.project.compositions[0]!.tracks[0]!.clips[0]!.node;
+        const updatedChild = rootNode.children.find((child) => child.id === "existing-child");
+        expect(updatedChild?.name).toBe("Renamed");
+      }
+
+      const getResult = await connectedClient.callTool({
+        name: GET_SCENE_TOOL_NAME,
+        arguments: { sceneId: "scene-patch-dry-run" },
+      });
+      const persisted = parseToolResult<WritePayload>(getResult as ToolTextResult);
+      expect(persisted.success).toBe(true);
+      if (persisted.success) {
+        const rootNode = persisted.document.project.compositions[0]!.tracks[0]!.clips[0]!.node;
+        const unchangedChild = rootNode.children.find((child) => child.id === "existing-child");
+        // The dry run must not have written anything: the persisted scene
+        // still has no 'name' field on this node.
+        expect(unchangedChild?.name).toBeUndefined();
+      }
+    });
+
+    it("dryRun: true still returns diagnostics (and persists nothing) for a patch that would produce an invalid document", async () => {
+      const connectedClient = await connectClient();
+      await createSceneWithRootNode(connectedClient, "scene-patch-dry-run-invalid");
+
+      const result = await connectedClient.callTool({
+        name: UPDATE_SCENE_TOOL_NAME,
+        arguments: {
+          sceneId: "scene-patch-dry-run-invalid",
+          mode: "patch",
+          dryRun: true,
+          operations: [{ type: "updateNode", nodeId: "does-not-exist", fields: { name: "X" } }],
+        },
+      });
+
+      const payload = parseToolResult<WritePayload>(result as ToolTextResult);
+      expect(payload.success).toBe(false);
+    });
+
     it("rejects an updateNode operation whose fields try to change id, kind, or children, at the input-schema level", async () => {
       const connectedClient = await connectClient();
       await createSceneWithRootNode(connectedClient, "scene-patch-forbidden-fields");
