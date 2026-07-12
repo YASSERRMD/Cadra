@@ -4,8 +4,10 @@ import {
   createProject,
   Image,
   resolveSceneAtFrame,
+  resolveVideoSourceFrame,
   Sequence,
   Shape,
+  Video,
 } from "@cadra/core";
 import { describe, expect, it } from "vitest";
 
@@ -187,6 +189,158 @@ describe("findVideoBackedFrames", () => {
     expect(found).toEqual([
       { assetRef: "video-asset", frame: 10 }, // clip-a: starts at 0, localFrame 10
       { assetRef: "video-asset", frame: 5 }, // clip-b: starts at 5, localFrame 5
+    ]);
+  });
+
+  it("finds a real VideoNode at its own resolved source frame - the composition-absolute frame, not the layer's own localFrame", () => {
+    const composition = createComposition({
+      id: "comp-1",
+      name: "Main",
+      fps: FPS,
+      durationInFrames: DURATION_IN_FRAMES,
+      width: 640,
+      height: 360,
+      tracks: [
+        {
+          id: "track-1",
+          clips: [
+            Sequence({
+              id: "clip-1",
+              from: 10,
+              durationInFrames: 50,
+              content: Video({ id: "video-node", assetRef: "video-asset" }),
+            }),
+          ],
+        },
+      ],
+    });
+    const project = createProject({ id: "p1", name: "Project", compositions: [composition] });
+
+    const sceneState = resolveSceneAtFrame(project, "comp-1", 15);
+    const found = findVideoBackedFrames(sceneState, assetKindOf);
+
+    // Clip starts at frame 10, resolved at frame 15: localFrame is 5, but a
+    // VideoNode's own default mapping (inFrame 0, playbackRate 1, no trim)
+    // resolves against the composition-absolute frame (15), matching
+    // exactly what the real renderer's own computeVideoFrameRenderKey
+    // would compute (see collectVideoBackedNodes's own doc) - not 5.
+    expect(found).toEqual([{ assetRef: "video-asset", frame: 15 }]);
+  });
+
+  it("resolves a VideoNode's own inFrame/outFrame/playbackRate exactly like resolveVideoSourceFrame does", () => {
+    const composition = createComposition({
+      id: "comp-1",
+      name: "Main",
+      fps: FPS,
+      durationInFrames: DURATION_IN_FRAMES,
+      width: 640,
+      height: 360,
+      tracks: [
+        {
+          id: "track-1",
+          clips: [
+            Sequence({
+              id: "clip-1",
+              from: 0,
+              durationInFrames: DURATION_IN_FRAMES,
+              content: Video({
+                id: "video-node",
+                assetRef: "video-asset",
+                inFrame: 100,
+                outFrame: 200,
+                playbackRate: 2,
+              }),
+            }),
+          ],
+        },
+      ],
+    });
+    const project = createProject({ id: "p1", name: "Project", compositions: [composition] });
+
+    const sceneState = resolveSceneAtFrame(project, "comp-1", 20);
+    const found = findVideoBackedFrames(sceneState, assetKindOf);
+
+    const expectedSourceFrame = resolveVideoSourceFrame(
+      { inFrame: 100, outFrame: 200, playbackRate: 2 },
+      20,
+    );
+    expect(found).toEqual([{ assetRef: "video-asset", frame: expectedSourceFrame }]);
+  });
+
+  it("VideoNode's own assetRef needs no assetKindOf lookup at all - unlike an ImageNode, its node kind alone already means video", () => {
+    const composition = createComposition({
+      id: "comp-1",
+      name: "Main",
+      fps: FPS,
+      durationInFrames: DURATION_IN_FRAMES,
+      width: 640,
+      height: 360,
+      tracks: [
+        {
+          id: "track-1",
+          clips: [
+            Sequence({
+              id: "clip-1",
+              from: 0,
+              durationInFrames: DURATION_IN_FRAMES,
+              content: Video({ id: "video-node", assetRef: "unregistered-asset" }),
+            }),
+          ],
+        },
+      ],
+    });
+    const project = createProject({ id: "p1", name: "Project", compositions: [composition] });
+
+    // assetKindOf here reports "unregistered-asset" as unknown (undefined),
+    // exactly what a real host would report for an asset it has never
+    // heard of - yet the VideoNode is still found, since its own node kind
+    // is sufficient, with no assetKindOf lookup needed.
+    const sceneState = resolveSceneAtFrame(project, "comp-1", 0);
+    const found = findVideoBackedFrames(sceneState, () => undefined);
+    expect(found).toEqual([{ assetRef: "unregistered-asset", frame: 0 }]);
+  });
+
+  it("finds both a real VideoNode and a legacy video-backed ImageNode in the same scene, each keyed by its own correct frame", () => {
+    const composition = createComposition({
+      id: "comp-1",
+      name: "Main",
+      fps: FPS,
+      durationInFrames: DURATION_IN_FRAMES,
+      width: 640,
+      height: 360,
+      tracks: [
+        {
+          id: "track-1",
+          clips: [
+            Sequence({
+              id: "clip-video-node",
+              from: 10,
+              durationInFrames: 50,
+              content: Video({ id: "video-node", assetRef: "video-asset" }),
+            }),
+          ],
+        },
+        {
+          id: "track-2",
+          clips: [
+            Sequence({
+              id: "clip-legacy-image",
+              from: 5,
+              durationInFrames: DURATION_IN_FRAMES,
+              content: Image({ id: "legacy-video-image", assetRef: "video-asset" }),
+            }),
+          ],
+        },
+      ],
+    });
+    const project = createProject({ id: "p1", name: "Project", compositions: [composition] });
+
+    const sceneState = resolveSceneAtFrame(project, "comp-1", 15);
+    const found = findVideoBackedFrames(sceneState, assetKindOf);
+
+    expect(found).toEqual([
+      { assetRef: "video-asset", frame: 15 }, // VideoNode: composition-absolute frame
+      { assetRef: "video-asset", frame: 10 }, // legacy ImageNode: localFrame (15 - 5)
     ]);
   });
 });
