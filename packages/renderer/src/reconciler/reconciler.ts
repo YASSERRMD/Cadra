@@ -6,6 +6,7 @@ import type { ModelRegistry } from "../assets/model-registry.js";
 import type { RendererBackend } from "../renderer.js";
 import type { SatoriLayerRenderRegistry } from "../svg-layer/satori-layer-render-registry.js";
 import type { TextRenderRegistry } from "../text/text-render-registry.js";
+import type { VideoFrameRegistry } from "../video-layer/video-frame-registry.js";
 import {
   applyNodeProperties,
   createThreeObject,
@@ -38,7 +39,9 @@ interface ReconciledEntry {
  * renders as an empty group too. `textureRegistry` is optional the same
  * way again; omitted, every `"image"` node (and every mesh's own
  * `normalMapRef`/`aoMapRef`) renders as its own documented fallback (see
- * `TextureRegistry`'s own doc).
+ * `TextureRegistry`'s own doc). `videoFrameRegistry` is optional the same
+ * way once more; omitted, every `"video"` node renders as its own
+ * documented placeholder plane (see `VideoFrameRegistry`'s own doc).
  */
 export interface ReconcilerOptions {
   geometryRegistry?: GeometryRegistry;
@@ -47,6 +50,7 @@ export interface ReconcilerOptions {
   satoriLayerRenderRegistry?: SatoriLayerRenderRegistry;
   modelRegistry?: ModelRegistry;
   textureRegistry?: TextureRegistry;
+  videoFrameRegistry?: VideoFrameRegistry;
 }
 
 /**
@@ -128,6 +132,7 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
     }),
     ...(options.modelRegistry !== undefined && { modelRegistry: options.modelRegistry }),
     ...(options.textureRegistry !== undefined && { textureRegistry: options.textureRegistry }),
+    ...(options.videoFrameRegistry !== undefined && { videoFrameRegistry: options.videoFrameRegistry }),
   };
 
   const entries = new Map<string, ReconciledEntry>();
@@ -342,6 +347,19 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
       // covered by entry.owned.material above (image's per-node material,
       // real-texture or placeholder alike, has always lived there).
       entry.owned.image.geometry.dispose();
+    }
+    if (entry.owned?.video !== undefined) {
+      // Unlike image's own case immediately above, a video node's texture
+      // is not registry-owned: videoFrameRegistry only ever hands back raw
+      // decoded pixels (an ImageBitmap), and applyVideoNodeProperties
+      // wraps them in a fresh THREE.Texture itself - so, unlike image's
+      // texture, this one genuinely is this reconciler's own resource and
+      // must be disposed here (see OwnedResources.video's own doc). The
+      // current material is already covered by entry.owned.material above
+      // (applyVideoNodeProperties reassigns that shared field on every
+      // swap, exactly like image's own placeholder-to-resolved swap does).
+      entry.owned.video.geometry.dispose();
+      entry.owned.video.texture.dispose();
     }
     if (entry.owned?.model !== undefined) {
       // Geometries/materials/textures are never disposed here: they are

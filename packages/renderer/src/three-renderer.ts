@@ -67,6 +67,7 @@ import type {
 import { createContactShadowMesh } from "./shadows/contact-shadow.js";
 import type { SatoriLayerRenderRegistry } from "./svg-layer/satori-layer-render-registry.js";
 import type { TextRenderRegistry } from "./text/text-render-registry.js";
+import type { VideoFrameRegistry } from "./video-layer/video-frame-registry.js";
 
 /**
  * The subset of `THREE.WebGPURenderer` / `THREE.WebGLRenderer` this module
@@ -659,6 +660,7 @@ export class ThreeRenderer implements Renderer {
   private readonly textRenderRegistry: TextRenderRegistry | undefined;
   private readonly satoriLayerRenderRegistry: SatoriLayerRenderRegistry | undefined;
   private readonly textureRegistry: TextureRegistry | undefined;
+  private readonly videoFrameRegistry: VideoFrameRegistry | undefined;
   private threeRenderer: ThreeRendererLike | undefined;
   private resolvedBackend: RendererBackend | undefined;
   private wasFallback = false;
@@ -779,6 +781,7 @@ export class ThreeRenderer implements Renderer {
     textRenderRegistry?: TextRenderRegistry,
     satoriLayerRenderRegistry?: SatoriLayerRenderRegistry,
     textureRegistry?: TextureRegistry,
+    videoFrameRegistry?: VideoFrameRegistry,
   ) {
     this.deps = deps;
     this.environmentRegistry = environmentRegistry;
@@ -787,11 +790,13 @@ export class ThreeRenderer implements Renderer {
     this.textRenderRegistry = textRenderRegistry;
     this.satoriLayerRenderRegistry = satoriLayerRenderRegistry;
     this.textureRegistry = textureRegistry;
+    this.videoFrameRegistry = videoFrameRegistry;
     this.reconciler = createReconciler({
       modelRegistry,
       ...(textRenderRegistry !== undefined && { textRenderRegistry }),
       ...(satoriLayerRenderRegistry !== undefined && { satoriLayerRenderRegistry }),
       ...(textureRegistry !== undefined && { textureRegistry }),
+      ...(videoFrameRegistry !== undefined && { videoFrameRegistry }),
     });
     this.defaultCamera.position.set(0, 0, 5);
   }

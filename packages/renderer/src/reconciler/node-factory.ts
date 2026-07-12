@@ -21,6 +21,7 @@ import {
   type SceneNode,
   type TextNode,
   toNumericSeed,
+  type VideoNode,
   type VolumeNode,
   type VolumeShape,
   type WhiteBalanceGain,
@@ -44,7 +45,12 @@ import {
 import { applyTextEffects } from "../text/apply-text-effects.js";
 import { buildTextGroup, type TextGroupResources } from "../text/build-text-group.js";
 import { computeTextNodeRenderKey, type TextRenderRegistry } from "../text/text-render-registry.js";
+import {
+  computeVideoFrameRenderKey,
+  type VideoFrameRegistry,
+} from "../video-layer/video-frame-registry.js";
 import type { GeometryRegistry, MaterialRegistry, TextureRegistry } from "./registries.js";
+import { createImageTexture } from "./registries.js";
 
 /**
  * Geometry shared by every `text`, `image`, and `video` placeholder node,
@@ -192,6 +198,16 @@ export interface NodeFactoryContext {
    * every other node kind's own registry-miss case already uses).
    */
   modelRegistry?: ModelRegistry;
+  /**
+   * Resolves a `VideoNode` at a specific frame (via
+   * `computeVideoFrameRenderKey`) to its already-decoded current-frame
+   * pixels. Optional, mirroring `satoriLayerRenderRegistry`'s own
+   * optionality: omitted, or no entry for a given node/frame, falls back
+   * to the documented `video` placeholder plane (the same "resource not
+   * ready yet" contract every other registry-resolved node kind already
+   * has).
+   */
+  videoFrameRegistry?: VideoFrameRegistry;
 }
 
 /**
@@ -275,6 +291,30 @@ export interface OwnedResources {
    * to dispose) while still on the shared `PLACEHOLDER_PLANE_GEOMETRY`.
    */
   image?: { geometry: THREE.BufferGeometry };
+  /**
+   * A `video` node's own geometry, sized to its currently-resolved frame's
+   * own aspect ratio - the exact same convention `OwnedResources.image`
+   * documents, applied per-frame instead of once, since a video's own
+   * resolved content (and so its own natural aspect ratio) can genuinely
+   * change frame to frame. `texture` is the `THREE.Texture` `createImageTexture`
+   * wraps around `videoFrameRegistry`'s own resolved `ImageBitmap` -
+   * unlike `TextureRegistry` (which hands the reconciler an
+   * already-wrapped, registry-owned `THREE.Texture` directly, see
+   * `OwnedResources.image`'s own doc for why that one is never disposed
+   * here), `VideoFrameRegistry` only ever hands back raw decoded pixels
+   * (see `VideoFrameRenderEntry`'s own doc): the *wrapping* `THREE.Texture`
+   * is created fresh, inside `applyVideoNodeProperties`, on every render
+   * key change, and so is genuinely reconciler-owned and must be disposed
+   * like any other owned resource - both on the next swap and on final
+   * teardown (`disposeEntry`). `lastRenderKey` is the
+   * `computeVideoFrameRenderKey` this node's current
+   * `mesh.geometry`/`mesh.material`/`texture` were last built from,
+   * mirroring `SatoriLayerResources`'s own identical field: rebuilt only
+   * when a new frame actually resolves to a different key, not on every
+   * single `applyNodeProperties` call. `undefined` (no per-node geometry
+   * to dispose) while still on the shared `PLACEHOLDER_PLANE_GEOMETRY`.
+   */
+  video?: { geometry: THREE.BufferGeometry; texture: THREE.Texture; lastRenderKey: string };
 }
 
 /**
@@ -360,10 +400,16 @@ function buildThreeObject(node: SceneNode, ctx: NodeFactoryContext): BuiltObject
       return buildImageObject(node, ctx);
 
     case "video": {
-      // Real video texture decoding/display is out of scope for this phase
-      // (see VideoNode's own doc comment); this is the same kind of
-      // shared-plane-plus-owned-material placeholder the "image" branch
-      // above already uses, distinguished only by its fallback color.
+      // Unlike "image" above, a video node's real content depends on frame
+      // (which this function - called once, at build time, before any
+      // frame is resolved - never receives), so there is no build-time
+      // equivalent of buildImageObject's immediate resolve here. This
+      // always starts as the same kind of shared-plane-plus-owned-material
+      // placeholder the "image" branch uses (distinguished only by its
+      // fallback color), and applyVideoNodeProperties (mirroring
+      // applySatoriLayerProperties's own identical "frame-dependent content
+      // resolves lazily" reasoning) swaps in the real decoded frame once
+      // ctx.videoFrameRegistry first resolves one for it.
       const material = new THREE.MeshBasicMaterial({
         color: VIDEO_PLACEHOLDER_COLOR,
         transparent: true,
@@ -748,18 +794,7 @@ export function applyNodeProperties(
       return;
 
     case "video": {
-      // Fixed placeholder color, same reason as "image" above (assetRef
-      // cannot resolve to a decoded video frame yet; see VideoNode's own
-      // doc comment for why real video texture display is out of scope for
-      // this phase). opacity is resolved and applied here regardless: it is
-      // a genuine Property<number> this phase adds, independent of texture
-      // decoding, so there is something real to react to for it even while
-      // the frame this placeholder shows is fixed.
-      const mesh = object3D as THREE.Mesh;
-      (mesh.material as THREE.MeshBasicMaterial).opacity = resolveNumberProperty(
-        node.opacity,
-        frame,
-      );
+      applyVideoNodeProperties(node, object3D as THREE.Mesh, ctx, frame, owned);
       return;
     }
 
@@ -1155,6 +1190,84 @@ function applyLightShadowConfig(light: THREE.Light, shadow: LightShadowConfig | 
   if (shadow?.radius !== undefined) {
     light.shadow.radius = shadow.radius;
   }
+}
+
+/**
+ * Applies this frame's resolved state onto a `video` node's own mesh:
+ * swaps `mesh.geometry`/`mesh.material` to a real decoded frame only when
+ * `computeVideoFrameRenderKey` actually resolves to something *and* that
+ * key differs from `owned.video`'s own last-built one (a video held on a
+ * single frame - `playbackRate: 0` is not itself valid, but
+ * `outOfRangeBehavior: "hold"` past the trim range holds on `outFrame`
+ * indefinitely - resolves to the exact same key every subsequent frame,
+ * so this never rebuilds anything for it, mirroring
+ * `applySatoriLayerProperties`'s own identical "only rebuild on an actual
+ * key change" rationale exactly), then applies `opacity` every frame
+ * regardless (a genuine `Property<number>`, independent of whether the
+ * decoded pixels changed at all this frame).
+ *
+ * Unlike `applySatoriLayerProperties` (whose own `object3D` is an empty
+ * `THREE.Group`, with the real mesh added as a child only once one
+ * exists), a `video` node's own `object3D` is already a real `THREE.Mesh`
+ * from the moment `buildThreeObject` builds it (on the shared placeholder
+ * geometry/a placeholder-colored material, exactly like `image`'s own
+ * not-yet-resolved case) - so this only ever *mutates* that existing
+ * mesh's own `.geometry`/`.material` in place, never replaces `object3D`
+ * itself. The swapped-away previous material is disposed via the shared
+ * `owned.material` field (reassigned to the new one here, reusing exactly
+ * the same generic disposal path every other placeholder-material node
+ * kind's own material already goes through - not tracked redundantly a
+ * second time inside `owned.video`); the swapped-away previous *geometry*
+ * and *texture* are `owned.video`'s own responsibility. The geometry,
+ * because - unlike material - there is no shared `owned.geometry` field
+ * this reconciler already disposes generically. The texture, because
+ * unlike `TextureRegistry` (which hands the reconciler an
+ * already-wrapped, registry-owned `THREE.Texture` it correctly never
+ * disposes), `VideoFrameRegistry` only ever hands back raw decoded pixels
+ * (`entry.image`) - the `THREE.Texture` wrapping them is created fresh
+ * right here via `createImageTexture`, so it is reconciler-owned and must
+ * be disposed like any other owned resource, both on the next swap and
+ * (via `owned.video.texture` - see `reconciler.ts`'s own `disposeEntry`)
+ * on final teardown.
+ *
+ * No-ops the geometry/material/texture swap (but still applies `opacity`)
+ * when `ctx.videoFrameRegistry` does not resolve anything for this exact
+ * frame: the same "not yet ready is an expected runtime state" fallback
+ * to the documented placeholder every other registry-resolved node kind
+ * already has.
+ */
+function applyVideoNodeProperties(
+  node: VideoNode,
+  mesh: THREE.Mesh,
+  ctx: NodeFactoryContext,
+  frame: number,
+  owned: OwnedResources | undefined,
+): void {
+  const renderKey = computeVideoFrameRenderKey(node, frame);
+  const entry = ctx.videoFrameRegistry?.resolve(renderKey);
+
+  if (entry !== undefined && owned !== undefined && owned.video?.lastRenderKey !== renderKey) {
+    owned.video?.geometry.dispose();
+    owned.video?.texture.dispose();
+    owned.material?.dispose();
+
+    const naturalWidth: number | undefined = (entry.image as { width?: number } | undefined)?.width;
+    const naturalHeight: number | undefined = (entry.image as { height?: number } | undefined)?.height;
+    const aspect =
+      naturalWidth !== undefined && naturalHeight !== undefined && naturalHeight > 0
+        ? naturalWidth / naturalHeight
+        : 1;
+    const geometry = new THREE.PlaneGeometry(1, 1 / aspect);
+    const texture = createImageTexture(entry.image);
+    const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
+
+    mesh.geometry = geometry;
+    mesh.material = material;
+    owned.material = material;
+    owned.video = { geometry, texture, lastRenderKey: renderKey };
+  }
+
+  (mesh.material as THREE.MeshBasicMaterial).opacity = resolveNumberProperty(node.opacity, frame);
 }
 
 /**

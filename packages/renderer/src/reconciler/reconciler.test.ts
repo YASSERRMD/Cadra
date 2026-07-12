@@ -6,6 +6,7 @@ import {
   type MeshMaterialConfig,
   type SceneNode,
   type Transform,
+  type VideoNode,
 } from "@cadra/core";
 import type { RasterizedSvg } from "@cadra/svg-raster/browser";
 import type { TextRenderData } from "@cadra/text";
@@ -17,6 +18,7 @@ import {
   createInMemorySatoriLayerRenderRegistry,
 } from "../svg-layer/satori-layer-render-registry.js";
 import { computeTextNodeRenderKey, createInMemoryTextRenderRegistry } from "../text/text-render-registry.js";
+import { computeVideoFrameRenderKey, createInMemoryVideoFrameRegistry } from "../video-layer/video-frame-registry.js";
 import { createReconciler } from "./reconciler.js";
 import { createDefaultGeometryRegistry, createDefaultMaterialRegistry } from "./registries.js";
 
@@ -159,6 +161,18 @@ function image(id: string, assetRef = "asset-1"): SceneNode {
     visible: true,
     children: [],
     assetRef,
+  };
+}
+
+function video(id: string, assetRef = "asset-1"): SceneNode {
+  return {
+    id,
+    kind: "video",
+    transform: transformAt(),
+    visible: true,
+    children: [],
+    assetRef,
+    opacity: 1,
   };
 }
 
@@ -319,6 +333,20 @@ describe("createReconciler: kind-to-Three.js mapping", () => {
     const firstMaterial = (rootObject.children[0] as THREE.Mesh).material;
     const secondMaterial = (rootObject.children[1] as THREE.Mesh).material;
     expect(firstMaterial).not.toBe(secondMaterial);
+  });
+
+  it("maps video to a Mesh using the shared placeholder plane geometry and a fixed placeholder color", () => {
+    const reconciler = createReconciler();
+    const result = reconciler.reconcile(video("root"), 0) as THREE.Mesh;
+    expect(result).toBeInstanceOf(THREE.Mesh);
+    expect(result.geometry).toBeInstanceOf(THREE.PlaneGeometry);
+    expect(result.material).toBeInstanceOf(THREE.MeshBasicMaterial);
+  });
+
+  it("two video placeholders share the exact same plane geometry instance", () => {
+    const firstResult = createReconciler().reconcile(video("v1"), 0) as THREE.Mesh;
+    const secondResult = createReconciler().reconcile(video("v2", "asset-2"), 0) as THREE.Mesh;
+    expect(firstResult.geometry).toBe(secondResult.geometry);
   });
 
   it("maps a satori node with no registered render data to an empty group", () => {
@@ -535,6 +563,64 @@ describe("createReconciler: add, update, remove", () => {
     // own established contract: only whatever populated the registry owns
     // its lifetime, never the reconciler - see TextureRegistry's own doc.
     expect(textureDisposeSpy).not.toHaveBeenCalled();
+  });
+
+  it("reconcile(null) disposes a still-placeholder video node's own material (no per-node geometry/texture built yet)", () => {
+    const reconciler = createReconciler();
+    const mesh = reconciler.reconcile(video("v1"), 0) as THREE.Mesh;
+    const materialDisposeSpy = vi.spyOn(mesh.material as THREE.Material, "dispose");
+
+    reconciler.reconcile(null, 0);
+
+    expect(materialDisposeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconcile(null) disposes a resolved video node's own per-node geometry, material, and wrapping texture (unlike image, this texture is reconciler-owned, not registry-owned)", () => {
+    const node = video("v1") as VideoNode;
+    const renderKey = computeVideoFrameRenderKey(node, 0);
+    const videoFrameRegistry = createInMemoryVideoFrameRegistry();
+    videoFrameRegistry.register(renderKey, {
+      image: { width: 10, height: 10 } as unknown as ImageBitmap,
+    });
+    const reconciler = createReconciler({ videoFrameRegistry });
+    const mesh = reconciler.reconcile(node, 0) as THREE.Mesh;
+    const geometryDisposeSpy = vi.spyOn(mesh.geometry, "dispose");
+    const materialDisposeSpy = vi.spyOn(mesh.material as THREE.Material, "dispose");
+    const textureDisposeSpy = vi.spyOn(
+      (mesh.material as THREE.MeshBasicMaterial).map as THREE.Texture,
+      "dispose",
+    );
+
+    reconciler.reconcile(null, 0);
+
+    expect(geometryDisposeSpy).toHaveBeenCalledTimes(1);
+    expect(materialDisposeSpy).toHaveBeenCalledTimes(1);
+    // Unlike image's own texture (which comes pre-wrapped from
+    // textureRegistry and so is never disposed by the reconciler),
+    // videoFrameRegistry only ever hands back raw decoded pixels -
+    // applyVideoNodeProperties wraps them in a fresh THREE.Texture itself,
+    // making that texture genuinely reconciler-owned, so unlike image's,
+    // it must be disposed here.
+    expect(textureDisposeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("disposes the previous frame's own wrapping texture (not just the material) when a later frame swaps to a different source frame", () => {
+    const node = video("v1") as VideoNode;
+    const keyAtFrame0 = computeVideoFrameRenderKey(node, 0);
+    const keyAtFrame10 = computeVideoFrameRenderKey(node, 10);
+    const videoFrameRegistry = createInMemoryVideoFrameRegistry();
+    videoFrameRegistry.register(keyAtFrame0, { image: { width: 10, height: 10 } as unknown as ImageBitmap });
+    videoFrameRegistry.register(keyAtFrame10, { image: { width: 10, height: 10 } as unknown as ImageBitmap });
+    const reconciler = createReconciler({ videoFrameRegistry });
+
+    const mesh = reconciler.reconcile(node, 0) as THREE.Mesh;
+    const firstTexture = (mesh.material as THREE.MeshBasicMaterial).map as THREE.Texture;
+    const textureDisposeSpy = vi.spyOn(firstTexture, "dispose");
+
+    reconciler.reconcile(node, 10);
+
+    expect(textureDisposeSpy).toHaveBeenCalledTimes(1);
+    expect((mesh.material as THREE.MeshBasicMaterial).map).not.toBe(firstTexture);
   });
 });
 
