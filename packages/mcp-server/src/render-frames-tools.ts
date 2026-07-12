@@ -25,11 +25,18 @@
  * scene nodes) are prepared via `buildSatoriLayerRenderRegistryForProject`,
  * pre-rendered and rasterized at every one of this call's own `frames`
  * (unlike text/image, a satori layer's own pixels can vary by frame - see
- * that function's own doc).
+ * that function's own doc). Model nodes (`"model"` scene nodes, glTF/GLB)
+ * are prepared via `buildModelRegistryForProject` - unlike text/image/
+ * satori, `render_scene`'s own real browser-based render path does not
+ * resolve `ModelNode` assets at all yet (a separate, still-open gap this
+ * tool's own parity does not yet cover), so a `ModelNode` renders correctly
+ * through this tool today but still renders as an empty, invisible group
+ * through `render_scene`.
  */
 import type { Project } from "@cadra/core";
 import { createFrameContext, resolveSceneAtFrame } from "@cadra/core";
 import {
+  buildModelRegistryForProject,
   buildSatoriLayerRenderRegistryForProject,
   buildTextRenderRegistryForProject,
   buildTextureRegistryForProject,
@@ -197,10 +204,15 @@ export function registerCadraRenderFramesTools(
           createAssetBytesFetcher(config.workspaceRoot),
         );
         const satoriLayerRenderRegistry = await buildSatoriLayerRenderRegistryForProject(project, frames);
+        const modelRegistry = await buildModelRegistryForProject(
+          project,
+          createAssetBytesFetcher(config.workspaceRoot),
+        );
         renderer = createNativeGpuHeadlessRenderer({
           textRenderRegistry,
           textureRegistry,
           satoriLayerRenderRegistry,
+          modelRegistry,
         });
 
         await renderer.init(

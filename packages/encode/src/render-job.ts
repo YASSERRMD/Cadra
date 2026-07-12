@@ -26,9 +26,13 @@ import {
   computeTextNodeRenderKey,
   computeVideoFrameCacheKey,
   createDataTexture,
+  createDefaultParseGltf,
+  createInMemoryModelRegistry,
   createInMemorySatoriLayerRenderRegistry,
   createInMemoryTextRenderRegistry,
   createInMemoryTextureRegistry,
+  type LoadedModel,
+  type ModelRegistry,
   type SatoriLayerRenderRegistry,
   type TextRenderRegistry,
   type TextureRegistry,
@@ -343,6 +347,16 @@ function collectVideoAssetRefs(node: SceneNode, out: Set<string>): void {
   }
   for (const child of node.children) {
     collectVideoAssetRefs(child, out);
+  }
+}
+
+/** Recursively collects every distinct `ModelNode.assetRef` in `node`'s own subtree into `out`. */
+function collectModelAssetRefs(node: SceneNode, out: Set<string>): void {
+  if (node.kind === "model") {
+    out.add(node.assetRef);
+  }
+  for (const child of node.children) {
+    collectModelAssetRefs(child, out);
   }
 }
 
@@ -757,6 +771,79 @@ export async function buildTextureRegistryForProject(
       console.error(
         `buildTextureRegistryForProject: failed to decode image asset "${entry.assetRef}" as PNG (${message}). ` +
           "This node renders as the documented gray placeholder instead.",
+      );
+    }
+  }
+  return registry;
+}
+
+/**
+ * Builds a real (non-serialized) `ModelRegistry` for `project`, fetching and
+ * parsing every distinct `ModelNode.assetRef` found anywhere in its own
+ * scene graph via `fetchAssetBytes` - the `ModelRegistry` counterpart to
+ * `buildTextureRegistryForProject` immediately above, for the exact same "no
+ * browser page, no `page.evaluate` structured-clone boundary at all" caller
+ * (`@cadra/headless`'s `createNativeGpuHeadlessRenderer`, which already
+ * accepts a `modelRegistry` option - see that function's own doc - but had
+ * no caller building one until now).
+ *
+ * Parses via `createDefaultParseGltf()` directly on each fetched entry's
+ * bytes, not `loadGltf` (which additionally re-fetches its own bytes
+ * internally via a `FetchBytes`-shaped resolver) - this function already has
+ * the bytes in hand from `fetchAssetBytes`, mirroring
+ * `buildTextureRegistryForProject`'s own "fetch once, decode directly" shape
+ * rather than going through a second loader. `createDefaultParseGltf`'s own
+ * result (`{scene, animations}`) already structurally satisfies
+ * `LoadedModel` - see that function's own doc.
+ *
+ * `fetchAssetBytes` is optional and, when omitted, this returns `undefined`
+ * immediately, matching `buildTextureRegistryForProject`'s own "no asset
+ * store, nothing decoded" behavior. An `assetRef` `fetchAssetBytes` cannot
+ * resolve, or whose bytes fail to parse as a valid GLTF/GLB, is silently
+ * skipped instead of failing the whole render - matching `ModelRegistry`'s
+ * own "unresolved is an expected runtime state" contract (that `ModelNode`
+ * renders as an empty group; see `node-factory.ts`'s own `"model"` case).
+ *
+ * Returns `undefined` (not an empty registry) when `project` has no model
+ * nodes at all, matching `TextRenderRegistry`'s/`TextureRegistry`'s own
+ * "omit entirely" convention.
+ */
+export async function buildModelRegistryForProject(
+  project: Project,
+  fetchAssetBytes?: (assetRef: string) => Promise<Uint8Array | undefined>,
+): Promise<ModelRegistry | undefined> {
+  if (fetchAssetBytes === undefined) {
+    return undefined;
+  }
+
+  const assetRefs = new Set<string>();
+  for (const composition of project.compositions) {
+    for (const track of composition.tracks) {
+      for (const clip of track.clips) {
+        collectModelAssetRefs(clip.node, assetRefs);
+      }
+    }
+  }
+
+  if (assetRefs.size === 0) {
+    return undefined;
+  }
+
+  const parseGltf = createDefaultParseGltf();
+  const registry = createInMemoryModelRegistry();
+  for (const assetRef of assetRefs) {
+    const bytes = await fetchAssetBytes(assetRef);
+    if (bytes === undefined) {
+      continue;
+    }
+    try {
+      const asset = await parseGltf(bytes);
+      registry.register(assetRef, asset as LoadedModel);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(
+        `buildModelRegistryForProject: failed to parse model asset "${assetRef}" as GLTF/GLB (${message}). ` +
+          "This node renders as an empty group instead.",
       );
     }
   }
