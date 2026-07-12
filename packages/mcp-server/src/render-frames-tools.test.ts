@@ -9,6 +9,7 @@ import {
   createProject,
   Image,
   Light,
+  Model,
   type Project,
   Satori,
   Sequence,
@@ -20,7 +21,9 @@ import type { SceneDocument } from "@cadra/schema";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { PNG } from "pngjs";
-import { afterEach, describe, expect, it } from "vitest";
+import * as THREE from "three";
+import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { UPLOAD_ASSET_TOOL_NAME } from "./asset-tools.js";
 import { createLogger } from "./logger.js";
@@ -700,6 +703,278 @@ describe("render_frames: real SatoriNode rendering", () => {
 
     const redOutput = await renderWithColor("frames-satori-red", "#ff0000");
     const blueOutput = await renderWithColor("frames-satori-blue", "#0000ff");
+
+    expect(Buffer.compare(redOutput, blueOutput)).not.toBe(0);
+  }, 30_000);
+});
+
+/**
+ * A minimal `FileReader` standing in for the real DOM one, mirroring
+ * `@cadra/renderer`'s own `gltf-loader.test.ts` `NodeFileReaderPolyfill`
+ * exactly: `GLTFExporter`'s own writer unconditionally reaches for a real
+ * `FileReader` to turn its own merged `Blob` into an `ArrayBuffer` (binary
+ * `.glb` mode), a genuine DOM API this headless Vitest/Node environment does
+ * not provide on its own.
+ */
+class NodeFileReaderPolyfill {
+  result: ArrayBuffer | string | null = null;
+  onloadend: (() => void) | null = null;
+
+  readAsArrayBuffer(blob: Blob): void {
+    void blob.arrayBuffer().then((buffer) => {
+      this.result = buffer;
+      this.onloadend?.();
+    });
+  }
+
+  readAsDataURL(blob: Blob): void {
+    void blob.arrayBuffer().then((buffer) => {
+      const base64 = Buffer.from(buffer).toString("base64");
+      this.result = `data:${blob.type};base64,${base64}`;
+      this.onloadend?.();
+    });
+  }
+}
+
+/**
+ * Builds a real, self-contained `.glb`'s raw bytes: a unit `THREE.BoxGeometry`
+ * with a solid-`color` `MeshStandardMaterial`, round-tripped through
+ * `GLTFExporter`'s own `binary: true` mode - the exact same real-GLB
+ * construction `@cadra/renderer`'s own `gltf-loader.test.ts` already proves
+ * `createDefaultParseGltf` (the parser `buildModelRegistryForProject` uses)
+ * correctly parses back into a usable mesh, reused here to prove the whole
+ * upload-asset-through-render_frames pipeline end to end instead of only the
+ * parse step in isolation.
+ */
+async function buildGlbBytes(color: number): Promise<Uint8Array> {
+  vi.stubGlobal("FileReader", NodeFileReaderPolyfill);
+  try {
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const material = new THREE.MeshStandardMaterial({ color });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = "TestBox";
+    const scene = new THREE.Scene();
+    scene.add(mesh);
+
+    const glb = (await new GLTFExporter().parseAsync(scene, { binary: true })) as ArrayBuffer;
+    return new Uint8Array(glb);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+}
+
+/**
+ * A minimal scene document with one `ModelNode` (scaled to `[4, 4, 4]` - a
+ * unit box's near face then sits at world Z `+2`, well inside the default
+ * `fov: 50`/distance-5 camera's frustum at that depth, filling the whole
+ * frame with no background pixel anywhere left to accidentally sample -
+ * mirroring `buildImageFillsFrameDocument`'s own "generously overfill, no
+ * per-test camera-distance math" approach), a `CameraNode`, and ambient +
+ * directional lighting (a `ModelNode`'s cloned material is whatever the
+ * source GLTF authored - here, a lit `MeshStandardMaterial` - unlike
+ * `ImageNode`/`SatoriNode`'s always-unlit `MeshBasicMaterial`, so this needs
+ * real light to be visible at all, mirroring this file's own
+ * `buildLitBoxDocument`).
+ */
+function buildModelFillsFrameDocument(sceneId: string, compositionId: string, size: number, assetRef: string): SceneDocument {
+  const model = Model({
+    id: "model-1",
+    assetRef,
+    transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [4, 4, 4] },
+  });
+  const camera = Camera({
+    id: "camera-1",
+    transform: { position: [0, 0, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  });
+  const ambientLight = Light({ id: "light-ambient", lightType: "ambient", intensity: 1.5 });
+  const directionalLight = Light({
+    id: "light-directional",
+    transform: { position: [2, 3, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    lightType: "directional",
+    intensity: 1.5,
+  });
+  const composition = createComposition({
+    id: compositionId,
+    name: "Main",
+    fps: FPS,
+    durationInFrames: 1,
+    width: size,
+    height: size,
+    tracks: [
+      { id: "track-model", clips: [Sequence({ id: "clip-model", from: 0, durationInFrames: 1, content: model })] },
+      { id: "track-camera", clips: [Sequence({ id: "clip-camera", from: 0, durationInFrames: 1, content: camera })] },
+      { id: "track-ambient", clips: [Sequence({ id: "clip-ambient", from: 0, durationInFrames: 1, content: ambientLight })] },
+      { id: "track-directional", clips: [Sequence({ id: "clip-directional", from: 0, durationInFrames: 1, content: directionalLight })] },
+    ],
+  });
+  const withActiveCameraTrack: Composition = {
+    ...composition,
+    activeCameraTrack: [{ startFrame: 0, durationInFrames: 1, cameraNodeId: "camera-1" }],
+  };
+  const project: Project = createProject({ id: sceneId, name: "Frames model scene", compositions: [withActiveCameraTrack] });
+  return { schemaVersion: 1, project } as SceneDocument;
+}
+
+/**
+ * Proves `render_frames`' own native-GPU-headless path actually renders a
+ * real `ModelNode`, not the documented empty-group placeholder every
+ * `"model"` node silently fell back to before `buildModelRegistryForProject`
+ * existed (the reconciler's own `buildModelObject`/`applyModelProperties`,
+ * and the GLTF loader/registry beneath them, were fully built and
+ * independently tested - but had zero real callers anywhere in this
+ * codebase until this wiring).
+ */
+describe("render_frames: real ModelNode rendering", () => {
+  let workspaceRoot: string | undefined;
+  let client: Client | undefined;
+
+  afterEach(async () => {
+    await client?.close();
+    client = undefined;
+    if (workspaceRoot !== undefined) {
+      await rm(workspaceRoot, { recursive: true, force: true });
+      workspaceRoot = undefined;
+    }
+  });
+
+  it("renders a real ModelNode's own uploaded GLB mesh (a solid-color box), not the empty placeholder", async () => {
+    try {
+      const device = await createNativeGpuDevice();
+      device.destroy();
+    } catch (error) {
+      console.log(
+        "render_frames ModelNode e2e test: skipping, a real native WebGPU device could not be " +
+          `acquired on this machine (${String(error)}).`,
+      );
+      return;
+    }
+
+    workspaceRoot = await mkdtemp(join(tmpdir(), "cadra-render-frames-model-test-"));
+    const { server } = createCadraMcpServer({
+      config: { workspaceRoot, outputDirectory: join(workspaceRoot, "out") },
+      logger: createLogger("test", {}, () => {
+        // Swallow log output in tests.
+      }),
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const connectedClient = new Client({ name: "test-client", version: "0.0.0" });
+    await Promise.all([server.connect(serverTransport), connectedClient.connect(clientTransport)]);
+    client = connectedClient;
+
+    const glbBytes = await buildGlbBytes(0xff0000);
+    const uploadResult = await connectedClient.callTool({
+      name: UPLOAD_ASSET_TOOL_NAME,
+      arguments: { bytesBase64: Buffer.from(glbBytes).toString("base64"), contentType: "model/gltf-binary" },
+    });
+    const uploadPayload = parseJson<UploadAssetSummary>(uploadResult as ToolTextResult);
+    expect(uploadPayload.success).toBe(true);
+    const assetRef = uploadPayload.assetRef!;
+
+    await connectedClient.callTool({
+      name: CREATE_SCENE_TOOL_NAME,
+      arguments: {
+        sceneId: "frames-model-scene",
+        name: "Frames model scene",
+        composition: { id: "comp-1", name: "Main", fps: FPS, durationInFrames: 1, width: 32, height: 32 },
+      },
+    });
+    await connectedClient.callTool({
+      name: UPDATE_SCENE_TOOL_NAME,
+      arguments: {
+        sceneId: "frames-model-scene",
+        mode: "replace",
+        document: buildModelFillsFrameDocument("frames-model-scene", "comp-1", 32, assetRef),
+      },
+    });
+
+    const result = await connectedClient.callTool({
+      name: RENDER_FRAMES_TOOL_NAME,
+      arguments: { sceneId: "frames-model-scene", compositionId: "comp-1", frames: [0], seed: "frames-model-seed" },
+    });
+
+    const summary = parseSummary(result as ToolTextResult);
+    expect(summary.success).toBe(true);
+
+    const images = imageBlocks(result as ToolTextResult);
+    expect(images).toHaveLength(1);
+    const png = PNG.sync.read(Buffer.from(images[0]!.data, "base64"));
+
+    const centerPixel = pixelAt(png.data, png.width, 16, 16);
+    // Real, lit red box - not the placeholder (an empty group renders
+    // nothing at all, leaving this pixel transparent black instead).
+    expect(centerPixel.r).toBeGreaterThan(100);
+    expect(centerPixel.g).toBeLessThan(80);
+    expect(centerPixel.b).toBeLessThan(80);
+    expect(centerPixel.a).toBeGreaterThan(200);
+  }, 30_000);
+
+  it("renders visibly different output for two scenes whose only difference is their ModelNode's own GLB material color", async () => {
+    try {
+      const device = await createNativeGpuDevice();
+      device.destroy();
+    } catch (error) {
+      console.log(
+        "render_frames ModelNode color-diff e2e test: skipping, a real native WebGPU device could " +
+          `not be acquired on this machine (${String(error)}).`,
+      );
+      return;
+    }
+
+    workspaceRoot = await mkdtemp(join(tmpdir(), "cadra-render-frames-model-diff-test-"));
+    const { server } = createCadraMcpServer({
+      config: { workspaceRoot, outputDirectory: join(workspaceRoot, "out") },
+      logger: createLogger("test", {}, () => {
+        // Swallow log output in tests.
+      }),
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const connectedClient = new Client({ name: "test-client", version: "0.0.0" });
+    await Promise.all([server.connect(serverTransport), connectedClient.connect(clientTransport)]);
+    client = connectedClient;
+
+    const redGlbBytes = await buildGlbBytes(0xff0000);
+    const blueGlbBytes = await buildGlbBytes(0x0000ff);
+
+    const uploadRed = await connectedClient.callTool({
+      name: UPLOAD_ASSET_TOOL_NAME,
+      arguments: { bytesBase64: Buffer.from(redGlbBytes).toString("base64"), contentType: "model/gltf-binary" },
+    });
+    const redAssetRef = parseJson<UploadAssetSummary>(uploadRed as ToolTextResult).assetRef!;
+
+    const uploadBlue = await connectedClient.callTool({
+      name: UPLOAD_ASSET_TOOL_NAME,
+      arguments: { bytesBase64: Buffer.from(blueGlbBytes).toString("base64"), contentType: "model/gltf-binary" },
+    });
+    const blueAssetRef = parseJson<UploadAssetSummary>(uploadBlue as ToolTextResult).assetRef!;
+
+    async function renderWithModel(sceneId: string, assetRef: string): Promise<Buffer> {
+      await connectedClient.callTool({
+        name: CREATE_SCENE_TOOL_NAME,
+        arguments: {
+          sceneId,
+          name: "Frames model scene",
+          composition: { id: "comp-1", name: "Main", fps: FPS, durationInFrames: 1, width: 16, height: 16 },
+        },
+      });
+      await connectedClient.callTool({
+        name: UPDATE_SCENE_TOOL_NAME,
+        arguments: {
+          sceneId,
+          mode: "replace",
+          document: buildModelFillsFrameDocument(sceneId, "comp-1", 16, assetRef),
+        },
+      });
+      const result = await connectedClient.callTool({
+        name: RENDER_FRAMES_TOOL_NAME,
+        arguments: { sceneId, compositionId: "comp-1", frames: [0], seed: "fixed-seed" },
+      });
+      const images = imageBlocks(result as ToolTextResult);
+      expect(images).toHaveLength(1);
+      return Buffer.from(images[0]!.data, "base64");
+    }
+
+    const redOutput = await renderWithModel("frames-red-model", redAssetRef);
+    const blueOutput = await renderWithModel("frames-blue-model", blueAssetRef);
 
     expect(Buffer.compare(redOutput, blueOutput)).not.toBe(0);
   }, 30_000);

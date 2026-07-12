@@ -223,6 +223,7 @@ export {
 } from "./render-audio-mixdown.js";
 export type { EncodedRenderJobHandle, SubmitEncodedRenderJobOptions } from "./render-job.js";
 export {
+  buildModelRegistryForProject,
   buildSatoriLayerRenderRegistryForProject,
   buildTextRenderRegistryForProject,
   buildTextureRegistryForProject,
