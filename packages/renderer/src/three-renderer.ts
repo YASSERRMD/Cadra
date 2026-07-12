@@ -895,6 +895,7 @@ export class ThreeRenderer implements Renderer {
       this.resolvedBackend,
       frameContext.fps,
       sceneState.width / sceneState.height,
+      frameContext.seed,
     );
     if (reconciled === null) {
       // `buildSceneStateRoot` always returns a non-null SceneNode, so

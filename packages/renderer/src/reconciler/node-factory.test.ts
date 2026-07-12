@@ -9,6 +9,7 @@ import {
   type SceneNode,
   type TextPhysicsConfig,
   type TextStaggerConfig,
+  toNumericSeed,
   type VideoNode,
   type VolumeNode,
 } from "@cadra/core";
@@ -1406,6 +1407,35 @@ describe("node-factory: volumetric smoke (Phase 68)", () => {
 
     const customMesh = createThreeObject(volumeNode({ raymarchSteps: 40 }), ctx).object3D as THREE.Mesh;
     expect((customMesh.material as VolumeNodeMaterial).steps).toBe(40);
+  });
+
+  it("combines ctx.seed, node.id, and node.seed into the material's own numeric seed, matching VolumeNode.seed's own documented contract", () => {
+    const ctx: NodeFactoryContext = { ...makeCtx(), backend: "webgpu", seed: "render-seed" };
+    const node = volumeNode({ id: "volume-a", seed: 7 });
+    const built = createThreeObject(node, ctx);
+
+    const numericSeed = built.owned?.volume?.material.userData.volumeNumericSeed as number;
+    expect(numericSeed).toBe(toNumericSeed("render-seed:volume-a:7"));
+  });
+
+  it("gives two volume nodes with different ids (same ctx.seed and node.seed) different numeric seeds", () => {
+    const ctx: NodeFactoryContext = { ...makeCtx(), backend: "webgpu", seed: "render-seed" };
+    const builtA = createThreeObject(volumeNode({ id: "volume-a" }), ctx);
+    const builtB = createThreeObject(volumeNode({ id: "volume-b" }), ctx);
+
+    const seedA = builtA.owned?.volume?.material.userData.volumeNumericSeed;
+    const seedB = builtB.owned?.volume?.material.userData.volumeNumericSeed;
+    expect(seedA).not.toBe(seedB);
+  });
+
+  it("gives the same volume node a different numeric seed when ctx.seed (the composition/render seed) changes", () => {
+    const node = volumeNode({ id: "volume-a" });
+    const builtWithSeedOne = createThreeObject(node, { ...makeCtx(), backend: "webgpu", seed: "seed-one" });
+    const builtWithSeedTwo = createThreeObject(node, { ...makeCtx(), backend: "webgpu", seed: "seed-two" });
+
+    const seedOne = builtWithSeedOne.owned?.volume?.material.userData.volumeNumericSeed;
+    const seedTwo = builtWithSeedTwo.owned?.volume?.material.userData.volumeNumericSeed;
+    expect(seedOne).not.toBe(seedTwo);
   });
 
   it("resolves color and density (scaled by the color's own alpha) onto the material's mutable uniforms", () => {
