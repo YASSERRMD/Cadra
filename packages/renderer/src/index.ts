@@ -134,10 +134,18 @@ export type {
   Reconciler,
   ReconcilerOptions,
 } from "./reconciler/index.js";
-export type { GeometryRegistry, MaterialRegistry } from "./reconciler/index.js";
+export type {
+  GeometryRegistry,
+  MaterialRegistry,
+  MutableTextureRegistry,
+  TextureRegistry,
+} from "./reconciler/index.js";
 export {
   createDefaultGeometryRegistry,
   createDefaultMaterialRegistry,
+  createDefaultTextureRegistry,
+  createImageTexture,
+  createInMemoryTextureRegistry,
   createReconciler,
   DEFAULT_GEOMETRY_REFS,
   DEFAULT_MATERIAL_REFS,

@@ -1,4 +1,4 @@
-import { createComposition, createProject, type Project, Sequence, Shape } from "@cadra/core";
+import { createComposition, createProject, Image, type Project, Sequence, Shape } from "@cadra/core";
 import type {
   HeadlessBrowserLike,
   HeadlessConsoleMessageLike,
@@ -88,14 +88,20 @@ function createFakeRangePage(behavior: {
     endFrame: number;
   }) => Promise<SerializedEncodedChunk[]>;
   consoleLines?: Array<{ type: string; text: string }>;
-}): HeadlessPageLike & { addScriptCalls: number; progressCalls: Array<[number, number]> } {
+}): HeadlessPageLike & {
+  addScriptCalls: number;
+  progressCalls: Array<[number, number]>;
+  capturedConfigs: unknown[];
+} {
   const exposed = new Map<string, (...args: never[]) => unknown>();
   const consoleHandlers: Array<(message: HeadlessConsoleMessageLike) => void> = [];
   const progressCalls: Array<[number, number]> = [];
+  const capturedConfigs: unknown[] = [];
 
   const page = {
     addScriptCalls: 0,
     progressCalls,
+    capturedConfigs,
     async exposeFunction(name: string, fn: (...args: never[]) => unknown): Promise<void> {
       exposed.set(name, fn);
     },
@@ -117,6 +123,7 @@ function createFakeRangePage(behavior: {
       }
 
       const config = (arg as { config: { startFrame: number; endFrame: number } }).config;
+      capturedConfigs.push((arg as { config: unknown }).config);
       const progress = exposed.get("__cadraHeadlessProgress") as
         ((frame: number, totalFrames: number) => Promise<void>) | undefined;
       // Simulate one progress call per frame in this range, mirroring what
@@ -169,17 +176,20 @@ function createRangeAwareBrowserLauncher(
   launcher: () => Promise<HeadlessBrowserLike>;
   launchCount: () => number;
   browsers: ReturnType<typeof createFakeBrowser>[];
+  pages: ReturnType<typeof createFakeRangePage>[];
 } {
   let launchCount = 0;
   const browsers: ReturnType<typeof createFakeBrowser>[] = [];
+  const pages: ReturnType<typeof createFakeRangePage>[] = [];
   const launcher = async (): Promise<HeadlessBrowserLike> => {
     launchCount += 1;
     const page = createFakeRangePage({ renderRange });
+    pages.push(page);
     const browser = createFakeBrowser(page);
     browsers.push(browser);
     return browser;
   };
-  return { launcher, launchCount: () => launchCount, browsers };
+  return { launcher, launchCount: () => launchCount, browsers, pages };
 }
 
 describe("submitEncodedRenderJob: basic scheduling and final mux", () => {
@@ -359,6 +369,118 @@ describe("submitEncodedRenderJob: basic scheduling and final mux", () => {
     await handle.result;
 
     expect(snapshots[snapshots.length - 1]).toEqual({ status: "done", framesCompleted: 60 });
+  });
+});
+
+describe("submitEncodedRenderJob: image asset bytes", () => {
+  /** A project with 4 ImageNodes: two sharing one assetRef, one with a distinct assetRef, and one whose assetRef fetchAssetBytes will not resolve. */
+  function buildProjectWithImages(): Project {
+    const shape = Shape({ id: "shape-1" });
+    const imageA1 = Image({ id: "img-a1", assetRef: "cadra-asset://aaa" });
+    const imageA2 = Image({ id: "img-a2", assetRef: "cadra-asset://aaa" });
+    const imageB = Image({ id: "img-b", assetRef: "cadra-asset://bbb" });
+    const imageMissing = Image({ id: "img-missing", assetRef: "cadra-asset://missing" });
+    const composition = createComposition({
+      id: "comp-1",
+      name: "Main",
+      fps: 30,
+      durationInFrames: 30,
+      width: 64,
+      height: 36,
+      tracks: [
+        {
+          id: "track-1",
+          clips: [
+            Sequence({ id: "clip-shape", from: 0, durationInFrames: 30, content: shape }),
+            Sequence({ id: "clip-a1", from: 0, durationInFrames: 30, content: imageA1 }),
+            Sequence({ id: "clip-a2", from: 0, durationInFrames: 30, content: imageA2 }),
+            Sequence({ id: "clip-b", from: 0, durationInFrames: 30, content: imageB }),
+            Sequence({ id: "clip-missing", from: 0, durationInFrames: 30, content: imageMissing }),
+          ],
+        },
+      ],
+    });
+    return createProject({ id: "p1", name: "Project", compositions: [composition] });
+  }
+
+  it("fetches each distinct ImageNode.assetRef via fetchAssetBytes, dedupes repeats, and omits refs it cannot resolve", async () => {
+    const destination = createFakeDestination();
+    const { launcher, pages } = createRangeAwareBrowserLauncher(async (range) => {
+      const chunks: SerializedEncodedChunk[] = [];
+      for (let frame = range.startFrame; frame < range.endFrame; frame += 1) {
+        chunks.push(fakeSerializedChunk(frame));
+      }
+      return chunks;
+    });
+
+    const bytesByRef: Record<string, Uint8Array> = {
+      "cadra-asset://aaa": new Uint8Array([1, 2, 3]),
+      "cadra-asset://bbb": new Uint8Array([4, 5, 6, 7]),
+    };
+    const fetchCalls: string[] = [];
+    const fetchAssetBytes = async (assetRef: string): Promise<Uint8Array | undefined> => {
+      fetchCalls.push(assetRef);
+      return bytesByRef[assetRef];
+    };
+
+    const handle = await submitEncodedRenderJob({
+      project: buildProjectWithImages(),
+      compositionId: "comp-1",
+      seed: "s",
+      format: "mp4",
+      bitrate: 1_000_000,
+      destination,
+      entryFilePath: "/fake/entry.js",
+      browserLauncher: launcher,
+      bundleEntry: async () => "/* fake bundle */",
+      fetchAssetBytes,
+    });
+    await handle.result;
+
+    // Fetched once per distinct assetRef, not once per node: imageA1/imageA2
+    // share "cadra-asset://aaa" and must only trigger one fetch for it.
+    expect(fetchCalls.sort()).toEqual(["cadra-asset://aaa", "cadra-asset://bbb", "cadra-asset://missing"]);
+
+    const config = pages[0]?.capturedConfigs[0] as {
+      imageRenderEntries: Array<{ assetRef: string; bytes: number[] }>;
+    };
+    const entries = config.imageRenderEntries;
+    // "missing" never resolved, so it is silently omitted entirely, not
+    // present as an entry with empty/undefined bytes.
+    expect(entries.map((entry) => entry.assetRef).sort()).toEqual([
+      "cadra-asset://aaa",
+      "cadra-asset://bbb",
+    ]);
+    expect(entries.find((entry) => entry.assetRef === "cadra-asset://aaa")?.bytes).toEqual([1, 2, 3]);
+    expect(entries.find((entry) => entry.assetRef === "cadra-asset://bbb")?.bytes).toEqual([4, 5, 6, 7]);
+  });
+
+  it("sends an empty imageRenderEntries when fetchAssetBytes is not supplied, even though the project has ImageNodes", async () => {
+    const destination = createFakeDestination();
+    const { launcher, pages } = createRangeAwareBrowserLauncher(async (range) => {
+      const chunks: SerializedEncodedChunk[] = [];
+      for (let frame = range.startFrame; frame < range.endFrame; frame += 1) {
+        chunks.push(fakeSerializedChunk(frame));
+      }
+      return chunks;
+    });
+
+    const handle = await submitEncodedRenderJob({
+      project: buildProjectWithImages(),
+      compositionId: "comp-1",
+      seed: "s",
+      format: "mp4",
+      bitrate: 1_000_000,
+      destination,
+      entryFilePath: "/fake/entry.js",
+      browserLauncher: launcher,
+      bundleEntry: async () => "/* fake bundle */",
+      // fetchAssetBytes intentionally omitted.
+    });
+    await handle.result;
+
+    const config = pages[0]?.capturedConfigs[0] as { imageRenderEntries: unknown[] };
+    expect(config.imageRenderEntries).toEqual([]);
   });
 });
 

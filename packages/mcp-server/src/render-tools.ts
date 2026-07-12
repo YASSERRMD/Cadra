@@ -51,6 +51,7 @@ import { compositionRenderModeSchema, parseScene, pathTracingConfigSchema } from
 import type { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+import { createAssetBytesFetcher } from "./asset-store.js";
 import type { CadraMcpServerConfig } from "./config.js";
 import {
   bindReadyGenerationsForScene,
@@ -418,6 +419,7 @@ export function registerCadraRenderTools(
           bitrate,
           destination,
           entryFilePath: BROWSER_HEADLESS_RENDER_ENTRY_PATH,
+          fetchAssetBytes: createAssetBytesFetcher(config.workspaceRoot),
           ...(rangeSizeFrames !== undefined ? { rangeSizeFrames } : {}),
           ...(maxConcurrency !== undefined ? { maxConcurrency } : {}),
         });
@@ -681,6 +683,7 @@ export function registerCadraRenderTools(
           bitrate: DEFAULT_PROBE_BITRATE,
           destination,
           entryFilePath: BROWSER_HEADLESS_RENDER_ENTRY_PATH,
+          fetchAssetBytes: createAssetBytesFetcher(config.workspaceRoot),
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

@@ -149,6 +149,15 @@ export interface SubmitEncodedRenderJobOptions {
   bundleEntry?: (options: { entryFilePath: string }) => Promise<string>;
   /** Milliseconds allowed for one range attempt before it is treated as timed out and retried. Defaults to `DEFAULT_RANGE_TIMEOUT_MS`. */
   timeoutMs?: number;
+  /**
+   * Resolves an `ImageNode.assetRef` to that asset's own raw bytes, e.g.
+   * `@cadra/mcp-server`'s own `createAssetBytesFetcher(workspaceRoot)`.
+   * Omitted means every `ImageNode` in `project` renders as the renderer's
+   * own documented gray placeholder, matching this option's pre-existing
+   * behavior before it existed at all - see `buildImageRenderEntriesForProject`'s
+   * own doc for the full "unresolved is an expected runtime state" contract.
+   */
+  fetchAssetBytes?: (assetRef: string) => Promise<Uint8Array | undefined>;
 }
 
 /** Milliseconds allowed for one range attempt by default: 2 minutes. Shorter than `renderCompositionHeadlessServer`'s own 5-minute default, since a single range is, by construction, a fraction of a whole composition's frames. */
@@ -198,6 +207,12 @@ interface SerializedMsdfAtlasPage {
   png: number[];
 }
 
+/** Mirrors `browser-headless-render-entry.ts`'s own `SerializedImageRenderEntry`; duplicated (not imported) for the same reason `BrowserRangeConfigArg` below is - see its own doc. */
+interface SerializedImageRenderEntry {
+  assetRef: string;
+  bytes: number[];
+}
+
 /** Mirrors `browser-headless-render-entry.ts`'s own `SerializedTextRenderData`. */
 interface SerializedTextRenderData {
   atlasPages: SerializedMsdfAtlasPage[];
@@ -223,6 +238,7 @@ interface BrowserRangeConfigArg {
   endFrame: number;
   keyframeIntervalFrames: number;
   textRenderEntries: SerializedTextRenderEntry[];
+  imageRenderEntries: SerializedImageRenderEntry[];
 }
 
 /**
@@ -243,6 +259,16 @@ function collectTextNodes(node: SceneNode, out: TextNode[]): void {
   }
   for (const child of node.children) {
     collectTextNodes(child, out);
+  }
+}
+
+/** Recursively collects every distinct `ImageNode.assetRef` in `node`'s own subtree into `out`. */
+function collectImageAssetRefs(node: SceneNode, out: Set<string>): void {
+  if (node.kind === "image") {
+    out.add(node.assetRef);
+  }
+  for (const child of node.children) {
+    collectImageAssetRefs(child, out);
   }
 }
 
@@ -353,6 +379,55 @@ async function buildTextRenderEntriesForProject(
     fontBytes: Array.from(entry.fontBytes),
     fontContentHash: entry.fontContentHash,
   }));
+}
+
+/**
+ * Fetches every distinct `ImageNode.assetRef` found anywhere in `project`'s
+ * own scene graph (deduped, across every composition/track/clip) via
+ * `fetchAssetBytes`, and serializes the result to cross a `page.evaluate`
+ * structured-clone boundary - mirroring `buildTextRenderEntriesForProject`'s
+ * own purpose, one step simpler: no Node-only decoding happens here at all
+ * (a real browser's own `createImageBitmap` does that decoding, inside
+ * `browser-headless-render-entry.ts`'s own `buildTextureRegistry`), this
+ * only fetches and serializes raw bytes.
+ *
+ * `fetchAssetBytes` is optional and, when omitted, this returns `[]`
+ * immediately: a caller with no asset store to fetch from (e.g. a test, or
+ * any future caller with no asset-backed images at all) gets exactly
+ * `submitEncodedRenderJob`'s pre-Layer-2 behavior back, not a crash. An
+ * `assetRef` `fetchAssetBytes` itself cannot resolve (not actually stored,
+ * or any other lookup failure it chooses to report as `undefined` rather
+ * than throw) is silently omitted, not an error - matching
+ * `TextureRegistry.resolve`'s own "unresolved is an expected runtime state"
+ * contract: that `ImageNode` renders as the documented gray placeholder
+ * instead of failing the whole render job over one missing asset.
+ */
+async function buildImageRenderEntriesForProject(
+  project: Project,
+  fetchAssetBytes?: (assetRef: string) => Promise<Uint8Array | undefined>,
+): Promise<SerializedImageRenderEntry[]> {
+  if (fetchAssetBytes === undefined) {
+    return [];
+  }
+
+  const assetRefs = new Set<string>();
+  for (const composition of project.compositions) {
+    for (const track of composition.tracks) {
+      for (const clip of track.clips) {
+        collectImageAssetRefs(clip.node, assetRefs);
+      }
+    }
+  }
+
+  const entries: SerializedImageRenderEntry[] = [];
+  for (const assetRef of assetRefs) {
+    const bytes = await fetchAssetBytes(assetRef);
+    if (bytes === undefined) {
+      continue;
+    }
+    entries.push({ assetRef, bytes: Array.from(bytes) });
+  }
+  return entries;
 }
 
 /**
@@ -633,6 +708,10 @@ async function runEncodedRenderJob(
   // the exact same entries (see buildTextRenderEntriesForProject's own
   // doc), mirroring entrySource itself being bundled once and reused.
   const textRenderEntries = await buildTextRenderEntriesForProject(options.project);
+  const imageRenderEntries = await buildImageRenderEntriesForProject(
+    options.project,
+    options.fetchAssetBytes,
+  );
 
   const renderRange = (range: {
     rangeIndex: number;
@@ -649,6 +728,7 @@ async function runEncodedRenderJob(
         bitrate: options.bitrate,
         keyframeIntervalFrames,
         textRenderEntries,
+        imageRenderEntries,
       },
       range,
       options.onProgress,

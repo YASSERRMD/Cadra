@@ -1,10 +1,13 @@
 import { readFileSync } from "node:fs";
 
+import { Camera, createComposition, createProject, Image, type Project, Sequence } from "@cadra/core";
 import { BROWSER_ENTRY_GLOBAL_NAME, bundleBrowserEntry, launchPlaywrightHeadlessBrowser } from "@cadra/headless";
 import { chromium } from "playwright";
+import { PNG } from "pngjs";
 import { describe, expect, it } from "vitest";
 
 import { BROWSER_HEADLESS_RENDER_ENTRY_PATH } from "./browser-headless-render-entry-path.js";
+import type { SerializedEncodedChunk } from "./serialized-encoded-chunk.js";
 
 /**
  * This test lives in `@cadra/encode` for the same reason
@@ -182,6 +185,220 @@ describe("createRealReadPixels: cross-frame contamination regression", () => {
         // more than one frame transition, not just the first.
         expect(pixelAt(frame2, SIZE.width, POINT_A.x, POINT_A.y)).toEqual([...BOX_A.color, 255]);
         expect(pixelAt(frame2, SIZE.width, POINT_B.x, POINT_B.y)).toEqual(TRANSPARENT);
+      } finally {
+        await browser.close();
+      }
+    },
+    30_000,
+  );
+});
+
+/** A square PNG, solid pure red across its own top half and solid pure blue across its own bottom half - deliberately asymmetric top-vs-bottom so a vertical mirror (a flipY-class bug) is empirically distinguishable from correct orientation, not just "some real image content appeared." */
+function buildTwoToneTestPng(size: number): Buffer {
+  const png = new PNG({ width: size, height: size });
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const index = (size * y + x) << 2;
+      const isTopHalf = y < size / 2;
+      png.data[index] = isTopHalf ? 255 : 0;
+      png.data[index + 1] = 0;
+      png.data[index + 2] = isTopHalf ? 0 : 255;
+      png.data[index + 3] = 255;
+    }
+  }
+  return PNG.sync.write(png);
+}
+
+/**
+ * A project with a single `ImageNode` (real `assetRef`, scaled large enough
+ * to fill the entire frame at the camera's own distance/fov - see
+ * `IMAGE_SIZE`'s own doc) plus a `CameraNode`, no lights (the image's own
+ * `MeshBasicMaterial` is unlit, so a real render needs no light source to
+ * show its real texture at full color).
+ */
+function buildImageFillsFrameProject(assetRef: string): Project {
+  const image = Image({
+    id: "image-1",
+    assetRef,
+    transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [8, 8, 8] },
+  });
+  const camera = Camera({
+    id: "camera-1",
+    transform: { position: [0, 0, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  });
+
+  const composition = createComposition({
+    id: "comp-1",
+    name: "Main",
+    fps: 10,
+    durationInFrames: 1,
+    width: IMAGE_SIZE,
+    height: IMAGE_SIZE,
+    tracks: [
+      {
+        id: "track-image",
+        clips: [Sequence({ id: "clip-image", from: 0, durationInFrames: 1, content: image })],
+      },
+      {
+        id: "track-camera",
+        clips: [Sequence({ id: "clip-camera", from: 0, durationInFrames: 1, content: camera })],
+      },
+    ],
+  });
+
+  return createProject({
+    id: "image-e2e",
+    name: "Image e2e",
+    compositions: [{ ...composition, activeCameraTrack: [{ startFrame: 0, durationInFrames: 1, cameraNodeId: "camera-1" }] }],
+  });
+}
+
+/**
+ * Square, matching `buildImageFillsFrameProject`'s own square composition
+ * (so the default 50deg fov's vertical and horizontal frustum cross-sections
+ * at the camera's own 5-unit distance are equal): `2 * 5 * tan(25deg) ≈
+ * 4.66` units visible top-to-bottom at the image plane's own z=0, safely
+ * smaller than the image node's own 8-unit `transform.scale`, so the
+ * rendered plane overflows every edge of the frame with margin - no
+ * background pixel anywhere in the output to accidentally sample instead of
+ * the image's own real texture content.
+ */
+const IMAGE_SIZE = 32;
+
+describe("runBrowserHeadlessRenderRange: real ImageNode texture rendering", () => {
+  it(
+    "renders a real, uploaded image's own real pixel content, right-side up (not vertically mirrored, not the gray placeholder)",
+    async () => {
+      if (!chromiumAvailable) {
+        console.log(
+          "ImageNode texture rendering e2e test: skipping, real Chromium not found (no cached Playwright browser in this environment).",
+        );
+        return;
+      }
+
+      const entrySource = await bundleBrowserEntry({
+        entryFilePath: BROWSER_HEADLESS_RENDER_ENTRY_PATH,
+      });
+      const browser = await launchPlaywrightHeadlessBrowser({});
+      try {
+        const page = await browser.newPage();
+        await page.addScript(entrySource);
+
+        const assetRef = "cadra-asset://two-tone-test";
+        const pngBytes = buildTwoToneTestPng(IMAGE_SIZE);
+        const project = buildImageFillsFrameProject(assetRef);
+
+        const result = await page.evaluate(
+          async (arg: { globalName: string; project: Project; assetRef: string; pngBytes: number[] }) => {
+            const entry = (
+              window as unknown as Record<
+                string,
+                | {
+                    runBrowserHeadlessRenderRange: (config: {
+                      project: Project;
+                      compositionId: string;
+                      seed: string | number;
+                      bitrate: number;
+                      startFrame: number;
+                      endFrame: number;
+                      imageRenderEntries: Array<{ assetRef: string; bytes: number[] }>;
+                    }) => Promise<SerializedEncodedChunk[]>;
+                  }
+                | undefined
+              >
+            )[arg.globalName];
+            if (entry === undefined) {
+              throw new Error(`window["${arg.globalName}"] was not defined.`);
+            }
+
+            const chunks = await entry.runBrowserHeadlessRenderRange({
+              project: arg.project,
+              compositionId: "comp-1",
+              seed: "image-e2e-seed",
+              bitrate: 1_000_000,
+              startFrame: 0,
+              endFrame: 1,
+              imageRenderEntries: [{ assetRef: arg.assetRef, bytes: arg.pngBytes }],
+            });
+
+            const chunk = chunks[0];
+            if (chunk === undefined) {
+              throw new Error("Expected at least one encoded chunk.");
+            }
+
+            // codedWidth/codedHeight are given explicitly (not left for the
+            // decoder to infer from the bitstream alone): verified
+            // empirically that omitting them makes this same real chunk's
+            // own real decode fail outright ("EncodingError: Error during
+            // flush.") on this environment's own AV1 decoder implementation,
+            // even though VideoDecoderConfig's own spec marks both optional.
+            const decoderConfig = {
+              codec: chunk.codec!,
+              codedWidth: arg.project.compositions[0]!.width,
+              codedHeight: arg.project.compositions[0]!.height,
+              ...(chunk.description !== undefined
+                ? { description: Uint8Array.from(chunk.description) }
+                : {}),
+            };
+
+            // Decode the real, just-encoded chunk back to real pixels via a
+            // real in-page WebCodecs VideoDecoder - the same real browser,
+            // the same real codec this render itself just chose, no
+            // external decoder/tool needed.
+            const decodedFrame = await new Promise<VideoFrame>((resolve, reject) => {
+              const decoder = new VideoDecoder({
+                output: (frame) => resolve(frame),
+                error: (error) => reject(error),
+              });
+              decoder.configure(decoderConfig);
+              decoder.decode(
+                new EncodedVideoChunk({
+                  type: chunk.type,
+                  timestamp: chunk.timestamp,
+                  duration: chunk.duration,
+                  data: Uint8Array.from(chunk.data),
+                }),
+              );
+              decoder.flush().catch(() => {
+                // Any decode failure already surfaces through the `error`
+                // callback above, which rejects this same promise; a
+                // rejected flush() after that point would otherwise become
+                // an unhandled rejection with nothing left to reject.
+              });
+            });
+
+            const canvas = document.createElement("canvas");
+            canvas.width = decodedFrame.displayWidth;
+            canvas.height = decodedFrame.displayHeight;
+            const context = canvas.getContext("2d");
+            if (context === null) {
+              throw new Error("Failed to acquire a 2D context for the decoded-frame canvas.");
+            }
+            context.drawImage(decodedFrame, 0, 0);
+            decodedFrame.close();
+            const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+            return { width: canvas.width, height: canvas.height, data: Array.from(imageData.data) };
+          },
+          { globalName: BROWSER_ENTRY_GLOBAL_NAME, project, assetRef, pngBytes: Array.from(pngBytes) },
+        );
+
+        expect(result.width).toBe(IMAGE_SIZE);
+        expect(result.height).toBe(IMAGE_SIZE);
+
+        // Sampled a few pixels in from each edge/the vertical center, clear
+        // of any lossy-compression bleed at the red/blue boundary row.
+        const topPixel = pixelAt(result.data, result.width, 16, 4);
+        const bottomPixel = pixelAt(result.data, result.width, 16, 28);
+
+        // Top of frame: the source PNG's own top half was pure red. A
+        // flipY-class bug would show blue here instead (the source's own
+        // bottom half, mirrored to the top).
+        expect(topPixel[0]).toBeGreaterThan(150);
+        expect(topPixel[2]).toBeLessThan(100);
+
+        // Bottom of frame: the source PNG's own bottom half was pure blue.
+        expect(bottomPixel[2]).toBeGreaterThan(150);
+        expect(bottomPixel[0]).toBeLessThan(100);
       } finally {
         await browser.close();
       }

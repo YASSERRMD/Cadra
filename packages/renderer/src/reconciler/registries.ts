@@ -97,3 +97,59 @@ export function createDefaultTextureRegistry(): TextureRegistry {
     },
   };
 }
+
+/** A `TextureRegistry` a caller can also populate. Mirrors `MutableTextRenderRegistry`'s own shape (`../text/text-render-registry.ts`). */
+export interface MutableTextureRegistry extends TextureRegistry {
+  register(ref: string, texture: THREE.Texture): void;
+}
+
+/**
+ * A simple in-memory `MutableTextureRegistry`, backed by a `Map`. Unlike
+ * `createDefaultGeometryRegistry`/`createDefaultMaterialRegistry`, this
+ * seeds nothing on its own (there is no meaningful "default" texture to seed
+ * with, mirroring `createDefaultTextureRegistry`'s own empty default) - a
+ * caller populates it via `register`, e.g. once per resolved `ImageNode`
+ * asset, the same way `createInMemoryTextRenderRegistry` gets populated once
+ * per resolved `TextNode`.
+ */
+export function createInMemoryTextureRegistry(): MutableTextureRegistry {
+  const textures = new Map<string, THREE.Texture>();
+
+  return {
+    resolve(ref: string): THREE.Texture | undefined {
+      return textures.get(ref);
+    },
+    register(ref: string, texture: THREE.Texture): void {
+      textures.set(ref, texture);
+    },
+  };
+}
+
+/**
+ * Wraps an already-decoded `ImageBitmap` (a browser's own `createImageBitmap`
+ * result) into a `THREE.Texture` ready for a `TextureRegistry` to serve,
+ * mirroring `../svg-layer/create-svg-texture.ts`'s own "browser-decoded
+ * resource to GPU-ready texture" purpose for the image-asset case instead of
+ * the rasterized-SVG one. Lives here (not `../assets/image-loader.ts`,
+ * where `ImageBitmap` decoding itself is defined) because `image-loader.ts`
+ * is part of this package's Three.js-free `Renderer`-facing public surface
+ * (see `index.test.ts`'s own "no Three.js leakage" guard), while this
+ * `./reconciler` module is explicitly exempt: its whole point is producing
+ * real Three.js values.
+ *
+ * `colorSpace` is set to `THREE.SRGBColorSpace`: an uploaded image asset's
+ * bytes are real, visible sRGB-gamma-encoded color (the same reasoning
+ * `createSvgTexture` documents for its own rasterized pixels), not a
+ * colorless data channel. `flipY` is left at `THREE.Texture`'s own default
+ * (`true`): unlike `createSvgTexture`'s `THREE.DataTexture` (whose default
+ * is `false`, since a raw pixel buffer has no browser-decoder-imposed
+ * orientation convention of its own), an `ImageBitmap`-backed `THREE.Texture`
+ * is the standard, idiomatic way Three.js loads a photo/image texture, and
+ * changing this default would fight that convention rather than match it.
+ */
+export function createImageTexture(image: ImageBitmap): THREE.Texture {
+  const texture = new THREE.Texture(image);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}

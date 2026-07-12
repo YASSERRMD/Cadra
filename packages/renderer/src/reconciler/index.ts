@@ -16,10 +16,18 @@
 export type { NodeFactoryContext, OwnedResources } from "./node-factory.js";
 export type { Reconciler, ReconcilerOptions } from "./reconciler.js";
 export { createReconciler } from "./reconciler.js";
-export type { GeometryRegistry, MaterialRegistry } from "./registries.js";
+export type {
+  GeometryRegistry,
+  MaterialRegistry,
+  MutableTextureRegistry,
+  TextureRegistry,
+} from "./registries.js";
 export {
   createDefaultGeometryRegistry,
   createDefaultMaterialRegistry,
+  createDefaultTextureRegistry,
+  createImageTexture,
+  createInMemoryTextureRegistry,
   DEFAULT_GEOMETRY_REFS,
   DEFAULT_MATERIAL_REFS,
 } from "./registries.js";
