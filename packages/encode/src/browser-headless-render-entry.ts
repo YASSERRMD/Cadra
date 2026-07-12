@@ -97,7 +97,7 @@ interface SerializedTextRenderData {
  * `@cadra/renderer`), prepared ahead of time on the Node side (font
  * loading, HarfBuzz shaping, and MSDF atlas generation are all
  * Node-only-dependency-laden work that cannot run inside this bundled
- * browser page — see `@cadra/text/browser`'s own module doc for why) and
+ * browser page - see `@cadra/text/browser`'s own module doc for why) and
  * carried across `page.evaluate`'s structured-clone boundary as plain,
  * serializable data.
  */
