@@ -9,6 +9,7 @@ import {
   type SceneNode,
   type TextPhysicsConfig,
   type TextStaggerConfig,
+  type VideoNode,
   type VolumeNode,
 } from "@cadra/core";
 import type { PhysicsTransform } from "@cadra/physics";
@@ -25,6 +26,7 @@ import {
 } from "../svg-layer/satori-layer-render-registry.js";
 import type { TextGroupResources } from "../text/build-text-group.js";
 import { computeTextNodeRenderKey, createInMemoryTextRenderRegistry } from "../text/text-render-registry.js";
+import { computeVideoFrameRenderKey, createInMemoryVideoFrameRegistry } from "../video-layer/video-frame-registry.js";
 import { applyNodeProperties, createThreeObject, type NodeFactoryContext } from "./node-factory.js";
 import { createDefaultGeometryRegistry, createDefaultMaterialRegistry } from "./registries.js";
 
@@ -188,6 +190,153 @@ describe("node-factory: image texture rendering", () => {
       { id: "img", kind: "image", assetRef: "photo", transform: createIdentityTransform(), visible: true, children: [] },
       ctx,
     );
+    const geometry = (built.object3D as THREE.Mesh).geometry as THREE.PlaneGeometry;
+    expect(geometry.parameters.width).toBe(1);
+    expect(geometry.parameters.height).toBe(1);
+  });
+});
+
+describe("node-factory: video texture rendering", () => {
+  function videoNode(overrides: Partial<VideoNode> = {}): VideoNode {
+    return {
+      id: "clip",
+      kind: "video",
+      transform: createIdentityTransform(),
+      visible: true,
+      children: [],
+      assetRef: "movie",
+      opacity: 1,
+      ...overrides,
+    };
+  }
+
+  // A plain { width, height } object satisfies everything this
+  // reconciler's own frame-sizing logic reads off `entry.image`; a real
+  // ImageBitmap is a browser-only construct this Node test environment
+  // cannot create, exactly like "image texture rendering"'s own
+  // `fakeTexture` above.
+  function fakeVideoFrame(width: number, height: number): ImageBitmap {
+    return { width, height } as unknown as ImageBitmap;
+  }
+
+  it("falls back to the gray placeholder when no videoFrameRegistry is injected at all", () => {
+    const ctx = makeCtx();
+    const node = videoNode();
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+
+    const mesh = built.object3D as THREE.Mesh;
+    expect((mesh.material as THREE.MeshBasicMaterial).map).toBeNull();
+    expect(built.owned?.video).toBeUndefined();
+  });
+
+  it("falls back to the gray placeholder when videoFrameRegistry does not resolve this frame's render key", () => {
+    const videoFrameRegistry = createInMemoryVideoFrameRegistry();
+    const ctx: NodeFactoryContext = { ...makeCtx(), videoFrameRegistry };
+    const node = videoNode();
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+
+    const mesh = built.object3D as THREE.Mesh;
+    expect((mesh.material as THREE.MeshBasicMaterial).map).toBeNull();
+  });
+
+  it("renders the real decoded frame, sized to its own aspect ratio, once videoFrameRegistry resolves this frame's render key", () => {
+    const videoFrameRegistry = createInMemoryVideoFrameRegistry();
+    const ctx: NodeFactoryContext = { ...makeCtx(), videoFrameRegistry };
+    const node = videoNode();
+    const renderKey = computeVideoFrameRenderKey(node, 0);
+    videoFrameRegistry.register(renderKey, { image: fakeVideoFrame(1920, 1080) });
+
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+
+    const mesh = built.object3D as THREE.Mesh;
+    const geometry = mesh.geometry as THREE.PlaneGeometry;
+    expect(geometry.parameters.width).toBe(1);
+    expect(geometry.parameters.height).toBeCloseTo(1080 / 1920, 5);
+    expect((mesh.material as THREE.MeshBasicMaterial).map).not.toBeNull();
+    expect(built.owned?.video?.geometry).toBe(geometry);
+  });
+
+  it("resolves opacity per frame, independent of whether the render key changed", () => {
+    const videoFrameRegistry = createInMemoryVideoFrameRegistry();
+    const ctx: NodeFactoryContext = { ...makeCtx(), videoFrameRegistry };
+    const node = videoNode({
+      opacity: {
+        type: "keyframeTrack",
+        keyframes: [
+          { frame: 0, value: 0 },
+          { frame: 10, value: 1 },
+        ],
+      },
+    });
+    const renderKey = computeVideoFrameRenderKey(node, 0);
+    videoFrameRegistry.register(renderKey, { image: fakeVideoFrame(400, 200) });
+
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+    const mesh = built.object3D as THREE.Mesh;
+    expect((mesh.material as THREE.MeshBasicMaterial).opacity).toBe(0);
+
+    applyNodeProperties(node, built.object3D, ctx, 10, built.owned);
+    expect((mesh.material as THREE.MeshBasicMaterial).opacity).toBe(1);
+  });
+
+  it("swaps the geometry and material when a later composition frame resolves to a different source frame", () => {
+    const videoFrameRegistry = createInMemoryVideoFrameRegistry();
+    const ctx: NodeFactoryContext = { ...makeCtx(), videoFrameRegistry };
+    const node = videoNode();
+    const keyAtFrame0 = computeVideoFrameRenderKey(node, 0);
+    const keyAtFrame10 = computeVideoFrameRenderKey(node, 10);
+    expect(keyAtFrame0).not.toBe(keyAtFrame10);
+    videoFrameRegistry.register(keyAtFrame0, { image: fakeVideoFrame(400, 200) });
+    videoFrameRegistry.register(keyAtFrame10, { image: fakeVideoFrame(400, 200) });
+
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+    const mesh = built.object3D as THREE.Mesh;
+    const firstMaterial = mesh.material;
+    const firstGeometry = mesh.geometry;
+
+    applyNodeProperties(node, built.object3D, ctx, 10, built.owned);
+    expect(mesh.material).not.toBe(firstMaterial);
+    expect(mesh.geometry).not.toBe(firstGeometry);
+  });
+
+  it("does not rebuild the material or geometry across frames that resolve to the same source frame ('hold' past the trimmed range)", () => {
+    const videoFrameRegistry = createInMemoryVideoFrameRegistry();
+    const ctx: NodeFactoryContext = { ...makeCtx(), videoFrameRegistry };
+    const node = videoNode({ inFrame: 0, outFrame: 5, outOfRangeBehavior: "hold" });
+    const keyAtFrame5 = computeVideoFrameRenderKey(node, 5);
+    const keyAtFrame20 = computeVideoFrameRenderKey(node, 20);
+    expect(keyAtFrame5).toBe(keyAtFrame20);
+    videoFrameRegistry.register(keyAtFrame5, { image: fakeVideoFrame(400, 200) });
+
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 5, built.owned);
+    const mesh = built.object3D as THREE.Mesh;
+    const firstMaterial = mesh.material;
+    const firstGeometry = mesh.geometry;
+
+    // Both frames resolve to the same source frame (held past the trimmed
+    // range), so this second call must not rebuild anything - proving the
+    // "only rebuild when the key actually changes" optimization, not just
+    // that it happens to still look correct.
+    applyNodeProperties(node, built.object3D, ctx, 20, built.owned);
+    expect(mesh.material).toBe(firstMaterial);
+    expect(mesh.geometry).toBe(firstGeometry);
+  });
+
+  it("still renders a real frame when its own natural width/height cannot be read (falls back to a 1:1 aspect, not a crash)", () => {
+    const videoFrameRegistry = createInMemoryVideoFrameRegistry();
+    const ctx: NodeFactoryContext = { ...makeCtx(), videoFrameRegistry };
+    const node = videoNode();
+    const renderKey = computeVideoFrameRenderKey(node, 0);
+    videoFrameRegistry.register(renderKey, { image: {} as unknown as ImageBitmap });
+
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
     const geometry = (built.object3D as THREE.Mesh).geometry as THREE.PlaneGeometry;
     expect(geometry.parameters.width).toBe(1);
     expect(geometry.parameters.height).toBe(1);

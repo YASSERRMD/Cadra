@@ -175,6 +175,15 @@ export {
   ThreeRenderer,
 } from "./three-renderer.js";
 export type {
+  MutableVideoFrameRegistry,
+  VideoFrameRegistry,
+  VideoFrameRenderEntry,
+} from "./video-layer/video-frame-registry.js";
+export {
+  computeVideoFrameRenderKey,
+  createInMemoryVideoFrameRegistry,
+} from "./video-layer/video-frame-registry.js";
+export type {
   CreateBestAvailableRendererOptions,
   CreateWorkerFn,
   CreateWorkerRendererOptions,
