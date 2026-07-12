@@ -13,6 +13,7 @@ import {
   Shape,
   Text,
 } from "@cadra/core";
+import { createNativeGpuDevice } from "@cadra/headless";
 import type { SceneDocument } from "@cadra/schema";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -133,6 +134,24 @@ describe("render_frames", () => {
   });
 
   it("renders requested frames as real, decodable, non-blank, correctly-sized PNGs, including text", async () => {
+    // No cheap synchronous pre-check exists for native WebGPU device
+    // availability (acquiring a GPUDevice *is* the check) - mirrors
+    // @cadra/headless's own render-frame-native-gpu.e2e.test.ts guard
+    // exactly, for the same reason: a sandboxed CI runner with no GPU/
+    // software-Vulkan path at all must skip this real-render assertion
+    // cleanly rather than fail the whole suite over an environment gap
+    // unrelated to render_frames' own correctness.
+    try {
+      const device = await createNativeGpuDevice();
+      device.destroy();
+    } catch (error) {
+      console.log(
+        "render_frames real-render e2e test: skipping, a real native WebGPU device could not be " +
+          `acquired on this machine (${String(error)}).`,
+      );
+      return;
+    }
+
     const connectedClient = await connectClient();
     await connectedClient.callTool({
       name: CREATE_SCENE_TOOL_NAME,
