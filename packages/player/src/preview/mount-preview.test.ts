@@ -9,6 +9,7 @@ import {
   type SceneState,
   Sequence,
   Shape,
+  Video,
 } from "@cadra/core";
 import type { Renderer, RendererCapabilities, RenderSize, RenderTarget } from "@cadra/renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -21,6 +22,7 @@ import type {
   GainNodeLike,
 } from "../audio/audio-context-like.js";
 import type { NowFn, ScheduleFrameFn } from "../transport.js";
+import type { DecodeVideoFrameFn } from "../video/decode-video-frame.js";
 import { mountPreview, type PreviewHandle } from "./mount-preview.js";
 import type { ObservedSize, ObserveResizeFn, UnobserveResizeFn } from "./resize-observation.js";
 
@@ -1209,5 +1211,289 @@ describe("mountPreview: audio scheduling", () => {
     // actually resolves - mirroring the "silent until a real resolver is
     // wired up" contract this option's own doc describes.
     expect(audioContext.sourceNodes).toHaveLength(0);
+  });
+});
+
+/** A project whose sole video content is a VideoNode covering `[startFrame, DURATION_IN_FRAMES)`, so frames before `startFrame` have no video-backed content at all (useful for keeping a Transport's own initial-frame construction trivially ready, independent of whatever a test's own fake decodeVideoFrame does). */
+function buildProjectWithVideo(assetRef: string, startFrame: number): Project {
+  const composition = createComposition({
+    id: "comp-1",
+    name: "Main",
+    fps: FPS,
+    durationInFrames: DURATION_IN_FRAMES,
+    width: COMPOSITION_WIDTH,
+    height: COMPOSITION_HEIGHT,
+    tracks: [
+      {
+        id: "track-1",
+        clips: [
+          Sequence({
+            id: "clip-1",
+            from: startFrame,
+            durationInFrames: DURATION_IN_FRAMES - startFrame,
+            content: Video({ id: "video-node", assetRef }),
+          }),
+        ],
+      },
+    ],
+  });
+  return createProject({ id: "p1", name: "Project", compositions: [composition] });
+}
+
+/** A controllable-resolution fake `DecodeVideoFrameFn`: each distinct `(assetRef, frame)` call gets its own deferred promise, resolved on demand via the returned `resolve` function, mirroring `attach-frame-accurate-seeking.coexist.test.ts`'s own single-pair version, generalized to track every pair a test needs independent control over. */
+function createControllableDecodeVideoFrame(): {
+  decodeVideoFrame: DecodeVideoFrameFn;
+  calls: Array<[string, number]>;
+  resolve: (assetRef: string, frame: number) => void;
+} {
+  const calls: Array<[string, number]> = [];
+  const resolvers = new Map<string, () => void>();
+  const key = (assetRef: string, frame: number): string => `${assetRef}:${frame}`;
+
+  const decodeVideoFrame: DecodeVideoFrameFn = (assetRef, frame) => {
+    calls.push([assetRef, frame]);
+    return new Promise<void>((resolvePromise) => {
+      resolvers.set(key(assetRef, frame), resolvePromise);
+    });
+  };
+
+  return {
+    decodeVideoFrame,
+    calls,
+    resolve: (assetRef, frame) => {
+      resolvers.get(key(assetRef, frame))?.();
+    },
+  };
+}
+
+/** A fake `DecodeVideoFrameFn` that always resolves immediately - for tests that only care whether decode was *requested* (e.g. prefetch), not about controlling exactly when it settles. */
+function createImmediateDecodeVideoFrame(): {
+  decodeVideoFrame: DecodeVideoFrameFn;
+  calls: Array<[string, number]>;
+} {
+  const calls: Array<[string, number]> = [];
+  const decodeVideoFrame: DecodeVideoFrameFn = async (assetRef, frame) => {
+    calls.push([assetRef, frame]);
+  };
+  return { decodeVideoFrame, calls };
+}
+
+describe("mountPreview: frame-accurate video seeking and prefetch", () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    container.remove();
+  });
+
+  it("does not gate seeking on video readiness when decodeVideoFrame is omitted, even for a project with video content", async () => {
+    const project = buildProjectWithVideo("video-asset", 20);
+    const renderer = createFakeRenderer();
+    const { observeResize } = createFakeResizeObserver();
+
+    const handle = mountPreview(container, { project, compositionId: "comp-1", renderer, observeResize });
+    await flushMicrotasks();
+
+    handle.seek(25);
+    // No decodeVideoFrame given: seek() applies immediately, exactly like
+    // every other mountPreview call with no video content at all.
+    expect(handle.getFrame()).toBe(25);
+  });
+
+  it("gates seek() on video content readiness once decodeVideoFrame is given, applying the frame only once decoding resolves", async () => {
+    const assetRef = "video-asset";
+    const project = buildProjectWithVideo(assetRef, 20);
+    const renderer = createFakeRenderer();
+    const { observeResize } = createFakeResizeObserver();
+    const { decodeVideoFrame, calls, resolve } = createControllableDecodeVideoFrame();
+
+    const handle = mountPreview(container, {
+      project,
+      compositionId: "comp-1",
+      renderer,
+      observeResize,
+      decodeVideoFrame,
+    });
+    await flushMicrotasks();
+
+    handle.seek(25);
+    await flushMicrotasks();
+
+    // Not yet decoded: the seek is gated, currentFrame has not moved.
+    expect(handle.getFrame()).toBe(0);
+    expect(calls).toContainEqual([assetRef, 25]);
+
+    resolve(assetRef, 25);
+    // attachFrameAccurateSeeking's own gated path is a longer promise chain
+    // than a plain renderer.init() resolution (Promise.all over every
+    // not-ready pair, each itself a decode().then(markReady).finally(...)
+    // chain, then one more .then() to actually call through to the real
+    // seek): a fixed, small number of microtask ticks is not reliably
+    // enough to drain all of it, so this awaits a real macrotask turn
+    // instead, mirroring attach-frame-accurate-seeking.coexist.test.ts's
+    // own identical flush technique for the same reason.
+    await new Promise((resolveTimeout) => setTimeout(resolveTimeout, 0));
+
+    expect(handle.getFrame()).toBe(25);
+  });
+
+  it("composes with a caller-supplied isFrameReady via logical AND during ordinary tick-driven playback - both must agree a frame is ready", async () => {
+    const assetRef = "video-asset";
+    // Video content across the whole timeline (not just from some later
+    // frame): every candidate frame tick() considers needs its own video
+    // readiness check, so an always-false callerIsFrameReady being ignored
+    // would be observable at the very first tick already.
+    const project = buildProjectWithVideo(assetRef, 0);
+    const renderer = createFakeRenderer();
+    const { observeResize } = createFakeResizeObserver();
+    const clock = createFakeClock(0);
+    const scheduler = createFakeScheduler();
+    // Resolves every video decode immediately: video readiness alone would
+    // never block playback from advancing.
+    const { decodeVideoFrame } = createImmediateDecodeVideoFrame();
+    // But the caller's own isFrameReady always reports "not ready" - if the
+    // composition silently dropped this in favor of the video-only check,
+    // playback below would advance anyway.
+    const callerIsFrameReady = vi.fn(() => false);
+
+    const handle = mountPreview(container, {
+      project,
+      compositionId: "comp-1",
+      renderer,
+      observeResize,
+      now: clock.now,
+      scheduleFrame: scheduler.scheduleFrame,
+      cancelFrame: scheduler.cancelFrame,
+      decodeVideoFrame,
+      isFrameReady: callerIsFrameReady,
+    });
+    await flushMicrotasks();
+
+    handle.play();
+    clock.advance(1000); // well over a frame's worth of elapsed time at any real fps
+    scheduler.fireNext();
+    clock.advance(1000);
+    scheduler.fireNext();
+
+    // Never advanced past frame 0, despite video readiness alone (an
+    // immediately-resolving decode) being satisfiable: the caller's own
+    // isFrameReady, composed in, is what is still blocking it.
+    expect(handle.getFrame()).toBe(0);
+    expect(callerIsFrameReady).toHaveBeenCalled();
+  });
+
+  it("proactively prefetches video content around the initial playhead, without waiting for a seek", async () => {
+    const assetRef = "video-asset";
+    // Video content starting at frame 0, so the default ±3 prefetch window
+    // around the initial playhead (frame 0) has real video-backed frames to
+    // warm: frames 0, 1, 2, 3 (negative offsets clamp away).
+    const project = buildProjectWithVideo(assetRef, 0);
+    const renderer = createFakeRenderer();
+    const { observeResize } = createFakeResizeObserver();
+    const { decodeVideoFrame, calls } = createImmediateDecodeVideoFrame();
+
+    mountPreview(container, {
+      project,
+      compositionId: "comp-1",
+      renderer,
+      observeResize,
+      decodeVideoFrame,
+    });
+    await flushMicrotasks();
+
+    const framesRequested = calls.filter(([ref]) => ref === assetRef).map(([, frame]) => frame);
+    for (const frame of [0, 1, 2, 3]) {
+      expect(framesRequested).toContain(frame);
+    }
+  });
+
+  it("honors a narrower videoPrefetchWindowSize", async () => {
+    const assetRef = "video-asset";
+    const project = buildProjectWithVideo(assetRef, 0);
+    const renderer = createFakeRenderer();
+    const { observeResize } = createFakeResizeObserver();
+    const { decodeVideoFrame, calls } = createImmediateDecodeVideoFrame();
+
+    mountPreview(container, {
+      project,
+      compositionId: "comp-1",
+      renderer,
+      observeResize,
+      decodeVideoFrame,
+      videoPrefetchWindowSize: 1,
+    });
+    await flushMicrotasks();
+
+    const framesRequested = new Set(calls.filter(([ref]) => ref === assetRef).map(([, frame]) => frame));
+    expect(framesRequested).toEqual(new Set([0, 1]));
+  });
+
+  it("disposes frame-accurate seeking and prefetch cleanly alongside audio - the previously-scheduled audio source is stopped, and no error is thrown", async () => {
+    const videoAssetRef = "video-asset";
+    const audioAssetRef = "cadra-asset://track";
+    // Both video and audio content, both starting at frame 0, so both
+    // systems have something real to attach to and interact through.
+    const composition = createComposition({
+      id: "comp-1",
+      name: "Main",
+      fps: FPS,
+      durationInFrames: DURATION_IN_FRAMES,
+      width: COMPOSITION_WIDTH,
+      height: COMPOSITION_HEIGHT,
+      tracks: [
+        {
+          id: "track-1",
+          clips: [
+            Sequence({
+              id: "clip-1",
+              from: 0,
+              durationInFrames: DURATION_IN_FRAMES,
+              content: Video({ id: "video-node", assetRef: videoAssetRef }),
+            }),
+          ],
+        },
+      ],
+    });
+    const audioTrack: AudioTrack = {
+      id: "audio-track-1",
+      clips: [{ id: "audio-clip-1", startFrame: 0, durationInFrames: DURATION_IN_FRAMES, assetRef: audioAssetRef }],
+    };
+    const withAudioTrack: Composition = { ...composition, audioTracks: [audioTrack] };
+    const project = createProject({ id: "p1", name: "Project", compositions: [withAudioTrack] });
+
+    const renderer = createFakeRenderer();
+    const { observeResize } = createFakeResizeObserver();
+    const { decodeVideoFrame } = createImmediateDecodeVideoFrame();
+    const audioContext = createFakeAudioContext();
+    const buffer = createFakeAudioBuffer();
+
+    const handle = mountPreview(container, {
+      project,
+      compositionId: "comp-1",
+      renderer,
+      observeResize,
+      decodeVideoFrame,
+      resolveAudioBuffer: (ref) => (ref === audioAssetRef ? buffer : undefined),
+      audioContext,
+    });
+    await flushMicrotasks();
+    expect(audioContext.sourceNodes.length).toBeGreaterThan(0);
+    const scheduledSource = audioContext.sourceNodes[0]!;
+    expect(scheduledSource.stopCalls).toHaveLength(0);
+
+    handle.seek(10);
+    await flushMicrotasks();
+
+    expect(() => handle.dispose()).not.toThrow();
+    // Every source node ever created got stopped by the time dispose()
+    // finished - none left dangling, regardless of how many seeks created
+    // fresh ones in between.
+    for (const source of audioContext.sourceNodes) {
+      expect(source.stopCalls.length).toBeGreaterThan(0);
+    }
   });
 });
