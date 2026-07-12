@@ -1,4 +1,12 @@
-import { createComposition, createProject, Image, type Project, Sequence, Shape } from "@cadra/core";
+import {
+  createComposition,
+  createProject,
+  Image,
+  type Project,
+  Sequence,
+  Shape,
+  Video,
+} from "@cadra/core";
 import type {
   HeadlessBrowserLike,
   HeadlessConsoleMessageLike,
@@ -483,6 +491,226 @@ describe("submitEncodedRenderJob: image asset bytes", () => {
 
     const config = pages[0]?.capturedConfigs[0] as { imageRenderEntries: unknown[] };
     expect(config.imageRenderEntries).toEqual([]);
+  });
+});
+
+describe("submitEncodedRenderJob: video asset bytes and per-range needed samples", () => {
+  /** A project with 4 VideoNodes: two sharing one assetRef, one with a distinct assetRef, and one whose assetRef fetchAssetBytes will not resolve. Mirrors `buildProjectWithImages`'s own shape exactly. */
+  function buildProjectWithVideos(): Project {
+    const shape = Shape({ id: "shape-1" });
+    const videoA1 = Video({ id: "vid-a1", assetRef: "cadra-asset://aaa" });
+    const videoA2 = Video({ id: "vid-a2", assetRef: "cadra-asset://aaa" });
+    const videoB = Video({ id: "vid-b", assetRef: "cadra-asset://bbb" });
+    const videoMissing = Video({ id: "vid-missing", assetRef: "cadra-asset://missing" });
+    const composition = createComposition({
+      id: "comp-1",
+      name: "Main",
+      fps: 30,
+      durationInFrames: 30,
+      width: 64,
+      height: 36,
+      tracks: [
+        {
+          id: "track-1",
+          clips: [
+            Sequence({ id: "clip-shape", from: 0, durationInFrames: 30, content: shape }),
+            Sequence({ id: "clip-a1", from: 0, durationInFrames: 30, content: videoA1 }),
+            Sequence({ id: "clip-a2", from: 0, durationInFrames: 30, content: videoA2 }),
+            Sequence({ id: "clip-b", from: 0, durationInFrames: 30, content: videoB }),
+            Sequence({ id: "clip-missing", from: 0, durationInFrames: 30, content: videoMissing }),
+          ],
+        },
+      ],
+    });
+    return createProject({ id: "p1", name: "Project", compositions: [composition] });
+  }
+
+  it("fetches each distinct VideoNode.assetRef via fetchAssetBytes, dedupes repeats, and omits refs it cannot resolve", async () => {
+    const destination = createFakeDestination();
+    const { launcher, pages } = createRangeAwareBrowserLauncher(async (range) => {
+      const chunks: SerializedEncodedChunk[] = [];
+      for (let frame = range.startFrame; frame < range.endFrame; frame += 1) {
+        chunks.push(fakeSerializedChunk(frame));
+      }
+      return chunks;
+    });
+
+    const bytesByRef: Record<string, Uint8Array> = {
+      "cadra-asset://aaa": new Uint8Array([1, 2, 3]),
+      "cadra-asset://bbb": new Uint8Array([4, 5, 6, 7]),
+    };
+    const fetchCalls: string[] = [];
+    const fetchAssetBytes = async (assetRef: string): Promise<Uint8Array | undefined> => {
+      fetchCalls.push(assetRef);
+      return bytesByRef[assetRef];
+    };
+
+    const handle = await submitEncodedRenderJob({
+      project: buildProjectWithVideos(),
+      compositionId: "comp-1",
+      seed: "s",
+      format: "mp4",
+      bitrate: 1_000_000,
+      destination,
+      entryFilePath: "/fake/entry.js",
+      browserLauncher: launcher,
+      bundleEntry: async () => "/* fake bundle */",
+      fetchAssetBytes,
+    });
+    await handle.result;
+
+    // Fetched once per distinct assetRef, not once per node: vidA1/vidA2
+    // share "cadra-asset://aaa" and must only trigger one fetch for it.
+    expect(fetchCalls.sort()).toEqual(["cadra-asset://aaa", "cadra-asset://bbb", "cadra-asset://missing"]);
+
+    const config = pages[0]?.capturedConfigs[0] as {
+      videoAssetEntries: Array<{ assetRef: string; bytes: number[] }>;
+    };
+    const entries = config.videoAssetEntries;
+    // "missing" never resolved, so it is silently omitted entirely, not
+    // present as an entry with empty/undefined bytes.
+    expect(entries.map((entry) => entry.assetRef).sort()).toEqual([
+      "cadra-asset://aaa",
+      "cadra-asset://bbb",
+    ]);
+    expect(entries.find((entry) => entry.assetRef === "cadra-asset://aaa")?.bytes).toEqual([1, 2, 3]);
+    expect(entries.find((entry) => entry.assetRef === "cadra-asset://bbb")?.bytes).toEqual([4, 5, 6, 7]);
+  });
+
+  it("sends an empty videoAssetEntries when fetchAssetBytes is not supplied, even though the project has VideoNodes", async () => {
+    const destination = createFakeDestination();
+    const { launcher, pages } = createRangeAwareBrowserLauncher(async (range) => {
+      const chunks: SerializedEncodedChunk[] = [];
+      for (let frame = range.startFrame; frame < range.endFrame; frame += 1) {
+        chunks.push(fakeSerializedChunk(frame));
+      }
+      return chunks;
+    });
+
+    const handle = await submitEncodedRenderJob({
+      project: buildProjectWithVideos(),
+      compositionId: "comp-1",
+      seed: "s",
+      format: "mp4",
+      bitrate: 1_000_000,
+      destination,
+      entryFilePath: "/fake/entry.js",
+      browserLauncher: launcher,
+      bundleEntry: async () => "/* fake bundle */",
+      // fetchAssetBytes intentionally omitted.
+    });
+    await handle.result;
+
+    const config = pages[0]?.capturedConfigs[0] as { videoAssetEntries: unknown[] };
+    expect(config.videoAssetEntries).toEqual([]);
+  });
+
+  it("computes videoSamplesNeeded per range via resolveVideoSourceFrame, deduped by (assetRef, sourceFrame) and independent across distinct assetRefs", async () => {
+    // "held" plays at 1x from source frame 10, trimmed to [10, 14]: frames
+    // 0,1,2 (range 1) map to source frames 10,11,12 (untouched); frames
+    // 3,4,5 (range 2) map to 13, 14, and (frame 5's raw 15 exceeds
+    // outFrame=14) held at 14 again - deliberately covering both the
+    // out-of-range hold path and same-range (assetRef, sourceFrame) dedup
+    // (frame 4 and frame 5 both resolve to source frame 14).
+    const held = Video({
+      id: "vid-held",
+      assetRef: "cadra-asset://held",
+      inFrame: 10,
+      outFrame: 14,
+      playbackRate: 1,
+      outOfRangeBehavior: "hold",
+    });
+    // "plain" has no inFrame/outFrame/playbackRate override, so its own
+    // source frame always equals the composition-absolute frame directly -
+    // proving distinct assetRefs never collapse into each other's own
+    // pairs even where their own sourceFrame numbers coincide (e.g. both
+    // "held" and "plain" resolve to source frame 13/14 at different
+    // frames, and must appear as two separate entries, not deduped
+    // against each other).
+    const plain = Video({ id: "vid-plain", assetRef: "cadra-asset://plain" });
+
+    const composition = createComposition({
+      id: "comp-1",
+      name: "Main",
+      fps: 30,
+      durationInFrames: 6,
+      width: 64,
+      height: 36,
+      tracks: [
+        {
+          id: "track-1",
+          clips: [
+            Sequence({ id: "clip-held", from: 0, durationInFrames: 6, content: held }),
+            Sequence({ id: "clip-plain", from: 0, durationInFrames: 6, content: plain }),
+          ],
+        },
+      ],
+    });
+    const project = createProject({ id: "p1", name: "Project", compositions: [composition] });
+
+    const destination = createFakeDestination();
+    const { launcher, pages } = createRangeAwareBrowserLauncher(async (range) => {
+      const chunks: SerializedEncodedChunk[] = [];
+      for (let frame = range.startFrame; frame < range.endFrame; frame += 1) {
+        chunks.push(fakeSerializedChunk(frame, 30));
+      }
+      return chunks;
+    });
+
+    const handle = await submitEncodedRenderJob({
+      project,
+      compositionId: "comp-1",
+      seed: "s",
+      format: "mp4",
+      bitrate: 1_000_000,
+      destination,
+      entryFilePath: "/fake/entry.js",
+      rangeSizeFrames: 3,
+      rangeAlignmentFrames: 3,
+      browserLauncher: launcher,
+      bundleEntry: async () => "/* fake bundle */",
+    });
+    await handle.result;
+
+    const sortSamples = (
+      samples: readonly { assetRef: string; sourceFrame: number }[],
+    ): { assetRef: string; sourceFrame: number }[] =>
+      [...samples].sort(
+        (a, b) => a.assetRef.localeCompare(b.assetRef) || a.sourceFrame - b.sourceFrame,
+      );
+
+    const configs = pages
+      .map((page) => page.capturedConfigs[0] as { startFrame: number; videoSamplesNeeded: unknown })
+      .sort((a, b) => a.startFrame - b.startFrame);
+    expect(configs.map((config) => config.startFrame)).toEqual([0, 3]);
+
+    expect(
+      sortSamples(configs[0]?.videoSamplesNeeded as { assetRef: string; sourceFrame: number }[]),
+    ).toEqual(
+      sortSamples([
+        { assetRef: "cadra-asset://held", sourceFrame: 10 },
+        { assetRef: "cadra-asset://held", sourceFrame: 11 },
+        { assetRef: "cadra-asset://held", sourceFrame: 12 },
+        { assetRef: "cadra-asset://plain", sourceFrame: 0 },
+        { assetRef: "cadra-asset://plain", sourceFrame: 1 },
+        { assetRef: "cadra-asset://plain", sourceFrame: 2 },
+      ]),
+    );
+
+    // Range [3, 6): "held" only contributes 2 distinct entries (13, 14),
+    // not 3, proving frame 4 (raw 14) and frame 5 (raw 15, held at 14)
+    // dedupe into one.
+    expect(
+      sortSamples(configs[1]?.videoSamplesNeeded as { assetRef: string; sourceFrame: number }[]),
+    ).toEqual(
+      sortSamples([
+        { assetRef: "cadra-asset://held", sourceFrame: 13 },
+        { assetRef: "cadra-asset://held", sourceFrame: 14 },
+        { assetRef: "cadra-asset://plain", sourceFrame: 3 },
+        { assetRef: "cadra-asset://plain", sourceFrame: 4 },
+        { assetRef: "cadra-asset://plain", sourceFrame: 5 },
+      ]),
+    );
   });
 });
 

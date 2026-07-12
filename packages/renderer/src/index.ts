@@ -180,6 +180,7 @@ export type {
   VideoFrameRenderEntry,
 } from "./video-layer/video-frame-registry.js";
 export {
+  computeVideoFrameCacheKey,
   computeVideoFrameRenderKey,
   createInMemoryVideoFrameRegistry,
 } from "./video-layer/video-frame-registry.js";

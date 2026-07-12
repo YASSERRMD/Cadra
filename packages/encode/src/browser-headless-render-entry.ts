@@ -6,14 +6,21 @@ import {
   renderComposition,
 } from "@cadra/headless";
 import {
+  computeVideoFrameCacheKey,
   createImageTexture,
   createInMemoryTextRenderRegistry,
   createInMemoryTextureRegistry,
+  createInMemoryVideoFrameRegistry,
   createPixelReadableRenderer,
   createRenderer,
+  type DecodeVideo,
   type PixelBuffer,
+  type SampleAtTimestamp,
+  sampleVideoFrame,
   type TextRenderRegistry,
   type TextureRegistry,
+  type VideoFrameRegistry,
+  type VideoSource,
 } from "@cadra/renderer";
 import type { PositionedGlyph } from "@cadra/text/browser";
 
@@ -208,6 +215,201 @@ async function buildTextureRegistry(
   return registry;
 }
 
+/**
+ * One `VideoNode.assetRef` this project needs, fetched ahead of time on the
+ * Node side (`@cadra/encode`'s own `render-job.ts`, via the same
+ * `fetchAssetBytes` seam `SerializedImageRenderEntry` already uses) and
+ * carried across `page.evaluate`'s structured-clone boundary as plain,
+ * serializable data - mirroring `SerializedImageRenderEntry`'s own purpose
+ * exactly: real decoding (`createRealDecodeVideo` below) happens here, in
+ * the page, not ahead of time, for the same "a real browser's own decoder is
+ * the only correct one for an arbitrary uploaded format" reason images
+ * already establish.
+ */
+export interface SerializedVideoAssetEntry {
+  /** The `VideoNode.assetRef` this entry serves. */
+  assetRef: string;
+  /** The asset's raw, still-encoded bytes. */
+  bytes: number[];
+}
+
+/**
+ * One `(assetRef, sourceFrame)` pair this range's own `[startFrame,
+ * endFrame)` actually needs a decoded frame for, precomputed on the Node
+ * side (`render-job.ts`'s own `computeNeededVideoSamplesForRange`, via
+ * `resolveVideoSourceFrame` over every `VideoNode` found in the project's
+ * scene graph) rather than recomputed here: every `VideoNode` field
+ * `resolveVideoSourceFrame` reads (`inFrame`/`outFrame`/`playbackRate`/
+ * `outOfRangeBehavior`) is a plain, non-keyframeable value (see
+ * `VideoNode`'s own doc), so this arithmetic never depends on anything only
+ * a full scene resolve could provide, and doing it once, Node-side, avoids
+ * every one of a job's parallel range pages needing its own copy of the
+ * project-wide scene-graph-walk logic `collectVideoNodes` already is.
+ */
+export interface VideoSampleRequest {
+  /** The `VideoNode.assetRef` this request samples. */
+  assetRef: string;
+  /** The exact source-video-local frame to sample, i.e. `resolveVideoSourceFrame`'s own return value for some composition-absolute frame in this range. */
+  sourceFrame: number;
+}
+
+/**
+ * Real, in-page `DecodeVideo`: wraps `bytes` in a `Blob`/object URL and
+ * loads it into a real `HTMLVideoElement`, resolving once `loadeddata`
+ * fires - unlike `loadedmetadata` (duration/dimensions known, but no
+ * guarantee a frame is actually decoded/paintable yet), `loadeddata`
+ * specifically guarantees the element's very first frame is available,
+ * which `createRealSampleAtTimestamp`'s own "already at this timestamp,
+ * skip the seek" fast path (below) depends on being true immediately after
+ * this resolves for the common `sourceFrame: 0` case.
+ */
+function createRealDecodeVideo(): DecodeVideo {
+  return (bytes) =>
+    new Promise<VideoSource>((resolve, reject) => {
+      // Uint8Array.from(bytes), not bytes directly: bytes's own declared
+      // type (DecodeVideo's own signature) is generic over its backing
+      // buffer (Uint8Array<ArrayBufferLike>), which BlobPart's stricter
+      // Uint8Array<ArrayBuffer> does not accept - the same normalization
+      // buildTextureRegistry's own Blob construction already needs, for
+      // the same reason (see its own call site).
+      const blob = new Blob([Uint8Array.from(bytes)]);
+      const video = document.createElement("video");
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = "auto";
+
+      const onLoaded = (): void => {
+        video.removeEventListener("error", onError);
+        resolve(video);
+      };
+      const onError = (): void => {
+        video.removeEventListener("loadeddata", onLoaded);
+        reject(video.error instanceof Error ? video.error : new Error("video decode failed to load"));
+      };
+      video.addEventListener("loadeddata", onLoaded, { once: true });
+      video.addEventListener("error", onError, { once: true });
+      video.src = URL.createObjectURL(blob);
+    });
+}
+
+/**
+ * Real, in-page `SampleAtTimestamp`: seeks `source` (an `HTMLVideoElement`,
+ * see `createRealDecodeVideo`) to `timestamp` and captures the resulting
+ * frame via `createImageBitmap`.
+ *
+ * Skips the seek (and its `seeked` event wait) entirely when `source` is
+ * already sitting at `timestamp` (within a small epsilon): a fresh element
+ * starts at `currentTime === 0`, so requesting `timestamp === 0` (the
+ * common first sample of any asset) would otherwise assign `.currentTime`
+ * to the value it already holds - a no-op the spec does not guarantee fires
+ * `seeked` at all, which would hang this function forever.
+ */
+function createRealSampleAtTimestamp(): SampleAtTimestamp {
+  return async (source, timestamp) => {
+    const video = source as HTMLVideoElement;
+
+    if (Math.abs(video.currentTime - timestamp) > 1e-4) {
+      await new Promise<void>((resolve, reject) => {
+        const onSeeked = (): void => {
+          video.removeEventListener("error", onError);
+          resolve();
+        };
+        const onError = (): void => {
+          video.removeEventListener("seeked", onSeeked);
+          reject(video.error instanceof Error ? video.error : new Error(`video seek to ${timestamp}s failed`));
+        };
+        video.addEventListener("seeked", onSeeked, { once: true });
+        video.addEventListener("error", onError, { once: true });
+        video.currentTime = timestamp;
+      });
+    }
+
+    return createImageBitmap(video);
+  };
+}
+
+/**
+ * Reconstructs a real, in-page `VideoFrameRegistry` from `entries`
+ * (`SerializedVideoAssetEntry`'s own raw bytes per distinct `assetRef`) and
+ * `samplesNeeded` (the exact `(assetRef, sourceFrame)` pairs this range's
+ * own frames actually resolve to, see `VideoSampleRequest`'s own doc):
+ * decodes each distinct `assetRef` exactly once via `createRealDecodeVideo`,
+ * then samples every one of its own needed source frames sequentially
+ * against that one shared `HTMLVideoElement` (a single element only has one
+ * `currentTime` at a time - sampling the same asset's own distinct frames
+ * concurrently would race each other's own seeks), while distinct assets
+ * still decode and sample fully in parallel.
+ *
+ * `fps` is the composition's own frame rate, not any notion of a source
+ * video's own encoded frame rate: `resolveVideoSourceFrame` (which produced
+ * every `sourceFrame` this function samples) has no fps parameter at all,
+ * meaning every `sourceFrame` it returns is already expressed in the same
+ * fps space as the composition-absolute frame that produced it - see
+ * `resolveVideoSourceFrame`'s own doc in `@cadra/core`.
+ *
+ * One asset failing to decode, or one sample failing (corrupt bytes, a
+ * format this browser's own `HTMLVideoElement` does not support, or a seek
+ * past a corrupt region), is caught and logged via `console.error` rather
+ * than rejecting this function or the render as a whole - mirroring
+ * `buildTextureRegistry`'s own per-asset resilience exactly: that one
+ * `VideoNode` (at that one frame) falls through to the renderer's own
+ * documented placeholder instead of failing an otherwise-successful render.
+ */
+async function buildVideoFrameRegistry(
+  entries: readonly SerializedVideoAssetEntry[],
+  samplesNeeded: readonly VideoSampleRequest[],
+  fps: number,
+): Promise<VideoFrameRegistry> {
+  const registry = createInMemoryVideoFrameRegistry();
+  if (samplesNeeded.length === 0) {
+    return registry;
+  }
+
+  const decodeVideo = createRealDecodeVideo();
+  const sampleAtTimestamp = createRealSampleAtTimestamp();
+
+  const sourcesByAssetRef = new Map<string, VideoSource>();
+  await Promise.all(
+    entries.map(async (entry) => {
+      try {
+        const source = await decodeVideo(Uint8Array.from(entry.bytes));
+        sourcesByAssetRef.set(entry.assetRef, source);
+      } catch (error) {
+        console.error(`Failed to decode video asset "${entry.assetRef}":`, error);
+      }
+    }),
+  );
+
+  const sourceFramesByAssetRef = new Map<string, Set<number>>();
+  for (const request of samplesNeeded) {
+    const sourceFrames = sourceFramesByAssetRef.get(request.assetRef) ?? new Set<number>();
+    sourceFrames.add(request.sourceFrame);
+    sourceFramesByAssetRef.set(request.assetRef, sourceFrames);
+  }
+
+  await Promise.all(
+    Array.from(sourceFramesByAssetRef.entries()).map(async ([assetRef, sourceFrames]) => {
+      const source = sourcesByAssetRef.get(assetRef);
+      if (source === undefined) {
+        return;
+      }
+      for (const sourceFrame of sourceFrames) {
+        try {
+          const image = await sampleVideoFrame(source, sourceFrame, fps, { sampleAtTimestamp });
+          registry.register(computeVideoFrameCacheKey(assetRef, sourceFrame), { image });
+        } catch (error) {
+          console.error(
+            `Failed to sample video asset "${assetRef}" at source frame ${sourceFrame}:`,
+            error,
+          );
+        }
+      }
+    }),
+  );
+
+  return registry;
+}
+
 /** Config this entry function accepts, structured-cloned in from the Node orchestrator via `page.evaluate`. */
 export interface BrowserHeadlessRenderConfig {
   /** The project to render, i.e. `renderComposition`'s own `options.project`. */
@@ -224,6 +426,10 @@ export interface BrowserHeadlessRenderConfig {
   textRenderEntries?: readonly SerializedTextRenderEntry[];
   /** Every `ImageNode` asset this project needs, fetched ahead of time on the Node side; see `SerializedImageRenderEntry`'s own doc. Omitted/empty means every image node renders as the documented gray placeholder, matching `createRenderer`'s own no-registry default. */
   imageRenderEntries?: readonly SerializedImageRenderEntry[];
+  /** Every `VideoNode` asset this project needs, fetched ahead of time on the Node side; see `SerializedVideoAssetEntry`'s own doc. Omitted/empty means every video node renders as the documented placeholder, matching `createRenderer`'s own no-registry default. */
+  videoAssetEntries?: readonly SerializedVideoAssetEntry[];
+  /** Every `(assetRef, sourceFrame)` pair this render's own frames actually need a decoded video frame for; see `VideoSampleRequest`'s own doc. Omitted/empty means no video frame is ever sampled (every video node renders as the documented placeholder for the whole render), independent of whether `videoAssetEntries` itself is populated. */
+  videoSamplesNeeded?: readonly VideoSampleRequest[];
 }
 
 /**
@@ -259,6 +465,10 @@ export interface BrowserHeadlessRenderRangeConfig {
   textRenderEntries?: readonly SerializedTextRenderEntry[];
   /** Every `ImageNode` asset this project needs, fetched ahead of time on the Node side; see `SerializedImageRenderEntry`'s own doc. Omitted/empty means every image node renders as the documented gray placeholder, matching `createRenderer`'s own no-registry default. */
   imageRenderEntries?: readonly SerializedImageRenderEntry[];
+  /** Every `VideoNode` asset this range needs, fetched ahead of time on the Node side; see `SerializedVideoAssetEntry`'s own doc. Omitted/empty means every video node renders as the documented placeholder, matching `createRenderer`'s own no-registry default. */
+  videoAssetEntries?: readonly SerializedVideoAssetEntry[];
+  /** Every `(assetRef, sourceFrame)` pair this range's own `[startFrame, endFrame)` actually needs a decoded video frame for; see `VideoSampleRequest`'s own doc. Omitted/empty means no video frame is ever sampled for this range, independent of whether `videoAssetEntries` itself is populated. */
+  videoSamplesNeeded?: readonly VideoSampleRequest[];
 }
 
 /**
@@ -415,6 +625,8 @@ async function buildEncodedChunksForRange(
   range: { startFrame?: number; endFrame?: number; keyframeIntervalFrames?: number } = {},
   textRenderEntries: readonly SerializedTextRenderEntry[] = [],
   imageRenderEntries: readonly SerializedImageRenderEntry[] = [],
+  videoAssetEntries: readonly SerializedVideoAssetEntry[] = [],
+  videoSamplesNeeded: readonly VideoSampleRequest[] = [],
 ): Promise<{
   composition: { width: number; height: number; fps: number };
   encodedChunks: AsyncGenerator<EncodedChunkResult>;
@@ -438,9 +650,15 @@ async function buildEncodedChunksForRange(
   canvas.height = composition.height;
 
   const textureRegistry = await buildTextureRegistry(imageRenderEntries);
+  const videoFrameRegistry = await buildVideoFrameRegistry(
+    videoAssetEntries,
+    videoSamplesNeeded,
+    composition.fps,
+  );
   const innerRenderer = createRenderer({
     textRenderRegistry: buildTextRenderRegistry(textRenderEntries),
     textureRegistry,
+    videoFrameRegistry,
   });
   const renderer = createPixelReadableRenderer({
     renderer: innerRenderer,
@@ -517,6 +735,8 @@ export async function runBrowserHeadlessRender(config: BrowserHeadlessRenderConf
       {},
       config.textRenderEntries,
       config.imageRenderEntries,
+      config.videoAssetEntries,
+      config.videoSamplesNeeded,
     );
 
     const destination = createBridgedWriteTarget();
@@ -598,6 +818,8 @@ export async function runBrowserHeadlessRenderRange(
       },
       config.textRenderEntries,
       config.imageRenderEntries,
+      config.videoAssetEntries,
+      config.videoSamplesNeeded,
     );
 
     const serialized: SerializedEncodedChunk[] = [];
