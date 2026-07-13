@@ -1,5 +1,5 @@
 import { resolveSequenceFrame } from "../primitives/sequence.js";
-import type { SceneNode } from "../scene-graph/scene-node.js";
+import type { CompositionRefNode, SceneNode } from "../scene-graph/scene-node.js";
 import type {
   ActiveCameraEntry,
   Clip,
@@ -274,6 +274,27 @@ function resolveTrack(
  * produces: a nested composition spliced in via `compositionRef` inherits the
  * enclosing clip's transition opacity uniformly across all of its own
  * resolved layers, rather than each nested layer defaulting back to `1`.
+ *
+ * Each nested layer's own `node` is individually wrapped in a synthetic
+ * `group` node carrying the `compositionRef`'s own `transform`/`visible`
+ * (`wrapCompositionRefTransform`) rather than being spliced in unchanged:
+ * `CompositionRefNode`, like every `SceneNode`, has its own real
+ * `transform`, but with no wrapper it was silently discarded entirely - a
+ * `compositionRef` could never actually be moved/scaled/rotated relative to
+ * where it sits in the parent composition. Wrapping is safe precisely
+ * because it does *not* try to compose two `AnimatableTransform`s
+ * symbolically (each may independently be keyframed, and this resolution
+ * pass deliberately never evaluates keyframes - see this module's own doc):
+ * the reconciler already resolves every node in a `SceneState`'s entire
+ * flattened tree against the same single global frame regardless of
+ * nesting depth or which original clip a node came from (confirmed
+ * directly: `ResolvedLayer.localFrame` has exactly one downstream reader,
+ * `worker/scene-state-diff.ts`'s own dirty-check, never transform
+ * evaluation), so an ordinary parent-child `THREE.Object3D` hierarchy -
+ * exactly what a `group` node with children already produces, with zero
+ * renderer changes needed - composes the two transforms correctly every
+ * frame, keyframes included, the same way it already does for any other
+ * `group` wrapping animated children.
  */
 function resolveClipContent(
   project: Project,
@@ -288,7 +309,13 @@ function resolveClipContent(
 ): void {
   if (node.kind === "compositionRef") {
     const nested = resolveComposition(project, node.compositionId, localFrame, chain);
-    pending.push(...nested.layers.map((layer) => ({ ...layer, opacity })));
+    pending.push(
+      ...nested.layers.map((layer) => ({
+        ...layer,
+        node: wrapCompositionRefTransform(node, layer.node),
+        opacity,
+      })),
+    );
     return;
   }
 
@@ -333,6 +360,32 @@ function resolveClipContent(
     localFrame,
     opacity,
   });
+}
+
+/**
+ * Wraps `nestedRootNode` (one nested layer's own root node, still in the
+ * nested composition's own local coordinate space) in a synthetic `group`
+ * node carrying `compositionRefNode`'s own `transform`/`visible` - see
+ * `resolveClipContent`'s own doc for why an ordinary parent-child wrapper
+ * is exactly the right mechanism here, with zero renderer changes needed.
+ *
+ * The wrapper's own `id` is derived from both the `compositionRef`'s own id
+ * and the wrapped node's own id: a single `compositionRef` splices in one
+ * wrapper per nested layer (not one shared wrapper for the whole nested
+ * composition, matching `resolveClipContent`'s own "one `ResolvedLayer` per
+ * nested layer" splicing, which preserves each nested layer's own z-order/
+ * provenance), and the reconciler identifies sibling nodes by id within one
+ * `reconcile()` call - reusing `compositionRefNode.id` alone across every
+ * nested layer's own wrapper would collide.
+ */
+function wrapCompositionRefTransform(compositionRefNode: CompositionRefNode, nestedRootNode: SceneNode): SceneNode {
+  return {
+    id: `${compositionRefNode.id}:wraps:${nestedRootNode.id}`,
+    kind: "group",
+    transform: compositionRefNode.transform,
+    visible: compositionRefNode.visible,
+    children: [nestedRootNode],
+  };
 }
 
 /** True if `node` itself or any descendant is a `compositionRef` node. */

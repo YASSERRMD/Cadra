@@ -29,6 +29,17 @@ function CompositionRef(id: string, compositionId: string): CompositionRefNode {
   };
 }
 
+/** The exact synthetic wrapper `resolveClipContent`'s own `wrapCompositionRefTransform` produces around one nested layer's own root node, mirroring that function's own id/transform/visible convention - see `resolve-scene.ts`'s own doc for why this wrapping is what actually carries a `compositionRef`'s own `transform` through to the resolved layer. */
+function wrappedNode(compositionRefNode: CompositionRefNode, nestedRootNode: SceneNode): SceneNode {
+  return {
+    id: `${compositionRefNode.id}:wraps:${nestedRootNode.id}`,
+    kind: "group",
+    transform: compositionRefNode.transform,
+    visible: compositionRefNode.visible,
+    children: [nestedRootNode],
+  };
+}
+
 describe("resolveSceneAtFrame: single track, single clip", () => {
   const shape = Shape({ id: "shape-1" });
   const composition = createComposition({
@@ -215,6 +226,7 @@ describe("resolveSceneAtFrame: nested compositionRef", () => {
     ],
   });
 
+  const refOne = CompositionRef("ref-1", "comp-inner");
   const outer: Composition = createComposition({
     id: "comp-outer",
     name: "Outer",
@@ -230,7 +242,7 @@ describe("resolveSceneAtFrame: nested compositionRef", () => {
             id: "outer-clip",
             from: 20,
             durationInFrames: 60,
-            content: CompositionRef("ref-1", "comp-inner"),
+            content: refOne,
           }),
         ],
       },
@@ -249,7 +261,7 @@ describe("resolveSceneAtFrame: nested compositionRef", () => {
       compositionId: "comp-inner",
       trackId: "inner-track",
       clipId: "inner-clip",
-      node: innerShape,
+      node: wrappedNode(refOne, innerShape),
       zIndex: 0,
       localFrame: 5,
       opacity: 1,
@@ -276,6 +288,7 @@ describe("resolveSceneAtFrame: nested compositionRef", () => {
 
   it("splices nested content at the correct relative z-position among sibling tracks", () => {
     const behind = Shape({ id: "behind-shape" });
+    const refTwo = CompositionRef("ref-2", "comp-inner");
     const aheadComposition = createComposition({
       id: "comp-outer-2",
       name: "Outer2",
@@ -295,7 +308,7 @@ describe("resolveSceneAtFrame: nested compositionRef", () => {
               id: "ref-clip",
               from: 20,
               durationInFrames: 60,
-              content: CompositionRef("ref-2", "comp-inner"),
+              content: refTwo,
             }),
           ],
         },
@@ -311,8 +324,42 @@ describe("resolveSceneAtFrame: nested compositionRef", () => {
 
     expect(state.layers).toHaveLength(2);
     expect(state.layers[0]?.node).toEqual(behind);
-    expect(state.layers[1]?.node).toEqual(innerShape);
+    expect(state.layers[1]?.node).toEqual(wrappedNode(refTwo, innerShape));
     expect(state.layers.map((layer) => layer.zIndex)).toEqual([0, 1]);
+  });
+
+  it("carries a non-identity compositionRef transform through to the resolved layer, instead of silently dropping it", () => {
+    const movedRef: CompositionRefNode = {
+      ...CompositionRef("ref-moved", "comp-inner"),
+      transform: { position: [10, 20, 30], rotation: [0, Math.PI / 2, 0], scale: [2, 2, 2] },
+    };
+    const outerMoved = createComposition({
+      id: "comp-outer-moved",
+      name: "OuterMoved",
+      fps: 30,
+      durationInFrames: 100,
+      width: 1920,
+      height: 1080,
+      tracks: [
+        {
+          id: "outer-track",
+          clips: [Sequence({ id: "outer-clip", from: 20, durationInFrames: 60, content: movedRef })],
+        },
+      ],
+    });
+    const movedProject = createProject({ id: "p-moved", name: "Project", compositions: [outerMoved, inner] });
+
+    const state = resolveSceneAtFrame(movedProject, "comp-outer-moved", 30);
+
+    expect(state.layers).toHaveLength(1);
+    const wrapper = state.layers[0]?.node;
+    expect(wrapper?.kind).toBe("group");
+    expect(wrapper?.transform).toEqual(movedRef.transform);
+    expect(wrapper?.children).toEqual([innerShape]);
+    // Not the identity transform every other test in this file uses -
+    // proves this is actually the compositionRef's own authored transform,
+    // not some coincidental default.
+    expect(wrapper?.transform).not.toEqual(createIdentityTransform());
   });
 });
 
@@ -335,12 +382,13 @@ describe("resolveSceneAtFrame: compositionRef nested inside an ordinary group", 
     });
 
     const sibling = Shape({ id: "sibling-shape" });
+    const deepRef = CompositionRef("deep-ref", "comp-deep-inner");
     const group: SceneNode = {
       id: "wrapper-group",
       kind: "group",
       transform: createIdentityTransform(),
       visible: true,
-      children: [sibling, CompositionRef("deep-ref", "comp-deep-inner")],
+      children: [sibling, deepRef],
     };
 
     const outer = createComposition({
@@ -363,7 +411,7 @@ describe("resolveSceneAtFrame: compositionRef nested inside an ordinary group", 
     // Nested compositionRef content splices in before the pruned remainder,
     // since it is walked/appended before the loop falls through to push the
     // pruned ordinary-content layer.
-    expect(state.layers[0]?.node).toEqual(innerShape);
+    expect(state.layers[0]?.node).toEqual(wrappedNode(deepRef, innerShape));
     expect(state.layers[1]?.node).toEqual({
       id: "wrapper-group",
       kind: "group",
