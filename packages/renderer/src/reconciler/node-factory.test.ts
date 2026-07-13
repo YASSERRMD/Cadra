@@ -589,6 +589,7 @@ describe("node-factory: Phase 26 keyframed properties resolve to different value
       },
     };
     const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
     // MSDF materials hold their color in a TSL uniform node, not the
     // classic `.color` property (see msdf-material.ts), so this asserts
     // through the same setColor seam applyNodeProperties itself calls,
@@ -616,10 +617,11 @@ describe("node-factory: Phase 26 keyframed properties resolve to different value
       color: [1, 1, 1, 1],
     };
     const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
 
     expect(built.object3D).toBeInstanceOf(THREE.Group);
     expect(built.object3D.children).toHaveLength(0);
-    expect(built.owned).toBeUndefined();
+    expect(built.owned?.text).toBeUndefined();
   });
 
   it("builds real glyph meshes grouped under line and word groups when render data is registered", () => {
@@ -635,9 +637,10 @@ describe("node-factory: Phase 26 keyframed properties resolve to different value
       color: [1, 1, 1, 1],
     };
     const built = createThreeObject(node, ctx);
-    const group = built.object3D as THREE.Group;
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+    const textResources = built.owned?.text as TextGroupResources;
 
-    const lineGroup = group.children[0] as THREE.Group;
+    const lineGroup = textResources.group.children[0] as THREE.Group;
     expect(lineGroup.name).toBe("line-0");
     const wordGroup = lineGroup.children[0] as THREE.Group;
     expect(wordGroup.name).toBe("word-0:0");
@@ -893,7 +896,8 @@ describe("node-factory: text stagger", () => {
     const built = createThreeObject(node, ctx);
     applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
 
-    const wordGroup = (built.object3D.children[0] as THREE.Group).children[0] as THREE.Group;
+    const textResources = built.owned?.text as TextGroupResources;
+    const wordGroup = (textResources.group.children[0] as THREE.Group).children[0] as THREE.Group;
     const meshes = wordGroup.children as THREE.Mesh[];
     expect(meshes).toHaveLength(2);
     expect(meshes[0]?.material).not.toBe(meshes[1]?.material);
@@ -905,7 +909,8 @@ describe("node-factory: text stagger", () => {
     const built = createThreeObject(node, ctx);
     applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
 
-    const wordGroup = (built.object3D.children[0] as THREE.Group).children[0] as THREE.Group;
+    const textResources = built.owned?.text as TextGroupResources;
+    const wordGroup = (textResources.group.children[0] as THREE.Group).children[0] as THREE.Group;
     const [firstMesh, secondMesh] = wordGroup.children as THREE.Mesh[];
     const firstSetOpacity = vi.spyOn(firstMesh?.userData as Record<string, (a: number) => void>, "setOpacity");
     const secondSetOpacity = vi.spyOn(secondMesh?.userData as Record<string, (a: number) => void>, "setOpacity");
@@ -937,7 +942,8 @@ describe("node-factory: text stagger", () => {
     const built = createThreeObject(node, ctx);
     applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
 
-    const wordGroup = (built.object3D.children[0] as THREE.Group).children[0] as THREE.Group;
+    const textResources = built.owned?.text as TextGroupResources;
+    const wordGroup = (textResources.group.children[0] as THREE.Group).children[0] as THREE.Group;
     const meshes = wordGroup.children as THREE.Mesh[];
     expect(meshes[0]?.material).toBe(meshes[1]?.material);
   });
@@ -1012,7 +1018,8 @@ describe("node-factory: text physics", () => {
     const built = createThreeObject(node, ctx);
     applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
 
-    const wordGroup = (built.object3D.children[0] as THREE.Group).children[0] as THREE.Group;
+    const textResources = built.owned?.text as TextGroupResources;
+    const wordGroup = (textResources.group.children[0] as THREE.Group).children[0] as THREE.Group;
     const meshes = wordGroup.children as THREE.Mesh[];
     expect(meshes[0]?.material).not.toBe(meshes[1]?.material);
   });
@@ -1023,7 +1030,8 @@ describe("node-factory: text physics", () => {
     const built = createThreeObject(node, ctx);
     applyNodeProperties(node, built.object3D, ctx, 5, built.owned);
 
-    const wordGroup = (built.object3D.children[0] as THREE.Group).children[0] as THREE.Group;
+    const textResources = built.owned?.text as TextGroupResources;
+    const wordGroup = (textResources.group.children[0] as THREE.Group).children[0] as THREE.Group;
     const [firstMesh, secondMesh] = wordGroup.children as THREE.Mesh[];
     const firstBase = firstMesh?.userData["basePosition"] as THREE.Vector3;
     const secondBase = secondMesh?.userData["basePosition"] as THREE.Vector3;
@@ -1048,7 +1056,8 @@ describe("node-factory: text physics", () => {
     const built = createThreeObject(node, ctx);
     applyNodeProperties(node, built.object3D, ctx, 5, built.owned);
 
-    const wordGroup = (built.object3D.children[0] as THREE.Group).children[0] as THREE.Group;
+    const textResources = built.owned?.text as TextGroupResources;
+    const wordGroup = (textResources.group.children[0] as THREE.Group).children[0] as THREE.Group;
     const firstMesh = wordGroup.children[0] as THREE.Mesh;
     const firstBase = firstMesh.userData["basePosition"] as THREE.Vector3;
 
@@ -1122,6 +1131,7 @@ describe("node-factory: text morph", () => {
     const node = morphTextNode("ab", "cd", 0);
 
     const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
 
     expect(built.object3D.children).toHaveLength(2);
     expect(built.owned?.textMorph).toBeDefined();
@@ -1133,18 +1143,20 @@ describe("node-factory: text morph", () => {
     expect(toResources.group).not.toBe(fromResources.group);
   });
 
-  it("falls back to a single, non-wrapped group (no crossfade) when the 'from' text is not yet registered", () => {
+  it("falls back to a single content child (no crossfade) when the 'from' text is not yet registered", () => {
     const ctx = makeCtxWithMorphTexts("ab");
     const node = morphTextNode("ab", "cd", 0);
 
     const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
 
     const toResources = built.owned?.text as TextGroupResources;
-    expect(built.object3D).toBe(toResources.group);
+    expect(built.object3D.children).toHaveLength(1);
+    expect(built.object3D.children[0]).toBe(toResources.group);
     expect(built.owned?.textMorph).toBeUndefined();
   });
 
-  it("does not build a morph wrapper at all when node.morph is undefined (Phase 50/51 behavior preserved)", () => {
+  it("builds a single content child when node.morph is undefined (Phase 50/51 behavior preserved)", () => {
     const ctx = makeCtxWithText("ab");
     const node: SceneNode = {
       id: "t",
@@ -1158,9 +1170,11 @@ describe("node-factory: text morph", () => {
     };
 
     const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
 
     const toResources = built.owned?.text as TextGroupResources;
-    expect(built.object3D).toBe(toResources.group);
+    expect(built.object3D.children).toHaveLength(1);
+    expect(built.object3D.children[0]).toBe(toResources.group);
     expect(built.owned?.textMorph).toBeUndefined();
   });
 
@@ -1169,6 +1183,7 @@ describe("node-factory: text morph", () => {
     const node = morphTextNode("ab", "cd", 0.25);
 
     const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
     const toResources = built.owned?.text as TextGroupResources;
     const fromResources = built.owned?.textMorph?.from as TextGroupResources;
     const toMesh = toResources.group.children[0]?.children[0]?.children[0] as THREE.Mesh;
@@ -1192,6 +1207,7 @@ describe("node-factory: text morph", () => {
     };
 
     const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
     const toResources = built.owned?.text as TextGroupResources;
     const fromResources = built.owned?.textMorph?.from as TextGroupResources;
     const toMesh = toResources.group.children[0]?.children[0]?.children[0] as THREE.Mesh;
@@ -1215,6 +1231,181 @@ describe("node-factory: text morph", () => {
     const built = createThreeObject(node, ctx);
 
     expect(() => applyNodeProperties(node, built.object3D, ctx, 0, built.owned)).not.toThrow();
+  });
+});
+
+describe("node-factory: text variationAxes rebuild-on-key-change", () => {
+  /** A single-glyph fixture distinguishable from SECOND_INSTANCE_DATA below purely by identity - the content, not what it looks like, is what these tests need to tell apart. */
+  const FIRST_INSTANCE_DATA: TextRenderData = {
+    lineCount: 1,
+    atlasPages: [{ width: 4, height: 4, pixels: new Uint8Array(4 * 4 * 4).fill(255), png: new Uint8Array() }],
+    glyphs: [
+      {
+        glyphId: 1,
+        cluster: 0,
+        lineIndex: 0,
+        wordIndex: 0,
+        origin: { x: 0, y: 0 },
+        quad: { left: 0, right: 1, bottom: 0, top: 1 },
+        page: 0,
+        uv: { u0: 0, v0: 0, u1: 1, v1: 1 },
+        range: 0.1,
+      },
+    ],
+  };
+  const SECOND_INSTANCE_DATA: TextRenderData = {
+    lineCount: 1,
+    atlasPages: [{ width: 4, height: 4, pixels: new Uint8Array(4 * 4 * 4).fill(128), png: new Uint8Array() }],
+    glyphs: [
+      {
+        glyphId: 2,
+        cluster: 0,
+        lineIndex: 0,
+        wordIndex: 0,
+        // A genuinely different quad, standing in for "a different resolved
+        // instance's own different glyph outline" (real baked variation
+        // instances change outlines, not just which fixture object this
+        // test happens to use) - the position tests below rely on this.
+        origin: { x: 0, y: 0 },
+        quad: { left: 0, right: 2, bottom: 0, top: 2 },
+        page: 0,
+        uv: { u0: 0, v0: 0, u1: 1, v1: 1 },
+        range: 0.1,
+      },
+    ],
+  };
+
+  const FIRST_KEY = computeTextNodeRenderKey({ content: "a", variationAxes: { wght: 100 } }, 0);
+  const SECOND_KEY = computeTextNodeRenderKey({ content: "a", variationAxes: { wght: 900 } }, 10);
+
+  function makeCtxWithVariationAxesInstances(): NodeFactoryContext {
+    const textRenderRegistry = createInMemoryTextRenderRegistry();
+    textRenderRegistry.register(FIRST_KEY, {
+      data: FIRST_INSTANCE_DATA,
+      fontBytes: new Uint8Array(),
+      fontContentHash: "font-light",
+    });
+    textRenderRegistry.register(SECOND_KEY, {
+      data: SECOND_INSTANCE_DATA,
+      fontBytes: new Uint8Array(),
+      fontContentHash: "font-bold",
+    });
+    return { ...makeCtx(), textRenderRegistry };
+  }
+
+  function variationAxesTextNode(): SceneNode {
+    return {
+      id: "t",
+      kind: "text",
+      transform: createIdentityTransform(),
+      visible: true,
+      children: [],
+      content: "a",
+      fontSize: 12,
+      color: [1, 1, 1, 1],
+      variationAxes: {
+        type: "keyframeTrack",
+        keyframes: [
+          { frame: 0, value: { wght: 100 } },
+          { frame: 10, value: { wght: 900 } },
+        ],
+      },
+    };
+  }
+
+  it("rebuilds real content, as a genuinely new TextGroupResources, when a later frame resolves a keyframed variationAxes to a different instance", () => {
+    const ctx = makeCtxWithVariationAxesInstances();
+    const node = variationAxesTextNode();
+    const built = createThreeObject(node, ctx);
+
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+    const firstResources = built.owned?.text;
+    expect(firstResources).toBeDefined();
+    expect(built.owned?.textLastRenderKey).toBe(FIRST_KEY);
+
+    applyNodeProperties(node, built.object3D, ctx, 10, built.owned);
+    const secondResources = built.owned?.text;
+    expect(secondResources).toBeDefined();
+    expect(secondResources).not.toBe(firstResources);
+    expect(built.owned?.textLastRenderKey).toBe(SECOND_KEY);
+  });
+
+  it("swaps the stable wrapper's own child to the newly built content group, removing the old one", () => {
+    const ctx = makeCtxWithVariationAxesInstances();
+    const node = variationAxesTextNode();
+    const built = createThreeObject(node, ctx);
+
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+    const firstGroup = (built.owned?.text as TextGroupResources).group;
+    expect(built.object3D.children).toEqual([firstGroup]);
+
+    applyNodeProperties(node, built.object3D, ctx, 10, built.owned);
+    const secondGroup = (built.owned?.text as TextGroupResources).group;
+
+    expect(secondGroup).not.toBe(firstGroup);
+    expect(built.object3D.children).toEqual([secondGroup]);
+    expect(firstGroup.parent).toBeNull();
+  });
+
+  it("disposes the old geometries and materials when rebuilding mid-lifetime, not just at final teardown", () => {
+    const ctx = makeCtxWithVariationAxesInstances();
+    const node = variationAxesTextNode();
+    const built = createThreeObject(node, ctx);
+
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+    const firstResources = built.owned?.text as TextGroupResources;
+    const geometryDisposeSpy = vi.spyOn(firstResources.geometries[0] as THREE.BufferGeometry, "dispose");
+    const materialDisposeSpy = vi.spyOn(firstResources.materials[0] as THREE.Material, "dispose");
+
+    applyNodeProperties(node, built.object3D, ctx, 10, built.owned);
+
+    expect(geometryDisposeSpy).toHaveBeenCalledTimes(1);
+    expect(materialDisposeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not rebuild across repeated calls at the same frame (a real regression: rebuilding every call, not only on a genuine key change, would defeat the whole point of tracking lastRenderKey)", () => {
+    const ctx = makeCtxWithVariationAxesInstances();
+    const node = variationAxesTextNode();
+    const built = createThreeObject(node, ctx);
+
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+    const firstResources = built.owned?.text;
+
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+    const secondCallResources = built.owned?.text;
+
+    expect(secondCallResources).toBe(firstResources);
+  });
+
+  it("does not rebuild across frames when variationAxes is a plain (non-keyframed) value - the common case pays none of this cost", () => {
+    const textRenderRegistry = createInMemoryTextRenderRegistry();
+    const key = computeTextNodeRenderKey({ content: "a", variationAxes: { wght: 400 } }, 0);
+    textRenderRegistry.register(key, {
+      data: FIRST_INSTANCE_DATA,
+      fontBytes: new Uint8Array(),
+      fontContentHash: "font-regular",
+    });
+    const ctx: NodeFactoryContext = { ...makeCtx(), textRenderRegistry };
+    const node: SceneNode = {
+      id: "t",
+      kind: "text",
+      transform: createIdentityTransform(),
+      visible: true,
+      children: [],
+      content: "a",
+      fontSize: 12,
+      color: [1, 1, 1, 1],
+      variationAxes: { wght: 400 },
+    };
+    const built = createThreeObject(node, ctx);
+
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+    const firstResources = built.owned?.text;
+
+    // A plain value resolves identically regardless of frame, so the render
+    // key at frame 50 is the exact same as at frame 0 - no rebuild.
+    applyNodeProperties(node, built.object3D, ctx, 50, built.owned);
+    expect(built.owned?.text).toBe(firstResources);
   });
 });
 
@@ -1245,6 +1436,7 @@ describe("node-factory: text materials (Phase 53)", () => {
       },
     });
     const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 5, built.owned);
 
     expect(built.owned?.text?.setFill).toBeDefined();
 
@@ -1257,6 +1449,7 @@ describe("node-factory: text materials (Phase 53)", () => {
     const ctx = makeCtxWithText("a");
     const node = textNodeWith({});
     const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
 
     expect(built.owned?.text?.setFill).toBeUndefined();
   });
@@ -1270,6 +1463,7 @@ describe("node-factory: text materials (Phase 53)", () => {
       },
     });
     const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
     const setOutlineSpy = vi.spyOn(built.owned?.text as TextGroupResources, "setOutline");
 
     applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
@@ -1286,6 +1480,7 @@ describe("node-factory: text materials (Phase 53)", () => {
       shadow: { offsetX: 0.05, offsetY: 0.05, color: [0, 0, 0, 0.5] },
     });
     const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
 
     expect(built.owned?.text?.setGlow).toBeDefined();
     expect(built.owned?.text?.setShadow).toBeDefined();

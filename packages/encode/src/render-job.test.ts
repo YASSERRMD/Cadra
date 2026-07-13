@@ -5,6 +5,7 @@ import {
   type Project,
   Sequence,
   Shape,
+  Text,
   Video,
 } from "@cadra/core";
 import type {
@@ -13,11 +14,13 @@ import type {
   HeadlessPageLike,
 } from "@cadra/headless";
 import { RenderJobFailedError } from "@cadra/headless";
+import { computeTextNodeRenderKey } from "@cadra/renderer";
 import { PNG } from "pngjs";
 import { describe, expect, it } from "vitest";
 
 import { readMp4FragmentedDurationTicks, readMp4TrackTimescale } from "./mux-validate-mp4.js";
 import {
+  buildTextRenderRegistryForProject,
   buildTextureRegistryForProject,
   DEFAULT_RANGE_TIMEOUT_MS,
   type EncodedRenderJobHandle,
@@ -798,6 +801,74 @@ describe("buildTextureRegistryForProject", () => {
     expect(registry!.resolve("cadra-asset://bbb")).toBeDefined();
     // Corrupt PNG bytes fail PNG.sync.read and are silently skipped, not thrown.
     expect(registry!.resolve("cadra-asset://corrupt")).toBeUndefined();
+  });
+});
+
+describe("buildTextRenderRegistryForProject: variationAxes", () => {
+  function buildProjectWithText(text: ReturnType<typeof Text>, durationInFrames: number): Project {
+    const composition = createComposition({
+      id: "comp-1",
+      name: "Main",
+      fps: 30,
+      durationInFrames,
+      width: 64,
+      height: 36,
+      tracks: [
+        {
+          id: "track-1",
+          clips: [Sequence({ id: "clip-1", from: 0, durationInFrames, content: text })],
+        },
+      ],
+    });
+    return createProject({ id: "p1", name: "Project", compositions: [composition] });
+  }
+
+  it("prepares one entry for a plain (non-keyframed) variationAxes, regardless of composition length", async () => {
+    const text = Text({ id: "t1", content: "a", variationAxes: { wght: 400 } });
+    const project = buildProjectWithText(text, 60);
+
+    const registry = await buildTextRenderRegistryForProject(project);
+    expect(registry).toBeDefined();
+
+    // A plain value resolves identically at every frame, so the same one
+    // key covers the entire composition.
+    const key = computeTextNodeRenderKey({ content: "a", variationAxes: { wght: 400 } }, 0);
+    const keyAtFrame30 = computeTextNodeRenderKey({ content: "a", variationAxes: { wght: 400 } }, 30);
+    expect(keyAtFrame30).toBe(key);
+    expect(registry!.resolve(key)).toBeDefined();
+  });
+
+  it("prepares a distinct, real baked-instance entry per frame a keyframed variationAxes resolves a genuinely different value at", async () => {
+    const text = Text({
+      id: "t1",
+      content: "a",
+      variationAxes: {
+        type: "keyframeTrack",
+        keyframes: [
+          { frame: 0, value: { wght: 100 } },
+          { frame: 10, value: { wght: 900 } },
+        ],
+      },
+    });
+    const project = buildProjectWithText(text, 11);
+
+    const registry = await buildTextRenderRegistryForProject(project);
+    expect(registry).toBeDefined();
+
+    const keyAtFrame0 = computeTextNodeRenderKey({ content: "a", variationAxes: { wght: 100 } }, 0);
+    const keyAtFrame10 = computeTextNodeRenderKey({ content: "a", variationAxes: { wght: 900 } }, 10);
+    expect(keyAtFrame0).not.toBe(keyAtFrame10);
+
+    const entryAtFrame0 = registry!.resolve(keyAtFrame0);
+    const entryAtFrame10 = registry!.resolve(keyAtFrame10);
+    expect(entryAtFrame0).toBeDefined();
+    expect(entryAtFrame10).toBeDefined();
+
+    // Each resolved entry's own font bytes are a real, independently baked
+    // static instance (bakeVariationInstance), not the same shared default
+    // variable font reused for both - a weight-100 and a weight-900 bake of
+    // the same source font genuinely differ at the byte level.
+    expect(Buffer.from(entryAtFrame0!.fontBytes)).not.toEqual(Buffer.from(entryAtFrame10!.fontBytes));
   });
 });
 

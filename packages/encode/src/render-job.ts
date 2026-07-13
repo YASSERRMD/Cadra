@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 
 import type { Project, SatoriNode, SceneNode, TextNode, VideoFrameMapping } from "@cadra/core";
-import { resolveAudioMixdown, resolveVideoSourceFrame } from "@cadra/core";
+import { isKeyframeTrack, resolveAudioMixdown, resolveVariationAxesProperty, resolveVideoSourceFrame } from "@cadra/core";
 import type {
   BrowserLauncher,
   HeadlessBrowserLike,
@@ -50,6 +50,7 @@ import {
   parseFontWithFontkit,
   type PositionedGlyph,
   prepareTextRenderData,
+  resolveTextShapingFont,
   type TextRenderData,
 } from "@cadra/text";
 import { PNG } from "pngjs";
@@ -501,7 +502,7 @@ interface PreparedTextRenderEntry {
 
 /**
  * Prepares a `PreparedTextRenderEntry` for every distinct `TextNode`
- * (deduped by `computeTextNodeRenderKey(node, 0)`, mirroring
+ * (deduped by `computeTextNodeRenderKey(node, frame)`, mirroring
  * `TextRenderRegistry`'s own resolve-by-key contract) found anywhere in
  * `project`'s own scene graph, across every composition/track/clip - plus
  * one more per `morph`-configured `TextNode`, for its own `morph.from` text
@@ -509,34 +510,58 @@ interface PreparedTextRenderEntry {
  * synthetic `{...node, content: node.morph.from}`), since a morphing node's
  * renderer-side `Object3D` needs both texts' own shaped/atlas-generated data
  * registered before it can build either glyph group - see
- * `node-factory.ts`'s own `buildTextObject`. Font loading, HarfBuzz shaping,
- * and MSDF atlas generation are all
- * Node-only-dependency-laden work (`fontkit`'s `Buffer` usage,
- * `msdfgen-wasm`'s `createRequire`, `subset-font`'s `fs`), so this always
- * runs here, server-side, in real Node - see this module's two callers for
- * why each needs that: `buildTextRenderEntriesForProject` (below) further
- * serializes this result to cross a `page.evaluate` structured-clone
- * boundary into a bundled browser page; `buildTextRenderRegistryForProject`
- * (exported) registers it directly into a `TextRenderRegistry` for a
- * same-process renderer (`@cadra/headless`'s native-GPU-headless path, no
- * browser, no serialization boundary at all) instead.
+ * `node-factory.ts`'s own `buildTextObject`.
  *
- * Every node currently uses this module's own bundled default font
- * regardless of whether it set its own `fontRef`: resolving `fontRef`
- * against a real, agent-uploaded font asset registry is a follow-up this
- * phase's scope does not cover (`create_scene`/`add_text_node`'s own
- * MCP-server callers have no such registry wired through to here yet
- * either), not something dropped by mistake.
+ * `frame` matters only for `variationAxes`: a plain (non-keyframed) value
+ * resolves identically at every frame, so `frame` `0` alone is exact and
+ * this only ever prepares one entry per node/side; a keyframed one
+ * genuinely differs frame to frame (a different resolved instance -
+ * different glyph *outlines*, not just a different advance width - see
+ * `TextNode.variationAxes`' own doc), so every frame across that node's own
+ * composition gets its own resolved sample here, deduped by
+ * `computeTextNodeRenderKey` down to however many distinct values that
+ * animation actually visits - the same "ahead of a `reconcile` call, not
+ * during one" cost `content` itself would already pay if it were keyframed
+ * (`computeTextNodeRenderKey`'s own doc). A resolved `variationAxes` bakes a
+ * real, glyph-outline-correct static font instance (`resolveTextShapingFont`,
+ * `@cadra/text`) before shaping; a node with no `variationAxes` at all pays
+ * none of this cost, using the shared default font exactly as before.
+ *
+ * Font loading, HarfBuzz shaping, MSDF atlas generation, and variation
+ * baking are all Node-only-dependency-laden work (`fontkit`'s `Buffer`
+ * usage, `msdfgen-wasm`'s `createRequire`, `subset-font`'s `fs`), so this
+ * always runs here, server-side, in real Node - see this module's two
+ * callers for why each needs that: `buildTextRenderEntriesForProject`
+ * (below) further serializes this result to cross a `page.evaluate`
+ * structured-clone boundary into a bundled browser page;
+ * `buildTextRenderRegistryForProject` (exported) registers it directly into
+ * a `TextRenderRegistry` for a same-process renderer (`@cadra/headless`'s
+ * native-GPU-headless path, no browser, no serialization boundary at all)
+ * instead.
+ *
+ * Every node currently uses this module's own bundled default font as its
+ * own *base* instance regardless of whether it set its own `fontRef`:
+ * resolving `fontRef` against a real, agent-uploaded font asset registry is
+ * a follow-up this phase's scope does not cover (`create_scene`/
+ * `add_text_node`'s own MCP-server callers have no such registry wired
+ * through to here yet either), not something dropped by mistake.
  */
 async function prepareTextRenderEntriesForProject(
   project: Project,
 ): Promise<PreparedTextRenderEntry[]> {
-  const textNodes: TextNode[] = [];
+  // Paired with each node's own composition's durationInFrames: needed to
+  // enumerate every frame a keyframed variationAxes could resolve
+  // differently at (see the loop below).
+  const textNodes: Array<{ node: TextNode; durationInFrames: number }> = [];
   for (const composition of project.compositions) {
+    const nodesInComposition: TextNode[] = [];
     for (const track of composition.tracks) {
       for (const clip of track.clips) {
-        collectTextNodes(clip.node, textNodes);
+        collectTextNodes(clip.node, nodesInComposition);
       }
+    }
+    for (const node of nodesInComposition) {
+      textNodes.push({ node, durationInFrames: composition.durationInFrames });
     }
   }
 
@@ -554,27 +579,51 @@ async function prepareTextRenderEntriesForProject(
   // here at all - "opentype" is simply the correct, only-supported choice.
   const fontRegistry = createFontRegistry("opentype");
   const font = await fontRegistry.registerBytes(fontBytes).ready;
+  // resolveTextShapingFont's own "variationSourceFont" param: the
+  // "opentype" backend above deliberately never populates variationAxes
+  // (see that function's own doc), so baking needs this *separate*,
+  // fontkit-parsed ParsedFont over the exact same bytes instead. Lazy - not
+  // computed at all (no extra parse cost) unless this project actually has
+  // at least one variationAxes-configured TextNode.
+  const variationSourceFont = textNodes.some(({ node }) => node.variationAxes !== undefined)
+    ? parseFontWithFontkit(fontBytes)
+    : undefined;
 
-  // Every distinct (cacheKey, content) this project's text needs shaped: one
-  // pair per TextNode's own `content`, plus one more per `morph.from` for a
-  // morphing node - the crossfade's own "from" text needs exactly the same
-  // shaped/atlas-generated treatment as any other rendered text (see
-  // TextNode.morph's own doc), just keyed by a synthetic node whose content
-  // is `morph.from` instead. Keying this map by computeTextNodeRenderKey
-  // itself (not by node) both dedupes naturally (two nodes/sides that happen
-  // to resolve the same key only ever get shaped once) and guarantees this
-  // stays consistent with node-factory.ts's buildTextObject, which resolves
-  // against the exact same key for both the primary and "from" text.
-  const requestedContent = new Map<string, string>();
-  for (const node of textNodes) {
-    requestedContent.set(computeTextNodeRenderKey(node, 0), node.content);
-    if (node.morph !== undefined) {
-      requestedContent.set(computeTextNodeRenderKey({ ...node, content: node.morph.from }, 0), node.morph.from);
+  // Every distinct (cacheKey, content, resolved variationAxes) this
+  // project's text needs shaped - see this function's own doc for exactly
+  // which frames get sampled and why. Keying this map by
+  // computeTextNodeRenderKey itself (not by node) both dedupes naturally
+  // (two nodes/sides/frames that happen to resolve the same key only ever
+  // get shaped once) and guarantees this stays consistent with
+  // node-factory.ts's buildTextObject, which resolves against the exact
+  // same key.
+  const requestedEntries = new Map<
+    string,
+    { content: string; variationAxes: Readonly<Record<string, number>> | undefined }
+  >();
+  for (const { node, durationInFrames } of textNodes) {
+    const framesToSample =
+      node.variationAxes !== undefined && isKeyframeTrack(node.variationAxes)
+        ? Array.from({ length: durationInFrames }, (_unused, frame) => frame)
+        : [0];
+
+    for (const frame of framesToSample) {
+      const variationAxes =
+        node.variationAxes !== undefined ? resolveVariationAxesProperty(node.variationAxes, frame) : undefined;
+      requestedEntries.set(computeTextNodeRenderKey(node, frame), { content: node.content, variationAxes });
+      if (node.morph !== undefined) {
+        requestedEntries.set(computeTextNodeRenderKey({ ...node, content: node.morph.from }, frame), {
+          content: node.morph.from,
+          variationAxes,
+        });
+      }
     }
   }
 
   const entries = new Map<string, PreparedTextRenderEntry>();
-  for (const [cacheKey, content] of requestedContent) {
+  for (const [cacheKey, { content, variationAxes }] of requestedEntries) {
+    const shapingFont = await resolveTextShapingFont(fontRegistry, font, content, variationAxes, variationSourceFont);
+
     // A 128px-per-em MSDF (vs the library's 42px default, tuned for
     // preview-sized text) keeps glyph edges crisp when a title fills a large
     // fraction of a 1080p+ frame: at the default, a full-width title
@@ -582,10 +631,15 @@ async function prepareTextRenderEntriesForProject(
     // the encoded output. `range` stays at its default: the MSDF material's
     // alpha ramp is calibrated against that default, and a wider range
     // leaves a visible haze out to each glyph quad's own bounds.
-    const data = await prepareTextRenderData(font, content, {
+    const data = await prepareTextRenderData(shapingFont, content, {
       atlasOptions: { fontSize: 128 },
     });
-    entries.set(cacheKey, { cacheKey, data, fontBytes, fontContentHash: font.contentHash });
+    entries.set(cacheKey, {
+      cacheKey,
+      data,
+      fontBytes: Buffer.from(shapingFont.bytes),
+      fontContentHash: shapingFont.contentHash,
+    });
   }
 
   return Array.from(entries.values());
