@@ -891,7 +891,18 @@ export function applyNodeProperties(
         }
         mesh.geometry = owned.meshGeometry.geometry;
       } else {
-        mesh.geometry = resolveMeshGeometry(node.geometryRef, ctx.geometryRegistry);
+        // node.geometryRef can legitimately be undefined here despite the
+        // guard above: owned.meshGeometry only ever gets populated at this
+        // entry's original createThreeObject call (see
+        // resolveMeshNodeGeometry), so a node created geometryRef-only and
+        // later edited (same id, still "mesh") to swap in inline geometry
+        // while dropping geometryRef reaches this branch with owned.meshGeometry
+        // still unset. Falls back to the same shared default a
+        // never-resolving geometryRef would.
+        mesh.geometry =
+          node.geometryRef !== undefined
+            ? resolveMeshGeometry(node.geometryRef, ctx.geometryRegistry)
+            : DEFAULT_MESH_GEOMETRY;
       }
       if (node.material !== undefined && owned?.material instanceof THREE.MeshPhysicalMaterial) {
         // Mutates the same owned material in place rather than reconstructing
@@ -901,7 +912,13 @@ export function applyNodeProperties(
         applyPbrMaterial(owned.material, resolveMeshMaterial(node.material, frame), ctx);
         mesh.material = owned.material;
       } else {
-        mesh.material = resolveMeshMaterialRef(node.materialRef, ctx.materialRegistry);
+        // Same reasoning as the geometry branch above: node.materialRef can
+        // legitimately be undefined here if this entry was created
+        // materialRef-only and later edited to swap in inline material.
+        mesh.material =
+          node.materialRef !== undefined
+            ? resolveMeshMaterialRef(node.materialRef, ctx.materialRegistry)
+            : DEFAULT_MESH_MATERIAL;
       }
       mesh.castShadow = node.castShadow ?? false;
       mesh.receiveShadow = node.receiveShadow ?? false;
@@ -1362,7 +1379,9 @@ function resolveMeshNodeGeometry(
   ctx: NodeFactoryContext,
 ): { geometry: THREE.BufferGeometry; owned: OwnedResources | undefined } {
   if (node.geometry === undefined) {
-    return { geometry: resolveMeshGeometry(node.geometryRef, ctx.geometryRegistry), owned: undefined };
+    // Schema-level validation (meshNodeSchema's .superRefine) guarantees
+    // geometryRef is present whenever geometry is absent.
+    return { geometry: resolveMeshGeometry(node.geometryRef!, ctx.geometryRegistry), owned: undefined };
   }
   const geometry = buildProceduralGeometry(node.geometry);
   return { geometry, owned: { meshGeometry: { geometry, geometryKey: JSON.stringify(node.geometry) } } };
@@ -1388,7 +1407,9 @@ function resolveMeshNodeMaterial(
   ctx: NodeFactoryContext,
 ): { material: THREE.Material; owned: OwnedResources | undefined } {
   if (node.material === undefined) {
-    return { material: resolveMeshMaterialRef(node.materialRef, ctx.materialRegistry), owned: undefined };
+    // Schema-level validation (meshNodeSchema's .superRefine) guarantees
+    // materialRef is present whenever material is absent.
+    return { material: resolveMeshMaterialRef(node.materialRef!, ctx.materialRegistry), owned: undefined };
   }
   const material = buildPbrMaterial(resolveMeshMaterial(node.material, 0), ctx);
   return { material, owned: { material } };

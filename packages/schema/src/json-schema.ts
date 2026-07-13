@@ -2,6 +2,75 @@ import { z } from "zod";
 
 import { sceneDocumentSchema } from "./envelope.js";
 
+type JsonSchemaNode = Record<string, unknown>;
+
+function isJsonSchemaNode(value: unknown): value is JsonSchemaNode {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** One `{ required: [name] }` branch per name, combined with `anyOf` - the JSON Schema shape of "at least one of these fields is present". */
+function requireAtLeastOneOf(...fieldNames: string[]): JsonSchemaNode {
+  return { anyOf: fieldNames.map((fieldName) => ({ required: [fieldName] })) };
+}
+
+/**
+ * Finds every object-schema node, anywhere in `root`, whose `properties.kind`
+ * is the literal `"mesh"` - i.e. the JSON Schema translation of
+ * `meshNodeSchema` wherever it was inlined (`z.toJSONSchema` factors a
+ * schema out into `$defs` and `$ref`s it only when the same schema instance
+ * is reachable from more than one place, so `meshNodeSchema`'s exact
+ * location among `$defs`/`oneOf`/`anyOf` branches is not a stable path to
+ * hardcode). A structural search by discriminant, mirroring `./parse.ts`'s
+ * `checkAssetRefs` walk, stays correct regardless of how `zod` happens to
+ * lay the tree out.
+ */
+function findMeshNodeSchemas(value: unknown): JsonSchemaNode[] {
+  if (Array.isArray(value)) {
+    return value.flatMap(findMeshNodeSchemas);
+  }
+  if (!isJsonSchemaNode(value)) {
+    return [];
+  }
+  const properties = value.properties;
+  const isMeshNode =
+    isJsonSchemaNode(properties) && isJsonSchemaNode(properties.kind) && properties.kind.const === "mesh";
+  const ownMatch = isMeshNode ? [value] : [];
+  return [...ownMatch, ...Object.values(value).flatMap(findMeshNodeSchemas)];
+}
+
+/**
+ * `meshNodeSchema`'s `.superRefine` (`./scene-node.ts`) enforces "at least
+ * one of `geometryRef`/`geometry`, and independently at least one of
+ * `materialRef`/`material`, must be present" at runtime - but `z.toJSONSchema`
+ * cannot lift an arbitrary `.superRefine` predicate into a structural JSON
+ * Schema constraint, so it silently drops it, leaving `geometryRef`/
+ * `materialRef`/`geometry`/`material` all plainly optional with no
+ * cross-field constraint at all in the generated artifact. Left alone, a
+ * document with neither a mesh node's ref nor its inline alternative would
+ * validate successfully against `scene.schema.json` even though this
+ * package's own `parseScene` rejects it - a real gap for any consumer
+ * validating purely against the raw JSON Schema (not through this package's
+ * Zod-based `parseScene`). This restores the constraint post-generation, as
+ * a structural `allOf`/`anyOf`/`required` combination every JSON Schema
+ * validator (this repo's own `ajv`-based tests included; see
+ * `json-schema.test.ts`) understands natively.
+ */
+function injectMeshNodeRefConstraints(root: JsonSchemaNode): void {
+  const meshNodeSchemas = findMeshNodeSchemas(root);
+  if (meshNodeSchemas.length === 0) {
+    throw new Error(
+      "generateSceneJsonSchema: no mesh node schema found to inject the geometryRef/materialRef " +
+        "'at least one of' constraint onto - did the generated JSON Schema's shape change?",
+    );
+  }
+  for (const meshNodeSchema of meshNodeSchemas) {
+    meshNodeSchema.allOf = [
+      requireAtLeastOneOf("geometryRef", "geometry"),
+      requireAtLeastOneOf("materialRef", "material"),
+    ];
+  }
+}
+
 /**
  * Generates the JSON Schema artifact for the full scene document envelope
  * (`{ schemaVersion, project }`), using Zod's own built-in JSON Schema
@@ -21,8 +90,10 @@ import { sceneDocumentSchema } from "./envelope.js";
  * actually accept.
  */
 export function generateSceneJsonSchema(): Record<string, unknown> {
-  return z.toJSONSchema(sceneDocumentSchema, { target: "draft-2020-12" }) as Record<
+  const jsonSchema = z.toJSONSchema(sceneDocumentSchema, { target: "draft-2020-12" }) as Record<
     string,
     unknown
   >;
+  injectMeshNodeRefConstraints(jsonSchema);
+  return jsonSchema;
 }

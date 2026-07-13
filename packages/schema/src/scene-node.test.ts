@@ -87,13 +87,66 @@ describe("sceneNodeSchema: mesh", () => {
     expect(result.success).toBe(true);
   });
 
-  it("rejects a mesh node missing materialRef", () => {
+  it("rejects a mesh node missing both materialRef and material, naming the missing constraint", () => {
     const result = sceneNodeSchema.safeParse({
       ...baseFields(),
       kind: "mesh",
       geometryRef: "geo-1",
     });
     expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((candidate) => candidate.path.join(".") === "materialRef");
+      expect(issue).toBeDefined();
+      expect(issue?.message).toMatch(/'materialRef' or 'material' must be provided/);
+    }
+  });
+
+  it("accepts a mesh node with inline geometry and material, geometryRef and materialRef both omitted", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "mesh",
+      geometry: { type: "box" },
+      material: {},
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a mesh node with both a ref and its inline alternative (the inline one wins, per MeshNode's own doc)", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "mesh",
+      geometryRef: "geo-1",
+      materialRef: "mat-1",
+      geometry: { type: "sphere" },
+      material: {},
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a mesh node with neither geometryRef nor geometry, naming the missing constraint", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "mesh",
+      materialRef: "mat-1",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((candidate) => candidate.path.join(".") === "geometryRef");
+      expect(issue).toBeDefined();
+      expect(issue?.message).toMatch(/'geometryRef' or 'geometry' must be provided/);
+    }
+  });
+
+  it("rejects a mesh node with neither a ref nor an inline value for either geometry or material, reporting both", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "mesh",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.path.join(".") === "geometryRef")).toBe(true);
+      expect(result.error.issues.some((issue) => issue.path.join(".") === "materialRef")).toBe(true);
+    }
   });
 });
 

@@ -1877,15 +1877,15 @@
               "description": "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track."
             },
             "geometryRef": {
-              "type": "string",
-              "description": "Id of a geometry asset, resolved against a geometry registry by the renderer."
+              "description": "Id of a geometry asset, resolved against a geometry registry by the renderer. Optional only when geometry is present.",
+              "type": "string"
             },
             "materialRef": {
-              "type": "string",
-              "description": "Id of a material asset, resolved against a material registry by the renderer."
+              "description": "Id of a material asset, resolved against a material registry by the renderer. Optional only when material is present.",
+              "type": "string"
             },
             "geometry": {
-              "description": "A procedural primitive geometry, taking over from geometryRef entirely when present.",
+              "description": "A procedural primitive geometry, taking over from geometryRef entirely when present. Required when geometryRef is absent.",
               "oneOf": [
                 {
                   "type": "object",
@@ -2081,7 +2081,7 @@
               ]
             },
             "material": {
-              "description": "A physically based material, taking over from materialRef entirely when present.",
+              "description": "A physically based material, taking over from materialRef entirely when present. Required when materialRef is absent.",
               "type": "object",
               "properties": {
                 "baseColor": {
@@ -3407,11 +3407,39 @@
             "kind",
             "transform",
             "visible",
-            "geometryRef",
-            "materialRef",
             "children"
           ],
-          "additionalProperties": false
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "anyOf": [
+                {
+                  "required": [
+                    "geometryRef"
+                  ]
+                },
+                {
+                  "required": [
+                    "geometry"
+                  ]
+                }
+              ]
+            },
+            {
+              "anyOf": [
+                {
+                  "required": [
+                    "materialRef"
+                  ]
+                },
+                {
+                  "required": [
+                    "material"
+                  ]
+                }
+              ]
+            }
+          ]
         },
         {
           "type": "object",

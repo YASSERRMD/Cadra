@@ -392,47 +392,82 @@ type _CheckMeshGeometryConfig = AssertTrue<
  * A renderable mesh. `geometryRef` and `materialRef` are ids resolved
  * against a geometry and material registry by a later phase; the scene DSL
  * itself stays agnostic to how those registries are populated.
+ *
+ * Each has a same-named inline alternative (`geometry`/`material`) that
+ * takes over entirely when present, so neither ref is unconditionally
+ * required - but at least one of `geometryRef`/`geometry`, and independently
+ * at least one of `materialRef`/`material`, must be present (nothing to
+ * render otherwise); `.superRefine` below enforces exactly that, since
+ * `z.strictObject` alone cannot express an "at least one of" constraint
+ * across two independently-optional fields.
  */
-export const meshNodeSchema = z.strictObject({
-  id: z.string().describe("Unique identifier for this scene node within the project."),
-  kind: z.literal("mesh").describe("Discriminant identifying this node as a mesh."),
-  name: z
-    .string()
-    .optional()
-    .describe("Optional human-readable label, purely for authoring and debugging."),
-  transform: animatableTransformSchema.describe(
-    "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track.",
-  ),
-  visible: propertySchema(z.boolean()).describe(
-    "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track.",
-  ),
-  geometryRef: z
-    .string()
-    .describe("Id of a geometry asset, resolved against a geometry registry by the renderer."),
-  materialRef: z
-    .string()
-    .describe("Id of a material asset, resolved against a material registry by the renderer."),
-  geometry: meshGeometryConfigSchema
-    .optional()
-    .describe("A procedural primitive geometry, taking over from geometryRef entirely when present."),
-  material: meshMaterialConfigSchema
-    .optional()
-    .describe("A physically based material, taking over from materialRef entirely when present."),
-  castShadow: z
-    .boolean()
-    .optional()
-    .describe("Whether this mesh casts a shadow onto other shadow-receiving surfaces. Defaults to false."),
-  receiveShadow: z
-    .boolean()
-    .optional()
-    .describe("Whether this mesh receives shadows cast by shadow-casting lights. Defaults to false."),
-  rigidBody: rigidBodyConfigSchema
-    .optional()
-    .describe("Rigid-body physics simulated by @cadra/physics. Omitted means this mesh is not physics-driven."),
-  get children(): z.ZodArray<typeof sceneNodeSchema> {
-    return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
-  },
-});
+export const meshNodeSchema = z
+  .strictObject({
+    id: z.string().describe("Unique identifier for this scene node within the project."),
+    kind: z.literal("mesh").describe("Discriminant identifying this node as a mesh."),
+    name: z
+      .string()
+      .optional()
+      .describe("Optional human-readable label, purely for authoring and debugging."),
+    transform: animatableTransformSchema.describe(
+      "The position, rotation, and scale of this node. Each field is a plain Vector3 or a keyframe track.",
+    ),
+    visible: propertySchema(z.boolean()).describe(
+      "Whether this node (and its subtree) should be rendered. A plain boolean or a keyframe track.",
+    ),
+    geometryRef: z
+      .string()
+      .optional()
+      .describe(
+        "Id of a geometry asset, resolved against a geometry registry by the renderer. Optional only when geometry is present.",
+      ),
+    materialRef: z
+      .string()
+      .optional()
+      .describe(
+        "Id of a material asset, resolved against a material registry by the renderer. Optional only when material is present.",
+      ),
+    geometry: meshGeometryConfigSchema
+      .optional()
+      .describe(
+        "A procedural primitive geometry, taking over from geometryRef entirely when present. Required when geometryRef is absent.",
+      ),
+    material: meshMaterialConfigSchema
+      .optional()
+      .describe(
+        "A physically based material, taking over from materialRef entirely when present. Required when materialRef is absent.",
+      ),
+    castShadow: z
+      .boolean()
+      .optional()
+      .describe("Whether this mesh casts a shadow onto other shadow-receiving surfaces. Defaults to false."),
+    receiveShadow: z
+      .boolean()
+      .optional()
+      .describe("Whether this mesh receives shadows cast by shadow-casting lights. Defaults to false."),
+    rigidBody: rigidBodyConfigSchema
+      .optional()
+      .describe("Rigid-body physics simulated by @cadra/physics. Omitted means this mesh is not physics-driven."),
+    get children(): z.ZodArray<typeof sceneNodeSchema> {
+      return z.array(sceneNodeSchema).describe("Child scene nodes nested under this node.");
+    },
+  })
+  .superRefine((node, ctx) => {
+    if (node.geometryRef === undefined && node.geometry === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Either 'geometryRef' or 'geometry' must be provided.",
+        path: ["geometryRef"],
+      });
+    }
+    if (node.materialRef === undefined && node.material === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Either 'materialRef' or 'material' must be provided.",
+        path: ["materialRef"],
+      });
+    }
+  });
 
 type _CheckMeshNode = AssertTrue<AssertEqual<z.infer<typeof meshNodeSchema>, MeshNode>>;
 
