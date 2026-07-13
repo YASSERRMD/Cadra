@@ -7,6 +7,8 @@ import {
 } from "@cadra/headless";
 import {
   computeVideoFrameCacheKey,
+  createDefaultEnvironmentRegistry,
+  createDefaultLutRegistry,
   createDefaultParseGltf,
   createImageTexture,
   createInMemoryModelRegistry,
@@ -17,8 +19,12 @@ import {
   createPixelReadableRenderer,
   createRenderer,
   type DecodeVideo,
+  type EnvironmentRegistry,
   type LoadedModel,
+  type LutRegistry,
   type ModelRegistry,
+  parseCubeLut,
+  parseHdrEnvironment,
   type PixelBuffer,
   type SampleAtTimestamp,
   sampleVideoFrame,
@@ -276,6 +282,98 @@ async function buildModelRegistry(entries: readonly SerializedModelAssetEntry[])
   );
 
   return registry;
+}
+
+/**
+ * One `CompositionEnvironment.envMapRef` this project needs, fetched ahead
+ * of time on the Node side (`@cadra/encode`'s own `render-job.ts`, via the
+ * same `fetchAssetBytes` seam `SerializedImageRenderEntry` already uses) and
+ * carried across `page.evaluate`'s structured-clone boundary as plain,
+ * serializable data - mirrors `SerializedModelAssetEntry`'s own purpose and
+ * rationale exactly: `@cadra/renderer`'s own `parseHdrEnvironment` works
+ * identically in a real browser page or plain Node (no network/file I/O of
+ * its own), so decoding still happens here, in the page (`buildEnvironmentRegistry`
+ * below), purely to keep every asset kind's own "fetch raw bytes on the Node
+ * side, decode in whichever environment actually renders" shape uniform.
+ */
+export interface SerializedEnvironmentAssetEntry {
+  /** The `CompositionEnvironment.envMapRef` this entry serves. */
+  envMapRef: string;
+  /** The asset's raw `.hdr` bytes. */
+  bytes: number[];
+}
+
+/**
+ * Reconstructs a real, in-page `EnvironmentRegistry` from `entries`: parses
+ * each one's raw bytes via `parseHdrEnvironment`, falling back to a real
+ * `createDefaultEnvironmentRegistry()` for any `envMapRef` not present in
+ * `entries` at all - so the two built-in procedural refs (`"studio"`/
+ * `"outdoor"`) keep resolving unchanged, and only a real uploaded HDR
+ * environment needs an entry here, mirroring `@cadra/encode`'s own
+ * same-process `buildEnvironmentRegistryForProject` exactly.
+ *
+ * One entry failing to parse (corrupt bytes, or a malformed `.hdr` file) is
+ * caught and logged via `console.error` rather than rejecting this function
+ * or the render job as a whole - mirroring `buildModelRegistry`'s own
+ * per-asset resilience exactly: that composition's environment then
+ * resolves as if `envMapRef` were never set, matching `EnvironmentRegistry.resolve`'s
+ * own "unresolved is an expected runtime state" contract.
+ */
+function buildEnvironmentRegistry(entries: readonly SerializedEnvironmentAssetEntry[]): EnvironmentRegistry {
+  const custom = new Map<string, ReturnType<typeof parseHdrEnvironment>>();
+
+  for (const entry of entries) {
+    try {
+      custom.set(entry.envMapRef, parseHdrEnvironment(Uint8Array.from(entry.bytes)));
+    } catch (error) {
+      console.error(`Failed to parse environment asset "${entry.envMapRef}":`, error);
+    }
+  }
+
+  const defaults = createDefaultEnvironmentRegistry();
+  return {
+    resolve: (ref: string) => custom.get(ref) ?? defaults.resolve(ref),
+  };
+}
+
+/**
+ * One `LutEffectConfig.lutRef` this project needs, fetched ahead of time on
+ * the Node side and carried across `page.evaluate`'s structured-clone
+ * boundary as plain, serializable data - mirrors
+ * `SerializedEnvironmentAssetEntry`'s own purpose and rationale exactly
+ * (`parseCubeLut` also works identically in a real browser page or plain
+ * Node).
+ */
+export interface SerializedLutAssetEntry {
+  /** The `LutEffectConfig.lutRef` this entry serves. */
+  lutRef: string;
+  /** The asset's raw `.cube` file bytes (UTF-8 text, decoded here). */
+  bytes: number[];
+}
+
+/**
+ * Reconstructs a real, in-page `LutRegistry` from `entries`, mirroring
+ * `buildEnvironmentRegistry`'s own shape and rationale exactly: falls back
+ * to a real `createDefaultLutRegistry()` (its own three built-in procedural
+ * looks) for any `lutRef` not present in `entries`, and a `.cube` file that
+ * fails to decode/parse is caught and logged rather than failing the render.
+ */
+function buildLutRegistry(entries: readonly SerializedLutAssetEntry[]): LutRegistry {
+  const custom = new Map<string, ReturnType<typeof parseCubeLut>>();
+
+  for (const entry of entries) {
+    try {
+      const text = new TextDecoder("utf-8").decode(Uint8Array.from(entry.bytes));
+      custom.set(entry.lutRef, parseCubeLut(text));
+    } catch (error) {
+      console.error(`Failed to parse LUT asset "${entry.lutRef}":`, error);
+    }
+  }
+
+  const defaults = createDefaultLutRegistry();
+  return {
+    resolve: (ref: string) => custom.get(ref) ?? defaults.resolve(ref),
+  };
 }
 
 /**
@@ -548,6 +646,10 @@ export interface BrowserHeadlessRenderConfig {
   videoSamplesNeeded?: readonly VideoSampleRequest[];
   /** Every `SatoriNode` render-key's own already-rasterized pixels this render's own frames actually need; see `SerializedSatoriLayerRenderEntry`'s own doc. Omitted/empty means every satori node renders as an empty group, matching `createRenderer`'s own no-registry default. */
   satoriLayerRenderEntries?: readonly SerializedSatoriLayerRenderEntry[];
+  /** Every `CompositionEnvironment.envMapRef` this project needs, fetched ahead of time on the Node side; see `SerializedEnvironmentAssetEntry`'s own doc. Omitted/empty means only the renderer's own built-in procedural refs (`"studio"`/`"outdoor"`) resolve, matching `createRenderer`'s own no-registry default. */
+  environmentRenderEntries?: readonly SerializedEnvironmentAssetEntry[];
+  /** Every `LutEffectConfig.lutRef` this project needs, fetched ahead of time on the Node side; see `SerializedLutAssetEntry`'s own doc. Omitted/empty means only the renderer's own built-in procedural looks (`"warm"`/`"tealOrange"`/`"filmStock"`) resolve, matching `createRenderer`'s own no-registry default. */
+  lutRenderEntries?: readonly SerializedLutAssetEntry[];
 }
 
 /**
@@ -591,6 +693,10 @@ export interface BrowserHeadlessRenderRangeConfig {
   videoSamplesNeeded?: readonly VideoSampleRequest[];
   /** Every `SatoriNode` render-key's own already-rasterized pixels this range's own `[startFrame, endFrame)` actually needs; see `SerializedSatoriLayerRenderEntry`'s own doc. Omitted/empty means every satori node renders as an empty group, matching `createRenderer`'s own no-registry default. */
   satoriLayerRenderEntries?: readonly SerializedSatoriLayerRenderEntry[];
+  /** Every `CompositionEnvironment.envMapRef` this project needs, fetched ahead of time on the Node side; see `SerializedEnvironmentAssetEntry`'s own doc. Omitted/empty means only the renderer's own built-in procedural refs (`"studio"`/`"outdoor"`) resolve, matching `createRenderer`'s own no-registry default. */
+  environmentRenderEntries?: readonly SerializedEnvironmentAssetEntry[];
+  /** Every `LutEffectConfig.lutRef` this project needs, fetched ahead of time on the Node side; see `SerializedLutAssetEntry`'s own doc. Omitted/empty means only the renderer's own built-in procedural looks (`"warm"`/`"tealOrange"`/`"filmStock"`) resolve, matching `createRenderer`'s own no-registry default. */
+  lutRenderEntries?: readonly SerializedLutAssetEntry[];
 }
 
 /**
@@ -751,6 +857,8 @@ async function buildEncodedChunksForRange(
   videoAssetEntries: readonly SerializedVideoAssetEntry[] = [],
   videoSamplesNeeded: readonly VideoSampleRequest[] = [],
   satoriLayerRenderEntries: readonly SerializedSatoriLayerRenderEntry[] = [],
+  environmentRenderEntries: readonly SerializedEnvironmentAssetEntry[] = [],
+  lutRenderEntries: readonly SerializedLutAssetEntry[] = [],
 ): Promise<{
   composition: { width: number; height: number; fps: number };
   encodedChunks: AsyncGenerator<EncodedChunkResult>;
@@ -781,12 +889,16 @@ async function buildEncodedChunksForRange(
     videoSamplesNeeded,
     composition.fps,
   );
+  const environmentRegistry = buildEnvironmentRegistry(environmentRenderEntries);
+  const lutRegistry = buildLutRegistry(lutRenderEntries);
   const innerRenderer = createRenderer({
     textRenderRegistry: buildTextRenderRegistry(textRenderEntries),
     textureRegistry,
     modelRegistry,
     satoriLayerRenderRegistry,
     videoFrameRegistry,
+    environmentRegistry,
+    lutRegistry,
   });
   const renderer = createPixelReadableRenderer({
     renderer: innerRenderer,
@@ -867,6 +979,8 @@ export async function runBrowserHeadlessRender(config: BrowserHeadlessRenderConf
       config.videoAssetEntries,
       config.videoSamplesNeeded,
       config.satoriLayerRenderEntries,
+      config.environmentRenderEntries,
+      config.lutRenderEntries,
     );
 
     const destination = createBridgedWriteTarget();
@@ -952,6 +1066,8 @@ export async function runBrowserHeadlessRenderRange(
       config.videoAssetEntries,
       config.videoSamplesNeeded,
       config.satoriLayerRenderEntries,
+      config.environmentRenderEntries,
+      config.lutRenderEntries,
     );
 
     const serialized: SerializedEncodedChunk[] = [];

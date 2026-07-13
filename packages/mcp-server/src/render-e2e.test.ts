@@ -784,6 +784,417 @@ describe("render_scene: real image asset bytes reach the renderer", () => {
   );
 });
 
+/**
+ * Encodes one new-RLE-format Radiance scanline whose entire width is a
+ * single solid RGBE color, mirroring `render-frames-tools.test.ts`'s own
+ * identical `encodeUniformHdrRow` (duplicated, not imported/shared - see
+ * this file's own `buildSolidColorPng` for the same established
+ * per-file-fixture convention).
+ */
+function encodeUniformHdrRow(width: number, r: number, g: number, b: number, e: number): Buffer {
+  if (width > 127) {
+    throw new Error("encodeUniformHdrRow: run length must fit in one byte (<=127)");
+  }
+  return Buffer.from([
+    2, 2, (width >> 8) & 0xff, width & 0xff,
+    128 + width, r,
+    128 + width, g,
+    128 + width, b,
+    128 + width, e,
+  ]);
+}
+
+/** A real, hand-built, new-RLE-encoded 64x32 Radiance HDR file (top half red, bottom half green), mirroring `render-frames-tools.test.ts`'s own identical `buildStripedHdrBytes` - see that file's own doc for why 64x32 (not a smaller, simpler fixture) is required. */
+function buildStripedHdrBytes(): Buffer {
+  const width = 64;
+  const header = Buffer.from(`#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 32 +X ${width}\n`, "utf8");
+  const rows: Buffer[] = [];
+  for (let i = 0; i < 16; i += 1) {
+    rows.push(encodeUniformHdrRow(width, 128, 0, 0, 128));
+  }
+  for (let i = 0; i < 16; i += 1) {
+    rows.push(encodeUniformHdrRow(width, 0, 128, 0, 128));
+  }
+  return Buffer.concat([header, ...rows]);
+}
+
+/** A real, hand-written `.cube` file mapping every input color to solid pure green, mirroring `render-frames-tools.test.ts`'s own identical `buildSolidGreenCubeText`. */
+function buildSolidGreenCubeText(): Buffer {
+  const line = "0.0 1.0 0.0";
+  return Buffer.from(
+    ["TITLE \"Solid Green\"", "LUT_3D_SIZE 2", line, line, line, line, line, line, line, line, ""].join("\n"),
+    "utf8",
+  );
+}
+
+/** A near-mirror metal sphere plus a camera, no explicit lights, mirroring `render-frames-tools.test.ts`'s own identical `buildReflectiveSphereDocument` - relies purely on `environment`'s own IBL contribution. */
+function buildReflectiveSphereSceneDocument(
+  sceneId: string,
+  compositionId: string,
+  durationInFrames: number,
+  fps: number,
+  size: number,
+  envMapRef: string,
+): SceneDocument {
+  const sphere = Shape({
+    id: "sphere-1",
+    geometryRef: "sphere",
+    transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [2.2, 2.2, 2.2] },
+    material: { baseColor: [1, 1, 1, 1], metalness: 1, roughness: 0.05 },
+  });
+  const camera = Camera({
+    id: "camera-1",
+    transform: { position: [0, 0, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  });
+  const composition = createComposition({
+    id: compositionId,
+    name: "Main",
+    fps,
+    durationInFrames,
+    width: size,
+    height: size,
+    environment: { envMapRef, intensity: 1.5 },
+    tracks: [
+      { id: "track-sphere", clips: [Sequence({ id: "clip-sphere", from: 0, durationInFrames, content: sphere })] },
+      { id: "track-camera", clips: [Sequence({ id: "clip-camera", from: 0, durationInFrames, content: camera })] },
+    ],
+  });
+  const withActiveCameraTrack: Composition = {
+    ...composition,
+    activeCameraTrack: [{ startFrame: 0, durationInFrames, cameraNodeId: "camera-1" }],
+  };
+  const project: Project = createProject({
+    id: sceneId,
+    name: "Environment asset e2e scene",
+    compositions: [withActiveCameraTrack],
+  });
+  return { schemaVersion: 1, project } as SceneDocument;
+}
+
+/** A plain lit box, camera, and a `lut` post-processing effect, mirroring `render-frames-tools.test.ts`'s own identical `buildLutGradedBoxDocument`. */
+function buildLutGradedBoxSceneDocument(
+  sceneId: string,
+  compositionId: string,
+  durationInFrames: number,
+  fps: number,
+  size: number,
+  lutRef: string,
+): SceneDocument {
+  const box = Shape({
+    id: "box-1",
+    material: { baseColor: [0.6, 0.6, 0.6, 1], metalness: 0, roughness: 0.8 },
+    transform: { position: [0, 0, 0], rotation: [0.3, 0.4, 0], scale: [2, 2, 2] },
+  });
+  const camera = Camera({
+    id: "camera-1",
+    transform: { position: [0, 0, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  });
+  const ambientLight = Light({ id: "light-ambient", lightType: "ambient", intensity: 1.5 });
+  const directionalLight = Light({
+    id: "light-directional",
+    transform: { position: [2, 3, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    lightType: "directional",
+    intensity: 1.5,
+  });
+  const composition = createComposition({
+    id: compositionId,
+    name: "Main",
+    fps,
+    durationInFrames,
+    width: size,
+    height: size,
+    postProcessing: { effects: [{ type: "lut", lutRef, intensity: 1 }] },
+    tracks: [
+      { id: "track-box", clips: [Sequence({ id: "clip-box", from: 0, durationInFrames, content: box })] },
+      { id: "track-camera", clips: [Sequence({ id: "clip-camera", from: 0, durationInFrames, content: camera })] },
+      {
+        id: "track-ambient",
+        clips: [Sequence({ id: "clip-ambient", from: 0, durationInFrames, content: ambientLight })],
+      },
+      {
+        id: "track-directional",
+        clips: [Sequence({ id: "clip-directional", from: 0, durationInFrames, content: directionalLight })],
+      },
+    ],
+  });
+  const withActiveCameraTrack: Composition = {
+    ...composition,
+    activeCameraTrack: [{ startFrame: 0, durationInFrames, cameraNodeId: "camera-1" }],
+  };
+  const project: Project = createProject({ id: sceneId, name: "LUT asset e2e scene", compositions: [withActiveCameraTrack] });
+  return { schemaVersion: 1, project } as SceneDocument;
+}
+
+/**
+ * Proves `render_scene`'s own real browser-based production path (not just
+ * `render_frames`' native-GPU path) resolves a real uploaded HDR
+ * environment through `Composition.environment.envMapRef` - beyond the
+ * renderer's own built-in `"studio"`/`"outdoor"` procedural refs, which is
+ * all this path previously ever reached (see
+ * `buildEnvironmentRenderEntriesForProject`'s own doc in `@cadra/encode`).
+ * Same "renders visibly different output" rigor as this file's own image-
+ * asset-bytes test above (see that test's own doc for why pixel-level
+ * verification is `browser-headless-render-entry.e2e.test.ts`'s job, not
+ * this file's).
+ */
+describe("render_scene: real environment map (envMapRef) reaches the renderer", () => {
+  let workspaceRoot: string | undefined;
+  let client: Client | undefined;
+
+  afterEach(async () => {
+    await client?.close();
+    client = undefined;
+    if (workspaceRoot !== undefined) {
+      await rm(workspaceRoot, { recursive: true, force: true });
+      workspaceRoot = undefined;
+    }
+  });
+
+  it(
+    "renders visibly different output for a real uploaded HDR envMapRef than for the built-in 'studio' default",
+    async () => {
+      if (!chromiumAvailable) {
+        console.log(
+          "render_scene environment e2e test: skipping, real Chromium not found (no cached Playwright browser in this environment).",
+        );
+        return;
+      }
+
+      workspaceRoot = await mkdtemp(join(tmpdir(), "cadra-render-environment-e2e-test-"));
+      const outputDirectory = join(workspaceRoot, "out");
+
+      const { server } = createCadraMcpServer({
+        config: { workspaceRoot, outputDirectory },
+        logger: createLogger("test", {}, () => {
+          // Swallow log output in tests.
+        }),
+      });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const connectedClient = new Client({ name: "test-client", version: "0.0.0" });
+      await Promise.all([server.connect(serverTransport), connectedClient.connect(clientTransport)]);
+      client = connectedClient;
+
+      const uploadResult = await connectedClient.callTool({
+        name: UPLOAD_ASSET_TOOL_NAME,
+        arguments: { bytesBase64: buildStripedHdrBytes().toString("base64"), contentType: "application/octet-stream" },
+      });
+      const uploadPayload = parseToolResult<UploadAssetPayload>(uploadResult as ToolTextResult);
+      expect(uploadPayload.success).toBe(true);
+
+      const compositionId = "comp-1";
+      const durationInFrames = 3;
+      const fps = 10;
+      const size = 32;
+
+      async function renderSceneWithEnvMapRef(sceneId: string, envMapRef: string): Promise<Buffer> {
+        const createResult = await connectedClient.callTool({
+          name: CREATE_SCENE_TOOL_NAME,
+          arguments: {
+            sceneId,
+            name: "Environment asset e2e scene",
+            composition: { id: compositionId, name: "Main", fps, durationInFrames, width: size, height: size },
+          },
+        });
+        expect(parseToolResult<{ success: boolean }>(createResult as ToolTextResult).success).toBe(true);
+
+        const replaceResult = await connectedClient.callTool({
+          name: UPDATE_SCENE_TOOL_NAME,
+          arguments: {
+            sceneId,
+            mode: "replace",
+            document: buildReflectiveSphereSceneDocument(
+              sceneId,
+              compositionId,
+              durationInFrames,
+              fps,
+              size,
+              envMapRef,
+            ),
+          },
+        });
+        expect(parseToolResult<{ success: boolean }>(replaceResult as ToolTextResult).success).toBe(true);
+
+        const renderResult = await connectedClient.callTool({
+          name: RENDER_SCENE_TOOL_NAME,
+          arguments: { sceneId, compositionId, seed: "fixed-environment-seed", format: "mp4", bitrate: 1_000_000 },
+        });
+        const renderPayload = parseToolResult<RenderScenePayload>(renderResult as ToolTextResult);
+        expect(renderPayload.success).toBe(true);
+        const jobId = renderPayload.jobId;
+
+        const pollDeadline = Date.now() + 60_000;
+        let finalStatus: RenderStatusPayload | undefined;
+        while (Date.now() < pollDeadline) {
+          const statusResult = await connectedClient.callTool({ name: GET_RENDER_STATUS_TOOL_NAME, arguments: { jobId } });
+          const statusPayload = parseToolResult<RenderStatusPayload>(statusResult as ToolTextResult);
+          if (statusPayload.outcome !== undefined) {
+            finalStatus = statusPayload;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+        expect(finalStatus?.outcome).toEqual({ ok: true });
+
+        const outputResult = await connectedClient.callTool({ name: GET_RENDER_OUTPUT_TOOL_NAME, arguments: { jobId } });
+        const outputPayload = parseToolResult<RenderOutputPayload>(outputResult as ToolTextResult);
+        expect(outputPayload.success).toBe(true);
+        return readFile(outputPayload.outputPath!);
+      }
+
+      const builtInOutput = await renderSceneWithEnvMapRef("scene-env-builtin", "studio");
+      const uploadedOutput = await renderSceneWithEnvMapRef("scene-env-uploaded", uploadPayload.assetRef!);
+
+      expect(builtInOutput.byteLength).toBeGreaterThan(512);
+      expect(uploadedOutput.byteLength).toBeGreaterThan(512);
+      expect(Buffer.compare(builtInOutput, uploadedOutput)).not.toBe(0);
+    },
+    120_000,
+  );
+});
+
+/**
+ * Proves `render_scene`'s own real browser-based production path resolves a
+ * real uploaded `.cube` LUT through a `postProcessing` `lut` effect's own
+ * `lutRef` - beyond the renderer's own built-in `"warm"`/`"tealOrange"`/
+ * `"filmStock"` procedural looks, which is all this path previously ever
+ * reached (see `buildLutRenderEntriesForProject`'s own doc in
+ * `@cadra/encode`).
+ */
+describe("render_scene: real LUT (lutRef) reaches the renderer", () => {
+  let workspaceRoot: string | undefined;
+  let client: Client | undefined;
+
+  afterEach(async () => {
+    await client?.close();
+    client = undefined;
+    if (workspaceRoot !== undefined) {
+      await rm(workspaceRoot, { recursive: true, force: true });
+      workspaceRoot = undefined;
+    }
+  });
+
+  it(
+    "renders visibly different output for a real uploaded .cube LUT than for no LUT at all",
+    async () => {
+      if (!chromiumAvailable) {
+        console.log(
+          "render_scene LUT e2e test: skipping, real Chromium not found (no cached Playwright browser in this environment).",
+        );
+        return;
+      }
+
+      workspaceRoot = await mkdtemp(join(tmpdir(), "cadra-render-lut-e2e-test-"));
+      const outputDirectory = join(workspaceRoot, "out");
+
+      const { server } = createCadraMcpServer({
+        config: { workspaceRoot, outputDirectory },
+        logger: createLogger("test", {}, () => {
+          // Swallow log output in tests.
+        }),
+      });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const connectedClient = new Client({ name: "test-client", version: "0.0.0" });
+      await Promise.all([server.connect(serverTransport), connectedClient.connect(clientTransport)]);
+      client = connectedClient;
+
+      const uploadResult = await connectedClient.callTool({
+        name: UPLOAD_ASSET_TOOL_NAME,
+        arguments: { bytesBase64: buildSolidGreenCubeText().toString("base64"), contentType: "application/octet-stream" },
+      });
+      const uploadPayload = parseToolResult<UploadAssetPayload>(uploadResult as ToolTextResult);
+      expect(uploadPayload.success).toBe(true);
+
+      const compositionId = "comp-1";
+      const durationInFrames = 3;
+      const fps = 10;
+      const size = 32;
+
+      const sceneId = "scene-lut-uploaded";
+      const createResult = await connectedClient.callTool({
+        name: CREATE_SCENE_TOOL_NAME,
+        arguments: {
+          sceneId,
+          name: "LUT asset e2e scene",
+          composition: { id: compositionId, name: "Main", fps, durationInFrames, width: size, height: size },
+        },
+      });
+      expect(parseToolResult<{ success: boolean }>(createResult as ToolTextResult).success).toBe(true);
+
+      const gradedResult = await connectedClient.callTool({
+        name: UPDATE_SCENE_TOOL_NAME,
+        arguments: {
+          sceneId,
+          mode: "replace",
+          document: buildLutGradedBoxSceneDocument(
+            sceneId,
+            compositionId,
+            durationInFrames,
+            fps,
+            size,
+            uploadPayload.assetRef!,
+          ),
+        },
+      });
+      expect(parseToolResult<{ success: boolean }>(gradedResult as ToolTextResult).success).toBe(true);
+
+      async function renderAndFetch(): Promise<Buffer> {
+        const renderResult = await connectedClient.callTool({
+          name: RENDER_SCENE_TOOL_NAME,
+          arguments: { sceneId, compositionId, seed: "fixed-lut-seed", format: "mp4", bitrate: 1_000_000 },
+        });
+        const renderPayload = parseToolResult<RenderScenePayload>(renderResult as ToolTextResult);
+        expect(renderPayload.success).toBe(true);
+        const jobId = renderPayload.jobId;
+
+        const pollDeadline = Date.now() + 60_000;
+        let finalStatus: RenderStatusPayload | undefined;
+        while (Date.now() < pollDeadline) {
+          const statusResult = await connectedClient.callTool({ name: GET_RENDER_STATUS_TOOL_NAME, arguments: { jobId } });
+          const statusPayload = parseToolResult<RenderStatusPayload>(statusResult as ToolTextResult);
+          if (statusPayload.outcome !== undefined) {
+            finalStatus = statusPayload;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+        expect(finalStatus?.outcome).toEqual({ ok: true });
+
+        const outputResult = await connectedClient.callTool({ name: GET_RENDER_OUTPUT_TOOL_NAME, arguments: { jobId } });
+        const outputPayload = parseToolResult<RenderOutputPayload>(outputResult as ToolTextResult);
+        expect(outputPayload.success).toBe(true);
+        return readFile(outputPayload.outputPath!);
+      }
+
+      const gradedOutput = await renderAndFetch();
+
+      // Re-author the exact same scene with no postProcessing at all, and
+      // render again with the same seed: if the uploaded LUT's own bytes
+      // never reached the renderer, both renders would encode to identical
+      // bytes.
+      const ungradedDocument = buildLutGradedBoxSceneDocument(
+        sceneId,
+        compositionId,
+        durationInFrames,
+        fps,
+        size,
+        uploadPayload.assetRef!,
+      );
+      ungradedDocument.project.compositions[0]!.postProcessing = undefined;
+      const ungradedResult = await connectedClient.callTool({
+        name: UPDATE_SCENE_TOOL_NAME,
+        arguments: { sceneId, mode: "replace", document: ungradedDocument },
+      });
+      expect(parseToolResult<{ success: boolean }>(ungradedResult as ToolTextResult).success).toBe(true);
+      const ungradedOutput = await renderAndFetch();
+
+      expect(gradedOutput.byteLength).toBeGreaterThan(512);
+      expect(ungradedOutput.byteLength).toBeGreaterThan(512);
+      expect(Buffer.compare(gradedOutput, ungradedOutput)).not.toBe(0);
+    },
+    120_000,
+  );
+});
+
 /** A real, valid, uncompressed WAV file, mirroring `@cadra/encode`'s own identical `buildSineWaveWav` (duplicated, not imported/shared - see this file's own `buildSolidColorPng` for the same established per-file-fixture convention). */
 function buildSineWaveWav(durationSeconds: number, frequencyHz: number, sampleRate = 44_100): Buffer {
   const numChannels = 1;
