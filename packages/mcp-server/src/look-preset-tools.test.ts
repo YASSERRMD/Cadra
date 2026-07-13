@@ -144,6 +144,32 @@ describe("Cadra MCP apply_look_preset tool", () => {
     expect(parseScene(payload.document).success).toBe(true);
   });
 
+  it("applies lightShafts (godRays, otherwise unreachable through this tool) with lightNodeId resolved to a real light this same call created", async () => {
+    const connectedClient = await connectClient();
+    await createEmptyScene(connectedClient, "scene-1");
+
+    const result = await connectedClient.callTool({
+      name: APPLY_LOOK_PRESET_TOOL_NAME,
+      arguments: { sceneId: "scene-1", compositionId: "comp-1", presetName: "lightShafts" },
+    });
+    const payload = parseToolResult<ApplyLookPresetPayload>(result as ToolTextResult);
+
+    expect(payload.success).toBe(true);
+    if (!payload.success) {
+      throw new Error("Expected apply_look_preset to succeed.");
+    }
+
+    const composition = payload.document.project.compositions[0]!;
+    const godRaysEffect = composition.postProcessing?.effects.find((effect) => effect.type === "godRays");
+    expect(godRaysEffect).toBeDefined();
+    // Resolved to one of this exact call's own real generated light ids -
+    // not the static "key" presetLightRef string LOOK_PRESETS.lightShafts
+    // itself authors.
+    expect(godRaysEffect?.type === "godRays" ? godRaysEffect.lightNodeId : undefined).not.toBe("key");
+    expect(payload.lightNodeIds).toContain(godRaysEffect?.type === "godRays" ? godRaysEffect.lightNodeId : undefined);
+    expect(parseScene(payload.document).success).toBe(true);
+  });
+
   it("is deterministic: applying the same preset with the same idSeed twice produces the same light node ids", async () => {
     const connectedClient = await connectClient();
     await createEmptyScene(connectedClient, "scene-1");
