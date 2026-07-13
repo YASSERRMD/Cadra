@@ -959,6 +959,47 @@ describe("mountPreview: dispose", () => {
     expect(renderer.renderFrame).not.toHaveBeenCalled();
   });
 
+  it("defers renderer.dispose() itself until init() actually resolves, rather than calling it synchronously while init is still in flight", async () => {
+    // A real Renderer (ThreeRenderer) throws RendererNotInitializedError
+    // from every method but init() until init() resolves - see that
+    // class's own contract in packages/renderer/src/three-renderer.ts.
+    // This fake's own init() is deliberately left uncontrolled (manually
+    // resolved below, not auto-resolving like createFakeRenderer()'s
+    // default), so this test can observe dispose()'s own call timing
+    // relative to init resolving, independent of whether a fake renderer
+    // actually enforces that contract itself.
+    let resolveInit: (() => void) | undefined;
+    const renderer: Renderer = {
+      init: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveInit = resolve;
+          }),
+      ),
+      renderFrame: vi.fn(),
+      resize: vi.fn(),
+      dispose: vi.fn(),
+      backend: "webgl2",
+      capabilities: { backend: "webgl2", isFallback: true, maxTextureSize: 4096 } as RendererCapabilities,
+    };
+    const project = buildProject();
+    const { observeResize } = createFakeResizeObserver();
+    const handle = mountPreview(container, {
+      project,
+      compositionId: "comp-1",
+      renderer,
+      observeResize,
+    });
+
+    handle.dispose(); // dispose while renderer.init() is still in flight
+    await flushMicrotasks();
+    expect(renderer.dispose).not.toHaveBeenCalled();
+
+    resolveInit?.();
+    await flushMicrotasks();
+    expect(renderer.dispose).toHaveBeenCalledTimes(1);
+  });
+
   it("is idempotent: calling dispose() a second time does not throw", async () => {
     const project = buildProject();
     const renderer = createFakeRenderer();

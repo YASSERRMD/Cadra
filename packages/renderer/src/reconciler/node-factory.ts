@@ -660,21 +660,46 @@ function buildVolumeMaterial(node: VolumeNode, ctx: NodeFactoryContext): VolumeN
 }
 
 /**
+ * Builds the geometry/material pair a resolved `image` texture renders
+ * with: a plane sized to the texture's own natural aspect ratio - 1 unit
+ * wide, `naturalHeight / naturalWidth` units tall - so a non-square image
+ * renders at its own true proportions rather than stretched into a square;
+ * an author wanting a specific final size scales the node's own
+ * `transform.scale`, exactly like every other node kind's own size
+ * convention. `ImageNode` has no `width`/`height` field of its own to size
+ * from instead (see its own doc in `@cadra/core`).
+ *
+ * Shared between `buildImageObject` (the initial reconcile) and
+ * `applyNodeProperties`'s own `"image"` case (a later reconcile that
+ * finds `ctx.textureRegistry` now resolves an `assetRef` it did not
+ * before - see that case's own doc for why a *second* call site needs
+ * this exact same construction).
+ */
+function buildResolvedImageMesh(
+  texture: THREE.Texture,
+): { geometry: THREE.PlaneGeometry; material: THREE.MeshBasicMaterial } {
+  const naturalWidth: number | undefined = (texture.image as { width?: number } | undefined)?.width;
+  const naturalHeight: number | undefined = (texture.image as { height?: number } | undefined)?.height;
+  const aspect =
+    naturalWidth !== undefined && naturalHeight !== undefined && naturalHeight > 0
+      ? naturalWidth / naturalHeight
+      : 1;
+  const geometry = new THREE.PlaneGeometry(1, 1 / aspect);
+  const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
+  return { geometry, material };
+}
+
+/**
  * Builds an `image` node's `Object3D`: a real textured plane when
  * `ctx.textureRegistry` resolves `node.assetRef`, or the documented gray
  * placeholder plane otherwise (no registry injected at all, or this
  * specific `assetRef` not yet loaded - the same "not yet loaded is an
  * expected runtime state, not a programming error" contract every other
- * registry-resolved node kind in this file already follows).
- *
- * The resolved-texture path builds its own geometry (not the shared
- * `PLACEHOLDER_PLANE_GEOMETRY`) sized to the texture's own natural aspect
- * ratio - 1 unit wide, `naturalHeight / naturalWidth` units tall - so a
- * non-square image renders at its own true proportions rather than
- * stretched into a square; an author wanting a specific final size scales
- * the node's own `transform.scale`, exactly like every other node kind's
- * own size convention. `ImageNode` has no `width`/`height` field of its own
- * to size from instead (see its own doc in `@cadra/core`).
+ * registry-resolved node kind in this file already follows; a caller
+ * whose own registry populates asynchronously, after this node's own
+ * first reconcile - see `apps/studio`'s own live, progressively-loading
+ * viewport - gets a real, non-placeholder plane on a later reconcile
+ * instead, via `applyNodeProperties`'s own `"image"` case retry).
  */
 function buildImageObject(node: ImageNode, ctx: NodeFactoryContext): BuiltObject {
   const texture = ctx.textureRegistry?.resolve(node.assetRef);
@@ -684,14 +709,7 @@ function buildImageObject(node: ImageNode, ctx: NodeFactoryContext): BuiltObject
     return { object3D: mesh, owned: { material } };
   }
 
-  const naturalWidth: number | undefined = (texture.image as { width?: number } | undefined)?.width;
-  const naturalHeight: number | undefined = (texture.image as { height?: number } | undefined)?.height;
-  const aspect =
-    naturalWidth !== undefined && naturalHeight !== undefined && naturalHeight > 0
-      ? naturalWidth / naturalHeight
-      : 1;
-  const geometry = new THREE.PlaneGeometry(1, 1 / aspect);
-  const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
+  const { geometry, material } = buildResolvedImageMesh(texture);
   const mesh = new THREE.Mesh(geometry, material);
   return { object3D: mesh, owned: { material, image: { geometry } } };
 }
@@ -999,13 +1017,42 @@ export function applyNodeProperties(
       return;
     }
 
-    case "image":
+    case "image": {
       // assetRef is a plain string, not a Property<T>: it cannot change
       // frame to frame on a persisting node id (a new/different assetRef
-      // means a new node id in practice), so texture resolution happens
-      // once, in buildImageObject, not here. Nothing else on ImageNode is
-      // reactive either (see its own doc: no width/height/opacity field).
+      // means a new node id in practice), so there is no per-frame
+      // "did node.assetRef itself change" check the way text's own
+      // render-key comparison has. What CAN change frame to frame is
+      // whether ctx.textureRegistry now resolves an assetRef it did not
+      // resolve on an earlier call: a caller whose own asset bytes arrive
+      // asynchronously, after this node's own first reconcile already ran
+      // (a one-shot render pipeline never hits this - its registry is
+      // always fully populated before the very first reconcile, so
+      // buildImageObject's own resolve above already succeeded there; a
+      // live, progressively-loading preview - see apps/studio's own
+      // preview-assets/build-preview-registries.ts - is what actually
+      // exercises this), needs exactly the same "retry while still
+      // unresolved" tolerance buildTextContent's own render-key check
+      // already gives text nodes. owned.image stays undefined for as long
+      // as this node is still showing the placeholder (see that field's
+      // own doc), so its presence alone is what "already resolved, no
+      // need to retry" means here - unlike text, there is no separate key
+      // to compare, since a resolved image's own content can never change
+      // again once found.
+      if (owned !== undefined && owned.image === undefined) {
+        const texture = ctx.textureRegistry?.resolve(node.assetRef);
+        if (texture !== undefined) {
+          const mesh = object3D as THREE.Mesh;
+          const { geometry, material } = buildResolvedImageMesh(texture);
+          owned.material?.dispose();
+          mesh.geometry = geometry;
+          mesh.material = material;
+          owned.material = material;
+          owned.image = { geometry };
+        }
+      }
       return;
+    }
 
     case "video": {
       applyVideoNodeProperties(node, object3D as THREE.Mesh, ctx, frame, owned);

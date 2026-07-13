@@ -1,7 +1,7 @@
 import type { Transform } from "@cadra/core";
 import type { ObserveResizeFn, PreviewHandle } from "@cadra/player";
 import { mountPreview } from "@cadra/player";
-import type { Renderer } from "@cadra/renderer";
+import type { CreateRendererOptions, Renderer } from "@cadra/renderer";
 import {
   attachTransformGizmo,
   createRenderer as createRealRenderer,
@@ -10,11 +10,12 @@ import {
 import type { JSX } from "react";
 import { useEffect, useRef } from "react";
 
+import { buildPreviewRegistries, type BuildPreviewRegistriesFn } from "../preview-assets/build-preview-registries.js";
 import { commitNodeTransform } from "../store/document-edits.js";
 import type { DocumentStoreState } from "../store/document-store.js";
 
 /** Constructs a `Renderer`, matching `@cadra/renderer`'s own `createRenderer()` signature. */
-export type CreateRendererFn = () => Renderer;
+export type CreateRendererFn = (options?: CreateRendererOptions) => Renderer;
 
 /** Props for `Viewport`: exactly the slice of store state the preview needs. */
 export interface ViewportProps {
@@ -41,6 +42,23 @@ export interface ViewportProps {
    * touches one.
    */
   observeResize?: ObserveResizeFn;
+  /**
+   * Builds the registries/resolvers (`createRenderer`'s own
+   * `textureRegistry`/`videoFrameRegistry`/etc., `mountPreview`'s own
+   * `resolveAudioBuffer`/`decodeVideoFrame`) that let this viewport render
+   * real asset content instead of each node kind's documented placeholder.
+   * Defaults to `../preview-assets/build-preview-registries.js`'s own real
+   * `buildPreviewRegistries` (fetches bytes from a locally running Cadra MCP
+   * server's `GET /assets` endpoint). Injectable for the same reason
+   * `createRenderer` is: a real implementation touches `fetch`/`AudioContext`/
+   * `document.createElement("video")`, none of which `Viewport.test.tsx`
+   * wants a rendered `Viewport` to actually reach for - though in practice
+   * every existing test's own asset-free fixture document already resolves
+   * the real default synchronously with no such call ever made (see that
+   * module's own doc), so overriding this is only needed for a test that
+   * specifically exercises asset loading itself.
+   */
+  buildPreviewRegistries?: BuildPreviewRegistriesFn;
   /**
    * Called with the live `PreviewHandle` right after `Viewport` constructs
    * it, and again with `undefined` during that same effect's cleanup (before
@@ -174,6 +192,7 @@ export function Viewport({
   selectedCompositionId,
   createRenderer = createRealRenderer,
   observeResize,
+  buildPreviewRegistries: buildRegistries = buildPreviewRegistries,
   onHandleChange,
   selectedNodeId,
   onSelectNode,
@@ -221,12 +240,41 @@ export function Viewport({
       return undefined;
     }
 
-    const renderer = createRenderer();
+    // Built and wired synchronously (not awaited): `buildRegistries` itself
+    // never blocks on network I/O, only the *content* of what it returns
+    // fills in asynchronously in the background (see that function's own
+    // doc). Constructing `renderer`/`handle` synchronously here, exactly as
+    // before this phase, is what keeps every ref this effect sets
+    // (`rendererRef`/`canvasRef`/`previewHandleRef`) populated by the time
+    // the click-to-select and gizmo effects below run in this same
+    // commit - both key on this same `[document, selectedCompositionId]`
+    // pair, so they always run immediately after this effect; had this
+    // effect instead awaited asset loading before constructing anything,
+    // both sibling effects would find every ref still empty every time and
+    // never get a chance to re-run once loading finished.
+    const registries = buildRegistries(document.project, composition.fps, () => {
+      // Nudges the current frame to redraw once a background asset fetch
+      // succeeds: `@cadra/renderer`'s own reconciler re-checks its own
+      // registry on every later `applyNodeProperties` call for as long as a
+      // node is still showing its own placeholder (see `node-factory.ts`'s
+      // `"image"` case), so seeking to the frame already showing is enough
+      // to pick up newly arrived content - no remount needed. A harmless
+      // no-op if the preview already tore down/moved on by the time this
+      // fires (`seek` past `dispose()` is itself a no-op).
+      previewHandleRef.current?.seek(previewHandleRef.current.getFrame());
+    });
+
+    const renderer = createRenderer(registries.createRendererOptions);
     const handle = mountPreview(container, {
       project: document.project,
       compositionId: selectedCompositionId,
       renderer,
       ...(observeResize !== undefined && { observeResize }),
+      ...(registries.resolveAudioBuffer !== undefined && {
+        resolveAudioBuffer: registries.resolveAudioBuffer,
+      }),
+      ...(registries.audioContext !== undefined && { audioContext: registries.audioContext }),
+      ...(registries.decodeVideoFrame !== undefined && { decodeVideoFrame: registries.decodeVideoFrame }),
     });
     rendererRef.current = renderer;
     canvasRef.current =
@@ -237,19 +285,20 @@ export function Viewport({
     return () => {
       onHandleChange?.(undefined);
       handle.dispose();
+      registries.dispose();
       rendererRef.current = undefined;
       canvasRef.current = undefined;
       previewHandleRef.current = undefined;
     };
     // Deliberately not depending on `createRenderer`/`observeResize`/
-    // `onHandleChange` themselves: this effect's remount trigger is exactly
-    // `[document, selectedCompositionId]` per this component's own doc
-    // above, and all three are fixed construction dependencies (the real
-    // implementations in production, fixed fakes/setters in tests), never
-    // something that changes across a component's own lifetime the way
-    // `document`/`selectedCompositionId` do. (eslint-plugin-react-hooks is
-    // not part of this workspace's lint config, so no exhaustive-deps
-    // suppression is needed here either.)
+    // `buildRegistries`/`onHandleChange` themselves: this effect's remount
+    // trigger is exactly `[document, selectedCompositionId]` per this
+    // component's own doc above, and all four are fixed construction
+    // dependencies (the real implementations in production, fixed fakes/
+    // setters in tests), never something that changes across a component's
+    // own lifetime the way `document`/`selectedCompositionId` do.
+    // (eslint-plugin-react-hooks is not part of this workspace's lint
+    // config, so no exhaustive-deps suppression is needed here either.)
   }, [document, selectedCompositionId]);
 
   // Click-to-select: a plain `click` listener on the mounted canvas,

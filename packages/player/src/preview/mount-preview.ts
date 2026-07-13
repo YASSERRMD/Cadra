@@ -251,6 +251,13 @@ export function mountPreview(container: HTMLElement, options: MountPreviewOption
   const observeResize = options.observeResize ?? observeResizeWithResizeObserver;
 
   let isDisposed = false;
+  // Tracks whether `options.renderer.init()` has actually resolved: every
+  // `Renderer` method but `init` itself throws `RendererNotInitializedError`
+  // before then (see that class's own contract), so `dispose()` below must
+  // not call `options.renderer.dispose()` until this is `true` - see the
+  // `renderer.init().then(...)` callback a few lines down for where a
+  // dispose-before-init-resolves call gets deferred to instead.
+  let isInitResolved = false;
   let transport: Transport | undefined;
   let audioSync: AudioTransportSync | undefined;
   let frameAccurateSeeking: FrameAccurateSeeking | undefined;
@@ -508,10 +515,17 @@ export function mountPreview(container: HTMLElement, options: MountPreviewOption
   lastAppliedSize = initSize;
 
   void Promise.resolve(options.renderer.init(canvas, initSize)).then(() => {
+    isInitResolved = true;
     if (isDisposed) {
       // dispose() ran while init was in flight: never construct a Transport
       // (which would immediately render a frame) against a torn-down
-      // renderer/canvas.
+      // renderer/canvas. dispose() itself could not call
+      // `options.renderer.dispose()` at the time it ran (every `Renderer`
+      // method but `init` throws `RendererNotInitializedError` before init
+      // resolves - see that class's own contract), so it deferred that one
+      // call to right here, now that init has actually resolved and doing
+      // so is safe.
+      options.renderer.dispose();
       return;
     }
 
@@ -657,7 +671,13 @@ export function mountPreview(container: HTMLElement, options: MountPreviewOption
     videoFramePrefetch?.dispose();
     audioSync?.dispose();
     transport?.dispose();
-    options.renderer.dispose();
+    // If init() has not resolved yet, `options.renderer.dispose()` would
+    // throw (see `isInitResolved`'s own doc above); the `renderer.init().
+    // then(...)` callback defers that call to itself instead once init does
+    // resolve, so this is not a leak, only a deferral.
+    if (isInitResolved) {
+      options.renderer.dispose();
+    }
     frameChangedHandlers.clear();
 
     root.remove();
