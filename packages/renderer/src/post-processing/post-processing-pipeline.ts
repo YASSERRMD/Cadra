@@ -497,6 +497,20 @@ export function buildWebGpuPipeline(
   if (sampleCount !== undefined) {
     scenePass.sampleLevel = resolveSampleLevel(sampleCount);
   }
+  // A freshly constructed PassNode's own render target starts at its
+  // constructor default (1x1, real image dimensions only known once
+  // `updateBefore` first runs mid-render), but a `depthOfField` effect
+  // below reads this pass's own "output" texture's *current* image
+  // dimensions synchronously, at graph-build time, to size its own
+  // internal render targets (three.webgpu.js's own `DepthOfFieldNode`,
+  // verified directly against this project's installed `three@0.185.1`
+  // source) - before this pass has ever actually rendered once. Sizing it
+  // explicitly here, from the exact same `renderer.getDrawingBufferSize`
+  // `PassNode.updateBefore` itself would eventually use, closes that gap:
+  // every downstream effect always sees this pass's own real dimensions,
+  // never a 1x1 placeholder.
+  const drawingBufferSize = renderer.getDrawingBufferSize(new THREE.Vector2());
+  scenePass.setSize(drawingBufferSize.width, drawingBufferSize.height);
 
   if (config.ambientOcclusion !== undefined && hasMotionBlur) {
     scenePass.setMRT(mrt({ output, normal: normalView, velocity }));
