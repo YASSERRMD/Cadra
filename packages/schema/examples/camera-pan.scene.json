@@ -59,7 +59,82 @@
                 }
               }
             ]
+          },
+          {
+            "id": "track-camera-pan-subject",
+            "name": "Subject",
+            "clips": [
+              {
+                "id": "clip-subject",
+                "startFrame": 0,
+                "durationInFrames": 120,
+                "node": {
+                  "id": "subject-box",
+                  "kind": "mesh",
+                  "name": "Subject",
+                  "transform": {
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1]
+                  },
+                  "visible": true,
+                  "geometryRef": "geometry-box",
+                  "materialRef": "material-shape-gold",
+                  "children": []
+                }
+              }
+            ]
+          },
+          {
+            "id": "track-camera-pan-light",
+            "name": "Light",
+            "clips": [
+              {
+                "id": "clip-light-ambient",
+                "startFrame": 0,
+                "durationInFrames": 120,
+                "node": {
+                  "id": "light-ambient",
+                  "kind": "light",
+                  "name": "Ambient",
+                  "transform": {
+                    "position": [0, 0, 0],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1]
+                  },
+                  "visible": true,
+                  "lightType": "ambient",
+                  "color": [1, 1, 1, 1],
+                  "intensity": 1.2,
+                  "children": []
+                }
+              },
+              {
+                "id": "clip-light-directional",
+                "startFrame": 0,
+                "durationInFrames": 120,
+                "node": {
+                  "id": "light-directional",
+                  "kind": "light",
+                  "name": "Key",
+                  "transform": {
+                    "position": [3, 5, 5],
+                    "rotation": [0, 0, 0],
+                    "scale": [1, 1, 1]
+                  },
+                  "visible": true,
+                  "lightType": "directional",
+                  "color": [1, 1, 1, 1],
+                  "intensity": 2,
+                  "children": []
+                }
+              }
+            ]
           }
+        ],
+        "activeCameraTrack": [
+          { "startFrame": 0, "durationInFrames": 60, "cameraNodeId": "camera-start" },
+          { "startFrame": 60, "durationInFrames": 60, "cameraNodeId": "camera-end" }
         ]
       }
     ]

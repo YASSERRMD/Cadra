@@ -25,14 +25,14 @@
                   "kind": "text",
                   "name": "Kinetic Title",
                   "transform": {
-                    "position": [0, 0, 0],
+                    "position": [-1.4, 0, 0],
                     "rotation": [0, 0, 0],
                     "scale": [1, 1, 1]
                   },
                   "visible": true,
                   "content": "CADRA",
                   "fontRef": "font-inter-bold",
-                  "fontSize": 120,
+                  "fontSize": 1.5,
                   "color": [1, 1, 1, 1],
                   "stagger": {
                     "preset": "fadeInUp",

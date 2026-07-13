@@ -73,14 +73,14 @@
                   "kind": "text",
                   "name": "Lower Third",
                   "transform": {
-                    "position": [-5, -3, 1],
+                    "position": [-3.4, -1.8, 0],
                     "rotation": [0, 0, 0],
                     "scale": [1, 1, 1]
                   },
                   "visible": true,
                   "content": "Cadra Multi-Track Demo",
                   "fontRef": "font-inter-bold",
-                  "fontSize": 48,
+                  "fontSize": 0.6,
                   "color": [1, 1, 1, 1],
                   "children": []
                 },

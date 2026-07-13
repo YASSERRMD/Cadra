@@ -25,14 +25,14 @@
                   "kind": "text",
                   "name": "Lower Third (Arabic)",
                   "transform": {
-                    "position": [-6, -3, 0],
+                    "position": [-2.5, -0.8, 0],
                     "rotation": [0, 0, 0],
                     "scale": [1, 1, 1]
                   },
                   "visible": true,
                   "content": "مرحبا بالعالم",
                   "fontRef": "font-noto-sans-arabic",
-                  "fontSize": 64,
+                  "fontSize": 0.8,
                   "color": [1, 1, 1, 1],
                   "stagger": {
                     "preset": "fadeInUp",
@@ -60,14 +60,14 @@
                   "kind": "text",
                   "name": "Lower Third (Latin)",
                   "transform": {
-                    "position": [-6, -3.8, 0],
+                    "position": [-2.5, -1.6, 0],
                     "rotation": [0, 0, 0],
                     "scale": [1, 1, 1]
                   },
                   "visible": true,
                   "content": "Hello, World",
                   "fontRef": "font-inter-bold",
-                  "fontSize": 40,
+                  "fontSize": 0.5,
                   "color": [0.85, 0.85, 0.85, 1],
                   "stagger": {
                     "preset": "fadeInUp",

@@ -105,13 +105,30 @@ export async function generateMsdfAtlas(
     resolvedByIndex.set(glyph.index, glyph);
   }
 
+  // A resolved glyph with a degenerate (zero-area) bounding box - a space,
+  // a zero-width joiner, most control characters - has no ink to pack.
+  // Handing even one of these to `packGlyphs` below is safe in isolation
+  // (msdfgen-wasm's own maxrects-packer just gives it a 0x0 rect), but
+  // handing it a `glyphsToPack` that ends up *entirely* ink-less corrupts
+  // this cached `Msdfgen` instance's internal glyph state: the packed bin
+  // comes back 0x0 (harmless on its own), but the *next* `loadFont` call on
+  // this same instance then crashes inside its own native `unloadGlyphs`
+  // cleanup with a WASM "memory access out of bounds" fault - verified
+  // empirically (isolated repro: pack only a space character, then pack
+  // anything else on the same instance). Filtering these out here, before
+  // they ever reach `packGlyphs`, sidesteps the corruption outright rather
+  // than working around its symptom. This is safe to skip unconditionally
+  // (not just when it would otherwise produce an all-empty bin): a glyph
+  // that never gets a placement is already exactly how `placeGlyphQuad`
+  // (glyph-layout.ts) treats a placement with `width<=0 || height<=0` -
+  // skip the quad, still advance the pen from the shaped run's own advance.
   const glyphsToPack: MsdfGlyph[] = [];
   const missingGlyphIds: number[] = [];
   for (const glyphId of usedGlyphIds) {
     const resolved = resolvedByIndex.get(glyphId);
     if (resolved === undefined) {
       missingGlyphIds.push(glyphId);
-    } else {
+    } else if (resolved.right > resolved.left && resolved.top > resolved.bottom) {
       glyphsToPack.push(resolved);
     }
   }
@@ -132,7 +149,20 @@ export async function generateMsdfAtlas(
     // Composite this bin's glyphs onto one Bitmap ourselves (mirroring
     // msdfgen-wasm's own createAtlasImage) so the raw RGBA pixels are
     // available directly, not only reachable by decoding a PNG back.
-    const composited = new Bitmap(bin.width, bin.height);
+    //
+    // A bin comes back 0x0 when every glyph packed into it has no ink (e.g.
+    // the only used glyph is a space, or every requested glyph fell back to
+    // .notdef and got filtered into missingGlyphIds upstream) - geometrically
+    // a bin can only be smaller than some glyph it contains if that glyph
+    // itself has zero width/height, so a 0x0 bin means every rect in it is
+    // 0x0 too. `placeGlyphQuad` (glyph-layout.ts) already skips any glyph
+    // with width<=0 or height<=0, so no real glyph quad ever samples this
+    // page's texture - substitute a trivial 1x1 transparent bitmap so the
+    // page stays a valid GPU texture downstream; msdfgen's own `createPng`
+    // rejects a literal 0x0 image outright.
+    const pageWidth = bin.width > 0 ? bin.width : 1;
+    const pageHeight = bin.height > 0 ? bin.height : 1;
+    const composited = new Bitmap(pageWidth, pageHeight);
     for (const rect of bin.rects) {
       if (rect.width > 0 && rect.height > 0) {
         const glyphBitmap = msdfgen.generateBitmap(rect.glyph, rect.msdfData);
@@ -140,8 +170,8 @@ export async function generateMsdfAtlas(
       }
     }
     pages.push({
-      width: bin.width,
-      height: bin.height,
+      width: pageWidth,
+      height: pageHeight,
       pixels: new Uint8Array(composited.buffer),
       png: msdfgen.createPng(composited, 9),
     });
