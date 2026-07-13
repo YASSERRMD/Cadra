@@ -312,7 +312,12 @@ export interface OwnedResources {
    * every other instance and the registry's own cached template, via
    * `SkeletonUtils.clone`'s "clone the hierarchy, reuse the leaf
    * resources" behavior - see `"model"`'s own `buildThreeObject` case doc
-   * for why disposing them here would be wrong).
+   * for why disposing them here would be wrong). `undefined` while this
+   * node's own `assetRef` has not resolved yet (an empty placeholder
+   * `THREE.Group`, no cloned hierarchy grafted into it yet); mirrors
+   * `OwnedResources.image`'s own identical "presence means resolved"
+   * convention, retried by `applyNodeProperties`'s own `"model"` case on
+   * any later reconcile while still `undefined` - see that case's own doc.
    */
   model?: ModelOwnedResources;
   /**
@@ -517,7 +522,13 @@ function buildThreeObject(node: SceneNode, ctx: NodeFactoryContext): BuiltObject
     case "model": {
       const entry = ctx.modelRegistry?.resolve(node.assetRef);
       if (entry === undefined) {
-        return { object3D: new THREE.Group(), owned: undefined };
+        // A real (if empty) `owned`, not `undefined`: `applyNodeProperties`'s
+        // own `"model"` case needs a mutable object to later populate with
+        // `owned.model` once a caller whose own registry populates
+        // asynchronously (see `apps/studio`'s own live viewport) resolves
+        // this node's `assetRef` on a later reconcile - see that case's own
+        // doc, and `OwnedResources.model`'s own doc for the exact contract.
+        return { object3D: new THREE.Group(), owned: {} };
       }
       return buildModelObject(node, entry);
     }
@@ -1078,6 +1089,37 @@ export function applyNodeProperties(
     }
 
     case "model": {
+      // See `OwnedResources.model`'s own doc for why a caller whose own
+      // registry populates asynchronously (`apps/studio`'s own live
+      // viewport) needs this retried on later reconciles, not resolved
+      // only once at `buildThreeObject` time - mirrors `"image"`'s own
+      // identical retry above, adapted for `model`'s own different
+      // placeholder shape: an empty `THREE.Group` (`owned: {}`, no
+      // `owned.model` yet) rather than a mesh with a directly swappable
+      // geometry/material, so the freshly-built model's own cloned
+      // hierarchy is grafted on as a *child* of that persistent group
+      // instead of replacing `object3D` outright (which this function has
+      // no way to do - it only ever receives the already-reconciled
+      // `object3D` reference, never a way to replace it in the scene
+      // graph). This graft is transparent to every other system that
+      // touches a model node: `applyModelProperties` itself never reads
+      // `object3D` at all, only `owned.model` (see its own doc), so nesting
+      // one level deeper here changes nothing about how animation/morph
+      // state is driven; disposal (`reconciler.ts`'s own `disposeEntry`)
+      // only ever reads `owned.model.skeletons` directly, never traverses
+      // `object3D`; and `pickNodeAtPoint`'s own name lookup already walks
+      // arbitrarily many parent levels to find `node.id` (a raycast can
+      // already hit a leaf mesh nested several levels deep inside a
+      // model's own hierarchy even without this extra level), so grafting
+      // is transparent to picking too.
+      if (owned !== undefined && owned.model === undefined) {
+        const entry = ctx.modelRegistry?.resolve(node.assetRef);
+        if (entry !== undefined) {
+          const built = buildModelObject(node, entry);
+          object3D.add(built.object3D);
+          owned.model = built.owned?.model;
+        }
+      }
       applyModelProperties(node, owned?.model, frame, ctx);
       return;
     }

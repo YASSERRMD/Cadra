@@ -207,19 +207,11 @@ function populateInBackground<T>(
  * inside a real browser" path anywhere in this codebase to build this one
  * on top of (see this task's own investigation for the full detail).
  *
- * `ModelNode` real-asset resolution is also deliberately out of scope for
- * now, for a different reason: unlike `image` (fixed to retry against the
- * registry on any later reconcile, see `node-factory.ts`'s own `"image"`
- * case), `model`'s own placeholder path returns `owned: undefined` entirely
- * (an empty group, no owned resources at all to retry into) rather than a
- * mutable `owned` object a later call could populate - fixing this the same
- * way needs a broader reconciler signature change (a way for
- * `applyNodeProperties` to hand the reconciler a *replacement* `owned`, not
- * just mutate an existing one), out of scope for this task; flagged as a
- * follow-up. `modelRegistry` below is still populated for whatever *does*
- * resolve before a `ModelNode`'s own first reconcile (the one-shot render
- * pipelines' own case, always true there), just not for one that resolves
- * later, live.
+ * `ModelNode` real-asset resolution self-heals exactly like `image` does:
+ * `node-factory.ts`'s own `"model"` case in `applyNodeProperties` retries
+ * `ctx.modelRegistry?.resolve(node.assetRef)` on any later reconcile while
+ * still showing its own empty-group placeholder, grafting the freshly
+ * resolved model's cloned hierarchy on as a child once found.
  */
 export function buildPreviewRegistries(
   project: Project,

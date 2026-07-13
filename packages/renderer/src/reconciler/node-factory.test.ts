@@ -2101,19 +2101,24 @@ function makeCtxWithModel(entries: Record<string, LoadedModel>): NodeFactoryCont
 }
 
 describe("node-factory: GLTF models, skeletal and morph animation (Phase 69)", () => {
-  it("renders an empty group with no owned resources when assetRef is not registered", () => {
+  it("renders an empty group with no owned.model yet when assetRef is not registered", () => {
     const ctx = makeCtxWithModel({});
     const built = createThreeObject(modelNode(), ctx);
     expect(built.object3D).toBeInstanceOf(THREE.Group);
     expect((built.object3D as THREE.Group).children.length).toBe(0);
-    expect(built.owned).toBeUndefined();
+    // A real (if empty) owned, not undefined: applyNodeProperties's own
+    // "model" case needs a mutable object to later populate with
+    // owned.model once a caller whose own registry populates
+    // asynchronously resolves this node's assetRef on a later reconcile -
+    // see OwnedResources.model's own doc.
+    expect(built.owned).toEqual({});
   });
 
   it("also renders an empty group when no modelRegistry is configured at all", () => {
     const ctx = makeCtx();
     const built = createThreeObject(modelNode(), ctx);
     expect(built.object3D).toBeInstanceOf(THREE.Group);
-    expect(built.owned).toBeUndefined();
+    expect(built.owned).toEqual({});
   });
 
   it("builds a clone of the registry entry's own scene, not the shared template itself", () => {
@@ -2295,6 +2300,63 @@ describe("node-factory: GLTF models, skeletal and morph animation (Phase 69)", (
     const node = modelNode({ clips: [{ name: "Move", weight: 1 }] });
     const built = createThreeObject(node, ctx);
     expect(() => applyNodeProperties(node, built.object3D, ctx, 5, built.owned)).not.toThrow();
+  });
+
+  it("grafts the real cloned model as a child of the placeholder group on a later applyNodeProperties call once modelRegistry resolves an assetRef it did not on this same node's own first reconcile", () => {
+    const node = modelNode();
+
+    // First reconcile: registry resolves nothing yet - matches a live,
+    // progressively-loading preview whose own asset bytes are still in
+    // flight over the network at the moment this node is first built (see
+    // apps/studio's own preview-assets/build-preview-registries.ts).
+    const notYetResolvedCtx = makeCtxWithModel({});
+    const built = createThreeObject(node, notYetResolvedCtx);
+    const group = built.object3D as THREE.Group;
+    expect(group.children.length).toBe(0);
+    expect(built.owned?.model).toBeUndefined();
+
+    // A later reconcile of the exact same node identity (object3D/owned
+    // both carried over, exactly like reconciler.ts's own updateOrCreate
+    // does for an existing entry) - now the asset has finished loading and
+    // the *same* registry instance resolves it. No second createThreeObject
+    // call: a resolved node id is never rebuilt from scratch, only ever
+    // re-applied.
+    const entry = fakeLoadedModel();
+    const nowResolvedCtx = makeCtxWithModel({ "character.glb": entry });
+    applyNodeProperties(node, group, nowResolvedCtx, 0, built.owned);
+
+    expect(built.owned?.model).toBeDefined();
+    // The placeholder group itself is preserved (only gained a child) -
+    // anything else holding a reference to it (picking, a parent's own
+    // .children array) must never need to re-acquire it.
+    expect(built.object3D).toBe(group);
+    expect(group.children.length).toBe(1);
+    // The grafted child is the real, freshly-cloned model (not the
+    // registry's own shared template), found via a nested lookup exactly
+    // like pickNodeAtPoint's own name-walk would still find node.id on the
+    // now-one-level-higher outer group regardless of this extra nesting.
+    expect(group.getObjectByName("Body")).toBeInstanceOf(THREE.Mesh);
+    expect(group.getObjectByName("Body")).not.toBe(entry.scene.getObjectByName("Body"));
+  });
+
+  it("never re-resolves (and never grafts a second copy) once a model node has already resolved its own real asset", () => {
+    const node = modelNode();
+    const entry = fakeLoadedModel();
+    const ctx = makeCtxWithModel({ "character.glb": entry });
+    const built = createThreeObject(node, ctx);
+    const group = built.object3D as THREE.Group;
+    const resolvedModel = built.owned?.model;
+
+    // A resolve spy proves the registry is never even consulted again once
+    // owned.model is already set - not merely that the result "happens to"
+    // stay the same.
+    const resolveSpy = vi.fn(() => entry);
+    const spiedCtx: NodeFactoryContext = { ...ctx, modelRegistry: { resolve: resolveSpy } };
+    applyNodeProperties(node, group, spiedCtx, 1, built.owned);
+
+    expect(resolveSpy).not.toHaveBeenCalled();
+    expect(built.owned?.model).toBe(resolvedModel);
+    expect(group.children.length).toBe(1);
   });
 });
 
