@@ -281,45 +281,28 @@ function withEnvironmentMapSupport(
 }
 
 /**
- * A cheap, exact cache key over a `RenderPassConfig`'s own *structural*
- * content, used by `withPostProcessingSupport`/`withWebGpuPostProcessingSupport`
- * below to decide whether their cached `BuiltPipeline` needs rebuilding.
- * `ThreeRenderer.renderFrame` resolves a fresh `RenderPassConfig` object
- * every call (see `resolveAmbientOcclusion`/`resolvePostProcessing`), so a
- * reference-identity check would always miss; every field on
- * `AmbientOcclusionRenderConfig`/`PostProcessingRenderConfig` is a plain
- * number, string, or array of those, so `JSON.stringify` is an exact,
- * order-sensitive, cheap-for-these-small-configs equality check. `frame` is
- * deliberately excluded (see `RenderPassConfig`'s own doc for why): it
- * changes every call by construction, and only ever drives a `BuiltPipeline`'s
- * own `updateFrame`, never a rebuild.
- */
-function renderPassConfigKey(config: RenderPassConfig | undefined): string {
-  return JSON.stringify(
-    config === undefined ? null : { ambientOcclusion: config.ambientOcclusion, postProcessing: config.postProcessing },
-  );
-}
-
-/**
- * Wraps `threeRendererLike`'s own `render` to route through a cached
+ * Wraps `threeRendererLike`'s own `render` to route through a fresh
  * `EffectComposer` (built by `buildWebGl2Pipeline`, `./post-processing/
  * post-processing-pipeline.ts`) whenever `config` carries an
- * `ambientOcclusion` and/or a non-empty `postProcessing`, rebuilt only when
- * the scene, camera, or resolved config actually changes across calls -
- * mirroring `ThreeRenderer`'s own `cachedEnvironment` cache-on-identity-change
- * pattern. Both concerns share the one composer (see `RenderPassConfig`'s
- * own doc for why): `buildWebGl2Pipeline`'s own `OutputPass` is required,
- * not optional, for either - any offscreen `WebGLRenderTarget` (which
- * `EffectComposer`'s own intermediate buffers are) makes `WebGLRenderer`
- * silently skip both tone mapping and output color-space conversion
- * (verified directly against this project's installed `three@0.185.1`
- * source, `WebGLPrograms.js`/`WebGLRenderer.js`), which would otherwise
- * silently undo `applyColorWorkflowDefaults`'s own ACES/sRGB output the
- * moment either is enabled.
+ * `ambientOcclusion` and/or a non-empty `postProcessing`. Both concerns
+ * share the one composer (see `RenderPassConfig`'s own doc for why):
+ * `buildWebGl2Pipeline`'s own `OutputPass` is required, not optional, for
+ * either - any offscreen `WebGLRenderTarget` (which `EffectComposer`'s own
+ * intermediate buffers are) makes `WebGLRenderer` silently skip both tone
+ * mapping and output color-space conversion (verified directly against this
+ * project's installed `three@0.185.1` source, `WebGLPrograms.js`/
+ * `WebGLRenderer.js`), which would otherwise silently undo
+ * `applyColorWorkflowDefaults`'s own ACES/sRGB output the moment either is
+ * enabled.
+ *
+ * Rebuilds the composer on every call rather than caching it across frames
+ * - see `renderingPipeline`'s own doc below for why a cross-frame cache was
+ * tried and reverted.
  */
 function withPostProcessingSupport(
   renderer: THREE.WebGLRenderer,
   threeRendererLike: ThreeRendererLike,
+  buildPipeline: typeof buildWebGl2Pipeline = buildWebGl2Pipeline,
 ): ThreeRendererLike {
   // Captured before the `Object.assign` below reassigns `threeRendererLike`'s
   // own `.render`/`.dispose` - `threeRendererLike` and (per
@@ -333,9 +316,34 @@ function withPostProcessingSupport(
   const originalRender = renderer.render.bind(renderer);
   const originalDispose = threeRendererLike.dispose.bind(threeRendererLike);
   let built: BuiltPipeline<EffectComposer> | undefined;
-  let cachedScene: THREE.Scene | undefined;
-  let cachedCamera: THREE.Camera | undefined;
-  let cachedKey: string | undefined;
+  // `built.handle.render()` below drives `EffectComposer`'s own passes
+  // (`RenderPass`/`SSAARenderPass` first among them), each of which calls
+  // back into this exact `renderer`'s own `.render(scene, camera)` mid-render
+  // - since `renderer` and `threeRendererLike` are the same mutated object,
+  // that nested call re-enters this very method, with no third `config`
+  // argument at all (three.js's own internals have no notion of
+  // `RenderPassConfig`). Without this guard, that reentrant call hits the "no
+  // postProcessing configured" branch below and tears the composer down
+  // *while it is still rendering* (verified directly: `disposeComposer()`
+  // was observably running inside every single `renderFrame` call for any
+  // composition using `postProcessing`/`ambientOcclusion`, disposing GPU
+  // resources that very same render call was still mid-use of).
+  //
+  // A cross-frame cache (rebuild only when scene/camera/config actually
+  // change, mirroring `ThreeRenderer`'s own `cachedEnvironment`) was tried
+  // and reverted: verified directly, with a real native-GPU render of a
+  // moving box behind a cached pipeline, that three/webgpu's TSL
+  // `RenderPipeline`/`PassNode` (the WebGPU sibling below,
+  // `withWebGpuPostProcessingSupport`) stops refreshing its own scene-pass
+  // texture after the *second* reuse of the same instance across separate
+  // top-level `render()` calls, freezing the rendered output - while the
+  // exact same sequence renders correctly every frame when rebuilt each
+  // call. `EffectComposer` is a much older, non-TSL API with a
+  // well-established "construct once, call `.render()` every frame"
+  // contract and likely does not share this limitation, but this function
+  // deliberately matches its WebGPU sibling's rebuild-every-call behavior
+  // rather than ship an unverified asymmetry between the two backends.
+  let renderingPipeline = false;
 
   function disposeComposer(): void {
     built?.handle.dispose();
@@ -344,6 +352,11 @@ function withPostProcessingSupport(
 
   return Object.assign(threeRendererLike, {
     render(scene: THREE.Scene, camera: THREE.Camera, config?: RenderPassConfig): void {
+      if (renderingPipeline) {
+        originalRender(scene, camera);
+        return;
+      }
+
       if (
         config === undefined ||
         (config.ambientOcclusion === undefined && config.postProcessing === undefined)
@@ -353,18 +366,17 @@ function withPostProcessingSupport(
         return;
       }
 
-      const key = renderPassConfigKey(config);
-      if (built === undefined || cachedScene !== scene || cachedCamera !== camera || cachedKey !== key) {
-        disposeComposer();
-        const size = renderer.getSize(new THREE.Vector2());
-        built = buildWebGl2Pipeline(renderer, scene, camera, size.x, size.y, config);
-        cachedScene = scene;
-        cachedCamera = camera;
-        cachedKey = key;
-      }
+      disposeComposer();
+      const size = renderer.getSize(new THREE.Vector2());
+      built = buildPipeline(renderer, scene, camera, size.x, size.y, config);
 
       built.updateFrame(config.frame);
-      built.handle.render();
+      renderingPipeline = true;
+      try {
+        built.handle.render();
+      } finally {
+        renderingPipeline = false;
+      }
     },
     dispose(): void {
       disposeComposer();
@@ -375,17 +387,17 @@ function withPostProcessingSupport(
 
 /**
  * The WebGPU-backend equivalent of `withPostProcessingSupport` above,
- * mirroring its own doc for why AO and post-processing share one
- * cached-and-rebuilt-on-change pipeline (built by `buildWebGpuPipeline`,
- * `./post-processing/post-processing-pipeline.ts`). Uses a TSL
- * `RenderPipeline` (the current, non-deprecated name for what `three/webgpu`
- * briefly called `PostProcessing` before r183; using `PostProcessing` here
- * would fire a runtime `console.warn` on every construction, verified
- * directly against this project's installed `three@0.185.1` source).
+ * mirroring its own doc for why AO and post-processing share one pipeline,
+ * rebuilt every call. Uses a TSL `RenderPipeline` (the current,
+ * non-deprecated name for what `three/webgpu` briefly called `PostProcessing`
+ * before r183; using `PostProcessing` here would fire a runtime
+ * `console.warn` on every construction, verified directly against this
+ * project's installed `three@0.185.1` source).
  */
 function withWebGpuPostProcessingSupport(
   renderer: WebGPURenderer,
   threeRendererLike: ThreeRendererLike,
+  buildPipeline: typeof buildWebGpuPipeline = buildWebGpuPipeline,
 ): ThreeRendererLike {
   // See `withPostProcessingSupport`'s own identical comment: must capture
   // the original `render`/`dispose` before `Object.assign` below reassigns
@@ -393,9 +405,16 @@ function withWebGpuPostProcessingSupport(
   const originalRender = renderer.render.bind(renderer);
   const originalDispose = threeRendererLike.dispose.bind(threeRendererLike);
   let built: BuiltPipeline<RenderPipeline> | undefined;
-  let cachedScene: THREE.Scene | undefined;
-  let cachedCamera: THREE.Camera | undefined;
-  let cachedKey: string | undefined;
+  // See `withPostProcessingSupport`'s own identical guard/doc: the TSL
+  // `RenderPipeline`'s own `PassNode` (`built.handle.render()` below) calls
+  // back into this exact `renderer`'s own `.render(scene, camera)` mid-render
+  // with no `config` argument, and without this guard that reentrant call
+  // disposes the pipeline it is still in the middle of using. The pipeline
+  // is rebuilt on every call rather than cached across frames - see
+  // `withPostProcessingSupport`'s own doc for the real native-GPU
+  // reproduction that ruled a cross-frame cache out for this specific TSL
+  // API.
+  let renderingPipeline = false;
 
   function disposePipeline(): void {
     built?.handle.dispose();
@@ -404,6 +423,11 @@ function withWebGpuPostProcessingSupport(
 
   return Object.assign(threeRendererLike, {
     render(scene: THREE.Scene, camera: THREE.Camera, config?: RenderPassConfig): void {
+      if (renderingPipeline) {
+        originalRender(scene, camera);
+        return;
+      }
+
       if (
         config === undefined ||
         (config.ambientOcclusion === undefined && config.postProcessing === undefined)
@@ -413,17 +437,16 @@ function withWebGpuPostProcessingSupport(
         return;
       }
 
-      const key = renderPassConfigKey(config);
-      if (built === undefined || cachedScene !== scene || cachedCamera !== camera || cachedKey !== key) {
-        disposePipeline();
-        built = buildWebGpuPipeline(renderer, scene, camera, config);
-        cachedScene = scene;
-        cachedCamera = camera;
-        cachedKey = key;
-      }
+      disposePipeline();
+      built = buildPipeline(renderer, scene, camera, config);
 
       built.updateFrame(config.frame);
-      built.handle.render();
+      renderingPipeline = true;
+      try {
+        built.handle.render();
+      } finally {
+        renderingPipeline = false;
+      }
     },
     dispose(): void {
       disposePipeline();
@@ -458,10 +481,28 @@ function withWebGpuPostProcessingSupport(
 export function applyProductionWebGpuBehavior(
   renderer: WebGPURenderer,
   pmremGenerator: { fromEquirectangular(texture: THREE.Texture): { texture: THREE.Texture }; dispose(): void },
+  buildPipeline: typeof buildWebGpuPipeline = buildWebGpuPipeline,
 ): void {
   applyColorWorkflowDefaults(renderer);
   const withEnvironment = withEnvironmentMapSupport(renderer, pmremGenerator);
-  withWebGpuPostProcessingSupport(renderer, withEnvironment);
+  withWebGpuPostProcessingSupport(renderer, withEnvironment, buildPipeline);
+}
+
+/**
+ * The WebGL2-backend equivalent of `applyProductionWebGpuBehavior` above -
+ * see its own doc for why this exists as a named export (production-behavior
+ * reuse, plus an injectable `buildPipeline` seam so a test can substitute a
+ * fake pipeline builder and never touch a real GPU) rather than staying
+ * inline in `createRealWebGl2Renderer`.
+ */
+export function applyProductionWebGl2Behavior(
+  renderer: THREE.WebGLRenderer,
+  pmremGenerator: { fromEquirectangular(texture: THREE.Texture): { texture: THREE.Texture }; dispose(): void },
+  buildPipeline: typeof buildWebGl2Pipeline = buildWebGl2Pipeline,
+): void {
+  applyColorWorkflowDefaults(renderer);
+  const withEnvironment = withEnvironmentMapSupport(renderer, pmremGenerator);
+  withPostProcessingSupport(renderer, withEnvironment, buildPipeline);
 }
 
 /**
@@ -485,9 +526,8 @@ function createRealWebGpuRenderer(target: RenderTarget, _size: RenderSize): Thre
 function createRealWebGl2Renderer(target: RenderTarget, _size: RenderSize): ThreeRendererLike {
   ensureWebGl2AreaLightSupport();
   const renderer = new THREE.WebGLRenderer({ canvas: target });
-  applyColorWorkflowDefaults(renderer);
-  const withEnvironment = withEnvironmentMapSupport(renderer, new THREE.PMREMGenerator(renderer));
-  return withPostProcessingSupport(renderer, withEnvironment);
+  applyProductionWebGl2Behavior(renderer, new THREE.PMREMGenerator(renderer));
+  return renderer as unknown as ThreeRendererLike;
 }
 
 /** The dependency set a `Renderer` uses when no overrides are supplied, i.e. real Three.js. */
