@@ -25,6 +25,19 @@ export interface LookPresetLight {
   color?: ColorRGBA;
   intensity?: number;
   castShadow?: boolean;
+  /**
+   * A preset-local, author-chosen key this light can be referenced by from
+   * elsewhere in the *same* preset's own `postProcessing` - specifically,
+   * a `GodRaysEffectConfig.lightNodeId` naming this exact string (see
+   * `applyLookPreset`'s own doc for the substitution this drives). Distinct
+   * from `name` (a free-text display label with no structural meaning):
+   * this is a stable, mechanical identity a preset's own static data can
+   * depend on, which `name` was never meant to guarantee. Never appears on
+   * the real `LightNode` `applyLookPreset` produces - purely an authoring-
+   * time indirection, resolved away before this preset's own lights and
+   * `postProcessing` reach a real `Composition`.
+   */
+  presetLightRef?: string;
 }
 
 /**
@@ -53,14 +66,14 @@ export interface LookPreset {
  * velocity-buffer motion blur, real and independently tested via
  * `@cadra/golden-frames`' own `motionBlurScene`, but until now unreachable
  * through `apply_look_preset` - only authorable by hand-editing raw
- * `postProcessing.effects` JSON). Adding a new named entry here later is a
- * pure data addition, no mechanism change - with one caveat: `godRays`
- * (`GodRaysEffectConfig`) needs a `lightNodeId` referencing a specific
- * `LightNode`'s id, but a preset's own lights only ever get a fresh id at
- * `applyLookPreset`'s own call time (`generateId()`, below) - there is no
- * mechanism today for a preset's static `postProcessing` to reference one
- * of its own not-yet-generated light ids, so `godRays` cannot be added to
- * a preset without a real design change first (tracked separately).
+ * `postProcessing.effects` JSON); `lightShafts` added later still, the
+ * first preset to turn on `godRays` (`@cadra/renderer`'s own real,
+ * independently tested volumetric-light-shaft effect) - see
+ * `LookPresetLight.presetLightRef`'s own doc and `applyLookPreset`'s own
+ * substitution step for the mechanism that makes a static preset's own
+ * `godRays.lightNodeId` resolve to one of that same preset's own
+ * (not-yet-generated at authoring time) light ids. Adding a new named
+ * entry here later is a pure data addition, no mechanism change.
  */
 export const LOOK_PRESETS: Record<string, LookPreset> = {
   /** A three-point-inspired key/fill/rim rig plus `POST_PROCESSING_LOOK_PRESETS.cinematic`: a general-purpose dramatic look for a title card or hero shot. */
@@ -212,6 +225,31 @@ export const LOOK_PRESETS: Record<string, LookPreset> = {
       ],
     },
   },
+  /** A single hard, shadow-casting key light through haze plus a dim ambient fill: dramatic volumetric light shafts (`godRays`) with a cool, moody grade - built for a subject emerging from darkness, a product reveal through fog, or a window-light interior beat. `key`'s own `presetLightRef` is what `godRays.lightNodeId` below resolves against (see `LookPresetLight.presetLightRef`'s own doc); `godRays` itself silently no-ops if that light is ever missing/moved off directional-or-point/loses `castShadow` (see `GodRaysEffectConfig`'s own doc), so this preset degrades gracefully rather than breaking. */
+  lightShafts: {
+    lights: [
+      {
+        name: "key",
+        presetLightRef: "key",
+        lightType: "directional",
+        transform: { position: [-4, 6, 2], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        intensity: 3,
+        castShadow: true,
+      },
+      {
+        name: "fill",
+        lightType: "ambient",
+        intensity: 0.15,
+      },
+    ],
+    postProcessing: {
+      effects: [
+        { type: "godRays", lightNodeId: "key", density: 0.8, maxDensity: 0.6 },
+        { type: "colorGrade", saturation: 0.85, contrast: 1.1, lift: [0.01, 0.015, 0.02] },
+        { type: "vignette", darkness: 0.4, offset: 1.1 },
+      ],
+    },
+  },
 };
 
 /**
@@ -260,6 +298,31 @@ export class UnknownLookPresetError extends Error {
 }
 
 /**
+ * Thrown by `applyLookPreset` when a preset's own `godRays.lightNodeId`
+ * names a `presetLightRef` none of that same preset's own lights declare -
+ * a bug in `LOOK_PRESETS`' own static data (a typo, or a light renamed
+ * without updating the effect that references it), never a user input
+ * error: every `LOOK_PRESETS` entry is curated, checked-in data, not
+ * something `apply_look_preset`'s own caller supplies. Thrown rather than
+ * silently left unresolved specifically because an unresolved
+ * `lightNodeId` would not fail loudly downstream either - `@cadra/renderer`'s
+ * own `godRays` handling already treats a `lightNodeId` matching no real
+ * light as a deliberate, silent no-op (see `GodRaysEffectConfig`'s own
+ * doc), so this preset-authoring mistake needs its own explicit check to
+ * ever surface at all.
+ */
+export class UnresolvedPresetLightRefError extends Error {
+  constructor(presetName: string, lightNodeId: string) {
+    super(
+      `applyLookPreset: preset "${presetName}"'s own postProcessing references presetLightRef ` +
+        `"${lightNodeId}", but none of its own lights declare that presetLightRef. This is a bug in ` +
+        "LOOK_PRESETS' own static data, not a caller error.",
+    );
+    this.name = "UnresolvedPresetLightRefError";
+  }
+}
+
+/**
  * Applies `presetName`'s lighting rig, post-processing, color grade, and
  * environment onto `composition`, returning a new `Composition` (never
  * mutating the input, matching every other pure scene-graph function in
@@ -272,12 +335,26 @@ export class UnknownLookPresetError extends Error {
  * author from, not deep-merged with" convention `PBR_PRESETS`/
  * `POST_PROCESSING_LOOK_PRESETS` already document.
  *
+ * Every `postProcessing` `godRays` effect's own `lightNodeId` is resolved
+ * as a `presetLightRef` against this same preset's own `lights` (see
+ * `LookPresetLight.presetLightRef`'s own doc) and substituted with that
+ * light's real, freshly generated id before the result is returned - a
+ * preset's static data can only ever reference its own light by that
+ * preset-local key, since the real id does not exist until this function
+ * actually runs. Every other effect type (and a `godRays.lightNodeId` that
+ * happens to already look like a real id, e.g. hand-authored
+ * `postProcessing` outside `LOOK_PRESETS` entirely) passes through
+ * unchanged.
+ *
  * `generateId` supplies every new track/clip/light-node id (typically
  * `createIdGenerator(seed)`, this codebase's own deterministic id source),
  * so applying the same preset to the same composition with the same seed
  * reproduces byte-identical output.
  *
  * @throws {UnknownLookPresetError} if `presetName` is not in `LOOK_PRESETS`.
+ * @throws {UnresolvedPresetLightRefError} if a `godRays` effect's own
+ *   `lightNodeId` names a `presetLightRef` this preset's own lights never
+ *   declare.
  */
 export function applyLookPreset(
   composition: Composition,
@@ -289,9 +366,14 @@ export function applyLookPreset(
     throw new UnknownLookPresetError(presetName);
   }
 
+  const realIdByPresetLightRef = new Map<string, string>();
   const lightTracks: Track[] = preset.lights.map((light) => {
+    const lightId = generateId();
+    if (light.presetLightRef !== undefined) {
+      realIdByPresetLightRef.set(light.presetLightRef, lightId);
+    }
     const lightNode = Light({
-      id: generateId(),
+      id: lightId,
       ...(light.name !== undefined && { name: light.name }),
       ...(light.transform !== undefined && { transform: light.transform }),
       ...(light.lightType !== undefined && { lightType: light.lightType }),
@@ -308,10 +390,27 @@ export function applyLookPreset(
     return { id: generateId(), clips: [clip] };
   });
 
+  const resolvedPostProcessing: CompositionPostProcessing | undefined =
+    preset.postProcessing === undefined
+      ? undefined
+      : {
+          ...preset.postProcessing,
+          effects: preset.postProcessing.effects.map((effect) => {
+            if (effect.type !== "godRays") {
+              return effect;
+            }
+            const realLightId = realIdByPresetLightRef.get(effect.lightNodeId);
+            if (realLightId === undefined) {
+              throw new UnresolvedPresetLightRefError(presetName, effect.lightNodeId);
+            }
+            return { ...effect, lightNodeId: realLightId };
+          }),
+        };
+
   return {
     ...composition,
     tracks: [...composition.tracks, ...lightTracks],
-    ...(preset.postProcessing !== undefined && { postProcessing: preset.postProcessing }),
+    ...(resolvedPostProcessing !== undefined && { postProcessing: resolvedPostProcessing }),
     ...(preset.colorGrading !== undefined && { colorGrading: preset.colorGrading }),
     ...(preset.environment !== undefined && { environment: preset.environment }),
   };
