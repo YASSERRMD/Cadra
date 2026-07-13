@@ -368,6 +368,14 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
       entry.owned.video.geometry.dispose();
       entry.owned.video.texture.dispose();
     }
+    if (entry.owned?.meshGeometry !== undefined) {
+      // A mesh node's own inline-geometry-config-built BufferGeometry (see
+      // OwnedResources.meshGeometry's own doc) - unlike geometryRef's
+      // registry-resolved geometry, this one is unique to this node and must
+      // be disposed here, the same non-shared-resource contract entry.owned.image/
+      // entry.owned.video's own geometries already establish above.
+      entry.owned.meshGeometry.geometry.dispose();
+    }
     if (entry.owned?.model !== undefined) {
       // Geometries/materials/textures are never disposed here: they are
       // shared with the ModelRegistry's own cached template (and every

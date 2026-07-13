@@ -2,6 +2,7 @@ import {
   createIdentityTransform,
   type LightNode,
   type LightType,
+  type MeshGeometryConfig,
   type MeshMaterialConfig,
   type MeshNode,
   type ModelNode,
@@ -106,6 +107,107 @@ describe("node-factory: unresolved mesh refs fall back to shared singletons, not
     const ctx = makeCtx();
     const built = createThreeObject(meshNode("box", "default"), ctx);
     expect(built.owned).toBeUndefined();
+  });
+});
+
+/** A mesh node with an inline procedural `geometry`, defaulting `geometryRef`/`materialRef` to the same placeholders `meshNode` uses. */
+function meshNodeWithGeometry(geometry: MeshGeometryConfig): SceneNode {
+  return {
+    id: "m",
+    kind: "mesh",
+    transform: createIdentityTransform(),
+    visible: true,
+    children: [],
+    geometryRef: "box",
+    materialRef: "default",
+    geometry,
+  };
+}
+
+describe("node-factory: procedural mesh geometry", () => {
+  it("falls back to geometryRef's registry-resolved geometry when no inline geometry is given (pre-existing behavior)", () => {
+    const ctx = makeCtx();
+    const built = createThreeObject(meshNode("box", "default"), ctx);
+    expect((built.object3D as THREE.Mesh).geometry).toBe(ctx.geometryRegistry.resolve("box"));
+    expect(built.owned).toBeUndefined();
+  });
+
+  it("builds a real geometry class per shape type from an inline geometry config, taking over from geometryRef entirely", () => {
+    const ctx = makeCtx();
+    const cases: Array<[MeshGeometryConfig, abstract new (...args: never[]) => THREE.BufferGeometry]> = [
+      [{ type: "box" }, THREE.BoxGeometry],
+      [{ type: "sphere" }, THREE.SphereGeometry],
+      [{ type: "plane" }, THREE.PlaneGeometry],
+      [{ type: "torus" }, THREE.TorusGeometry],
+      [{ type: "cylinder" }, THREE.CylinderGeometry],
+      [{ type: "cone" }, THREE.ConeGeometry],
+      [{ type: "capsule" }, THREE.CapsuleGeometry],
+    ];
+    for (const [geometry, expectedClass] of cases) {
+      const built = createThreeObject(meshNodeWithGeometry(geometry), ctx);
+      const mesh = built.object3D as THREE.Mesh;
+      expect(mesh.geometry, geometry.type).toBeInstanceOf(expectedClass);
+      // Never geometryRef's shared "box" singleton, even for geometry.type === "box".
+      expect(mesh.geometry).not.toBe(ctx.geometryRegistry.resolve("box"));
+      expect(built.owned?.meshGeometry?.geometry, geometry.type).toBe(mesh.geometry);
+    }
+  });
+
+  it("resolves explicit parameters onto the constructed geometry", () => {
+    const ctx = makeCtx();
+    const built = createThreeObject(meshNodeWithGeometry({ type: "torus", radius: 1.2, tube: 0.3 }), ctx);
+    const geometry = (built.object3D as THREE.Mesh).geometry as THREE.TorusGeometry;
+    expect(geometry.parameters.radius).toBe(1.2);
+    expect(geometry.parameters.tube).toBe(0.3);
+  });
+
+  it("gives every node its own geometry instance, never shared across nodes with an identical inline config", () => {
+    const ctx = makeCtx();
+    const first = createThreeObject(meshNodeWithGeometry({ type: "sphere" }), ctx).object3D as THREE.Mesh;
+    const second = createThreeObject(meshNodeWithGeometry({ type: "sphere" }), ctx).object3D as THREE.Mesh;
+    expect(first.geometry).not.toBe(second.geometry);
+  });
+
+  it("re-resolving with an unchanged geometry config across frames reuses the same geometry instance, disposing nothing", () => {
+    const ctx = makeCtx();
+    const node = meshNodeWithGeometry({ type: "torus", radius: 1 });
+    const built = createThreeObject(node, ctx);
+    const mesh = built.object3D as THREE.Mesh;
+    const geometryBeforeUpdate = mesh.geometry;
+    const disposeSpy = vi.spyOn(geometryBeforeUpdate, "dispose");
+
+    applyNodeProperties(node, mesh, ctx, 5, built.owned);
+
+    expect(mesh.geometry).toBe(geometryBeforeUpdate);
+    expect(disposeSpy).not.toHaveBeenCalled();
+  });
+
+  it("rebuilds and disposes the previous geometry when the inline config actually changes across frames", () => {
+    const ctx = makeCtx();
+    const node = meshNodeWithGeometry({ type: "torus", radius: 1 });
+    const built = createThreeObject(node, ctx);
+    const mesh = built.object3D as THREE.Mesh;
+    const oldGeometry = mesh.geometry;
+    const disposeSpy = vi.spyOn(oldGeometry, "dispose");
+
+    const changedNode = meshNodeWithGeometry({ type: "torus", radius: 2 });
+    applyNodeProperties(changedNode, mesh, ctx, 0, built.owned);
+
+    expect(disposeSpy).toHaveBeenCalledOnce();
+    expect(mesh.geometry).not.toBe(oldGeometry);
+    expect((mesh.geometry as THREE.TorusGeometry).parameters.radius).toBe(2);
+    expect(built.owned?.meshGeometry?.geometry).toBe(mesh.geometry);
+  });
+
+  it("falling back from an inline geometry to a bare geometryRef across frames re-resolves through the registry", () => {
+    const ctx = makeCtx();
+    const node = meshNodeWithGeometry({ type: "sphere" });
+    const built = createThreeObject(node, ctx);
+    const mesh = built.object3D as THREE.Mesh;
+
+    applyNodeProperties(meshNode("box", "default"), mesh, ctx, 0, built.owned);
+
+    expect(mesh.geometry).toBe(ctx.geometryRegistry.resolve("box"));
   });
 });
 

@@ -20,11 +20,14 @@ describe("createDefaultGeometryRegistry", () => {
     }
   });
 
-  it("resolves box, sphere, and plane to their specific geometry classes", () => {
+  it("resolves every seeded ref to its specific geometry class", () => {
     const registry = createDefaultGeometryRegistry();
     expect(registry.resolve("box")).toBeInstanceOf(THREE.BoxGeometry);
     expect(registry.resolve("sphere")).toBeInstanceOf(THREE.SphereGeometry);
     expect(registry.resolve("plane")).toBeInstanceOf(THREE.PlaneGeometry);
+    expect(registry.resolve("torus")).toBeInstanceOf(THREE.TorusGeometry);
+    expect(registry.resolve("cylinder")).toBeInstanceOf(THREE.CylinderGeometry);
+    expect(registry.resolve("cone")).toBeInstanceOf(THREE.ConeGeometry);
   });
 
   it("returns undefined for an unregistered ref", () => {
