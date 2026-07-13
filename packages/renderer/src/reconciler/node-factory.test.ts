@@ -211,6 +211,54 @@ describe("node-factory: procedural mesh geometry", () => {
   });
 });
 
+describe("node-factory: geometryRef/materialRef are optional (mirroring geometry/material)", () => {
+  it("never queries the registry with an undefined ref, and falls back to the default geometry/material, when a later frame's node has neither ref and this entry's own owned resources were never populated", () => {
+    // meshNode(...) always creates a ref-only node, so `built.owned` is
+    // undefined (see "createThreeObject reports no owned resources for a
+    // mesh node" above) - the same shape a reconciler entry that started
+    // geometryRef/materialRef-only has for its whole lifetime. Reconciling
+    // that same entry against a node edited to drop both refs in favor of
+    // inline geometry/material (same id, still "mesh", so reused rather
+    // than recreated - a schema-valid edit, but one the reconciler cannot
+    // hot-apply into `owned` after the fact; see node-factory.ts's own
+    // applyNodeProperties mesh case) must not read `undefined` as a ref.
+    //
+    // Asserted via spies on the registries themselves, not just the
+    // resulting geometry/material identity: createDefaultGeometryRegistry's
+    // Map.get(undefined) already happens to return undefined (falling back
+    // to the exact same default a merely-unresolvable string ref would), so
+    // comparing only the end result would pass even for a call site that
+    // still incorrectly forwards `undefined` straight into the registry.
+    const ctx = makeCtx();
+    const geometryResolveSpy = vi.spyOn(ctx.geometryRegistry, "resolve");
+    const materialResolveSpy = vi.spyOn(ctx.materialRegistry, "resolve");
+    const built = createThreeObject(meshNode("box", "default"), ctx);
+    const mesh = built.object3D as THREE.Mesh;
+    expect(built.owned).toBeUndefined();
+    geometryResolveSpy.mockClear();
+    materialResolveSpy.mockClear();
+
+    const laterNode: SceneNode = {
+      id: "m",
+      kind: "mesh",
+      transform: createIdentityTransform(),
+      visible: true,
+      children: [],
+      geometry: { type: "sphere" },
+      material: {},
+    };
+
+    expect(() => applyNodeProperties(laterNode, mesh, ctx, 0, built.owned)).not.toThrow();
+
+    expect(geometryResolveSpy).not.toHaveBeenCalled();
+    expect(materialResolveSpy).not.toHaveBeenCalled();
+    const fallback = createThreeObject(meshNode("still-unresolvable-a", "still-unresolvable-b"), ctx)
+      .object3D as THREE.Mesh;
+    expect(mesh.geometry).toBe(fallback.geometry);
+    expect(mesh.material).toBe(fallback.material);
+  });
+});
+
 describe("node-factory: image texture rendering", () => {
   function makeCtxWithTexture(entries: Record<string, THREE.Texture>): NodeFactoryContext {
     return {

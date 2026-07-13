@@ -75,15 +75,21 @@ describe("curated example scenes: every mesh node's own geometryRef/materialRef 
       continue;
     }
 
-    it(`every mesh node in "${example.name}" resolves a real geometryRef, and either a real materialRef or an inline material override`, () => {
+    it(`every mesh node in "${example.name}" resolves either a real geometryRef or an inline geometry override, and either a real materialRef or an inline material override`, () => {
       for (const node of meshNodes) {
-        expect(geometryRegistry.resolve(node.geometryRef), `${example.name}/${node.id}: geometryRef "${node.geometryRef}"`).toBeDefined();
-        // Mirrors node-factory.ts's own resolveMeshNodeMaterial: an inline
-        // `material` takes over from `materialRef` entirely when present,
-        // so a materialRef that intentionally never resolves (documenting
-        // intent only, same as product-shot-ibl-dof's own
-        // "material-product-fallback") is not itself a bug.
-        const hasResolvableMaterialRef = materialRegistry.resolve(node.materialRef) !== undefined;
+        // Mirrors node-factory.ts's own resolveMeshNodeGeometry/resolveMeshNodeMaterial:
+        // an inline geometry/material takes over from geometryRef/materialRef entirely
+        // when present, so a ref that intentionally never resolves (documenting intent
+        // only, same as product-shot-ibl-dof's own "material-product-fallback"), or is
+        // absent outright now that the inline field makes it optional, is not itself a bug.
+        const hasResolvableGeometryRef =
+          node.geometryRef !== undefined && geometryRegistry.resolve(node.geometryRef) !== undefined;
+        expect(
+          hasResolvableGeometryRef || node.geometry !== undefined,
+          `${example.name}/${node.id}: geometryRef "${node.geometryRef}" does not resolve and no inline geometry override is set`,
+        ).toBe(true);
+        const hasResolvableMaterialRef =
+          node.materialRef !== undefined && materialRegistry.resolve(node.materialRef) !== undefined;
         expect(
           hasResolvableMaterialRef || node.material !== undefined,
           `${example.name}/${node.id}: materialRef "${node.materialRef}" does not resolve and no inline material override is set`,

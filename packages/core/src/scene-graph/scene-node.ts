@@ -196,13 +196,23 @@ export type MeshGeometryConfig =
  * against a geometry and material registry by a later phase (the renderer's
  * scene-graph-to-Three.js mapping); the scene graph itself stays agnostic to
  * how those registries are populated.
+ *
+ * Neither is unconditionally required: each has a same-named inline
+ * alternative (`geometry`/`material`) that takes over entirely when present.
+ * The real constraint - at least one of `geometryRef`/`geometry` must be
+ * present, and independently at least one of `materialRef`/`material` - is
+ * not expressible in this interface alone; `meshNodeSchema`'s
+ * `.superRefine` in `@cadra/schema` is what actually enforces it. Having
+ * both a ref and its inline alternative is valid (the inline one wins).
  */
 export interface MeshNode extends SceneNodeBase<"mesh"> {
-  geometryRef: string;
-  materialRef: string;
-  /** A procedural primitive geometry, taking over from `geometryRef` entirely when present. Omitted means `geometryRef`'s registry-resolved geometry (the pre-existing behavior). */
+  /** Id of a geometry asset, resolved against a geometry registry by the renderer. Optional only when `geometry` is present (see `MeshNode`'s own doc for the real invariant). */
+  geometryRef?: string;
+  /** Id of a material asset, resolved against a material registry by the renderer. Optional only when `material` is present (see `MeshNode`'s own doc for the real invariant). */
+  materialRef?: string;
+  /** A procedural primitive geometry, taking over from `geometryRef` entirely when present. Omitted means `geometryRef`'s registry-resolved geometry (the pre-existing behavior) - so `geometryRef` must be present when this is not. */
   geometry?: MeshGeometryConfig;
-  /** A physically based material, taking over from `materialRef` entirely when present. Omitted means `materialRef`'s registry-resolved material (the pre-Phase-55 behavior). */
+  /** A physically based material, taking over from `materialRef` entirely when present. Omitted means `materialRef`'s registry-resolved material (the pre-Phase-55 behavior) - so `materialRef` must be present when this is not. */
   material?: MeshMaterialConfig;
   /** Whether this mesh casts a shadow onto other shadow-receiving surfaces. Defaults to `false`. */
   castShadow?: boolean;
