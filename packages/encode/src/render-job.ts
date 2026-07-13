@@ -47,6 +47,7 @@ import { prepareSatoriLayerRenderData } from "@cadra/renderer/svg-layer/prepare-
 import type { SatoriLayerFont } from "@cadra/satori-layer";
 import {
   createFontRegistry,
+  parseFontWithFontkit,
   type PositionedGlyph,
   prepareTextRenderData,
   type TextRenderData,
@@ -1167,6 +1168,41 @@ export async function buildModelRegistryForProject(
   return registry;
 }
 
+let cachedDefaultSatoriFonts: Promise<SatoriLayerFont[]> | undefined;
+
+/**
+ * Loads this module's own bundled `Inter-Variable.ttf` as a `SatoriLayerFont`
+ * array for Satori rendering - both `buildSatoriLayerRenderRegistryForProject`
+ * and `buildSatoriLayerRenderEntriesForRange`'s own shared font source (see
+ * either one's own doc for why this specific mechanism is safe against the
+ * `fvar`-parsing crash a *raw* variable font triggers in Satori's bundled
+ * font parser). Parsed via `parseFontWithFontkit` (not the `"opentype"`
+ * backend `prepareTextRenderEntriesForProject` uses for its own bundled
+ * font): unlike that function's own output, nothing here ever crosses a
+ * `page.evaluate` structured-clone boundary into a browser-bundled page -
+ * Satori itself is a native-Node-addon-backed renderer with no browser
+ * build at all (see `@cadra/satori-layer`'s own package doc), so every
+ * caller of this helper already runs in plain Node regardless of which
+ * render path (native-GPU or browser-based) is ultimately producing the
+ * final video - so `fontkit`'s fuller, Node-only metrics/instancing support
+ * is simply the better choice here, with no cross-environment constraint to
+ * trade it away for.
+ *
+ * Memoized (once per process, not once per call): the same bytes parse to
+ * the same result every time, and both call sites may run within the same
+ * render job.
+ */
+function loadDefaultSatoriFonts(): Promise<SatoriLayerFont[]> {
+  if (cachedDefaultSatoriFonts === undefined) {
+    cachedDefaultSatoriFonts = (async () => {
+      const fontBytes = readFileSync(DEFAULT_FONT_PATH);
+      const font = parseFontWithFontkit(new Uint8Array(fontBytes));
+      return [{ family: "Inter", font, weight: 400, style: "normal" } satisfies SatoriLayerFont];
+    })();
+  }
+  return cachedDefaultSatoriFonts;
+}
+
 /**
  * Builds a real (non-serialized) `SatoriLayerRenderRegistry` for `project`,
  * pre-rendering and rasterizing every distinct `SatoriNode` at every frame
@@ -1191,25 +1227,22 @@ export async function buildModelRegistryForProject(
  * nodes at all, matching `TextRenderRegistry`'s/`TextureRegistry`'s own
  * "omit entirely" convention.
  *
- * Passes `fonts: []` to `prepareSatoriLayerRenderData` - deliberately, not
- * yet this module's own bundled default font the way
- * `prepareTextRenderEntriesForProject` uses it for every `TextNode`.
- * Verified directly (constructing a real `SatoriLayerFont` from that exact
- * bundled `Inter-Variable.ttf` and feeding it through a real
- * `prepareSatoriLayerRenderData` call) that doing so throws inside Satori's
- * own bundled font parser (`@shuding/opentype.js`'s `parseFvarAxis`, a
- * `TypeError` reading past the end of that font's own `fvar` - variable
- * font axes - table) for this specific font file, unrelated to anything
- * this function does with it. A `layer` with no text at all (e.g. a plain
- * colored background/shape/icon) renders correctly regardless - Satori
- * never needs a font for non-text content - so this still closes the real
- * gap this function exists for (a `"satori"` node rendering as a real
- * layer instead of silently staying invisible forever). A `layer` that
- * does contain text currently renders without glyphs for it (the same
- * graceful "no font matched" fallback `@cadra/satori-layer`'s own
- * `renderLayerToSvg` already documents for an unmatched `fontFamily`, not
- * a new failure mode), until a real Satori-compatible font is wired in as
- * a follow-up.
+ * Fonts for `prepareSatoriLayerRenderData` come from `loadDefaultSatoriFonts`
+ * (this module's own bundled `Inter-Variable.ttf`, the same file
+ * `prepareTextRenderEntriesForProject` uses for every `TextNode`) - passing
+ * the *raw* variable-font bytes straight to Satori crashes (Satori's own
+ * bundled `@shuding/opentype.js` fork throws inside `parseFvarAxis` on any
+ * font with an active variation axis), but `@cadra/satori-layer`'s own
+ * `instanceFontForSatori` (invoked automatically inside `renderLayerToSvg`
+ * for every entry in `fonts`) already exists specifically to prevent that:
+ * it pins every variation axis to a static value and subsets the result
+ * before Satori ever sees it - the exact mechanism `parseFvarAxis` needs to
+ * not be reached at all. Verified directly, empirically, against this exact
+ * font file (constructing a real `SatoriLayerFont` and feeding it through a
+ * real `prepareSatoriLayerRenderData` call) that this renders real glyphs
+ * with no crash, and that Satori falls back to this one available font
+ * regardless of whether a layer's own `fontFamily` matches it, is a generic
+ * CSS name like `"sans-serif"`, or is omitted entirely.
  */
 export async function buildSatoriLayerRenderRegistryForProject(
   project: Project,
@@ -1228,7 +1261,7 @@ export async function buildSatoriLayerRenderRegistryForProject(
     return undefined;
   }
 
-  const fonts: SatoriLayerFont[] = [];
+  const fonts = await loadDefaultSatoriFonts();
   const registry = createInMemorySatoriLayerRenderRegistry();
   for (const node of satoriNodes) {
     for (const frame of frames) {
@@ -1261,10 +1294,8 @@ export async function buildSatoriLayerRenderRegistryForProject(
  * frames still rasterizes only once for that whole run, the same dedup
  * `buildSatoriLayerRenderRegistryForProject` itself already does).
  *
- * Passes `fonts: []` to `prepareSatoriLayerRenderData` for the same reason
- * `buildSatoriLayerRenderRegistryForProject`'s own doc gives (a confirmed
- * upstream Satori/opentype.js crash parsing this module's own bundled
- * variable font).
+ * Fonts come from `loadDefaultSatoriFonts`, shared with
+ * `buildSatoriLayerRenderRegistryForProject` - see that function's own doc.
  *
  * Returns `[]` when `project` has no satori nodes at all - the browser
  * side's own `buildSatoriLayerRenderRegistry` (see
@@ -1290,7 +1321,7 @@ async function buildSatoriLayerRenderEntriesForRange(
     return [];
   }
 
-  const fonts: SatoriLayerFont[] = [];
+  const fonts = await loadDefaultSatoriFonts();
   const seenCacheKeys = new Set<string>();
   const entries: SerializedSatoriLayerRenderEntry[] = [];
   for (const node of satoriNodes) {

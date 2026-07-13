@@ -28,6 +28,7 @@
     "@cadra/core": "workspace:*",
     "@cadra/headless": "workspace:*",
     "@cadra/renderer": "workspace:*",
+    "@cadra/satori-layer": "workspace:*",
     "@cadra/text": "workspace:*",
     "pixelmatch": "^7.2.0",
     "pngjs": "^7.0.0"
