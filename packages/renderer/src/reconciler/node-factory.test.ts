@@ -298,6 +298,78 @@ describe("node-factory: image texture rendering", () => {
     expect(geometry.parameters.width).toBe(1);
     expect(geometry.parameters.height).toBe(1);
   });
+
+  it("swaps in the real texture on a later applyNodeProperties call once textureRegistry resolves an assetRef it did not on this same node's own first reconcile", () => {
+    const node = {
+      id: "img",
+      kind: "image" as const,
+      assetRef: "photo",
+      transform: createIdentityTransform(),
+      visible: true,
+      children: [],
+    };
+
+    // First reconcile: registry resolves nothing yet - matches a live,
+    // progressively-loading preview whose own asset bytes are still in
+    // flight over the network at the moment this node is first built (see
+    // apps/studio's own preview-assets/build-preview-registries.ts).
+    const notYetResolvedCtx = makeCtxWithTexture({});
+    const built = createThreeObject(node, notYetResolvedCtx);
+    const mesh = built.object3D as THREE.Mesh;
+    const placeholderMaterial = mesh.material as THREE.MeshBasicMaterial;
+    expect(placeholderMaterial.map).toBeNull();
+    expect(built.owned?.image).toBeUndefined();
+
+    // A later reconcile of the exact same node identity (object3D/owned
+    // both carried over, exactly like `reconciler.ts`'s own
+    // `updateOrCreate` does for an existing entry) - now the asset has
+    // finished loading and the *same* registry instance resolves it. No
+    // second createThreeObject call: a resolved node id is never rebuilt
+    // from scratch, only ever re-applied.
+    const texture = fakeTexture(1920, 1080);
+    const nowResolvedCtx = makeCtxWithTexture({ photo: texture });
+    applyNodeProperties(node, mesh, nowResolvedCtx, 1, built.owned);
+
+    expect(mesh.material).not.toBe(placeholderMaterial);
+    expect((mesh.material as THREE.MeshBasicMaterial).map).toBe(texture);
+    const geometry = mesh.geometry as THREE.PlaneGeometry;
+    expect(geometry.parameters.width).toBe(1);
+    expect(geometry.parameters.height).toBeCloseTo(1080 / 1920, 5);
+    expect(built.owned?.image?.geometry).toBe(geometry);
+    // The very object3D/mesh instance is preserved throughout (only its
+    // own .geometry/.material were swapped) - anything else holding a
+    // reference to this mesh (picking, the transform gizmo, a parent's
+    // own .children array) must never need to re-acquire it.
+    expect(built.object3D).toBe(mesh);
+  });
+
+  it("never re-resolves (and never touches the real material/geometry again) once an image node has already resolved its own real texture", () => {
+    const node = {
+      id: "img",
+      kind: "image" as const,
+      assetRef: "photo",
+      transform: createIdentityTransform(),
+      visible: true,
+      children: [],
+    };
+    const texture = fakeTexture(400, 200);
+    const ctx = makeCtxWithTexture({ photo: texture });
+    const built = createThreeObject(node, ctx);
+    const mesh = built.object3D as THREE.Mesh;
+    const resolvedMaterial = mesh.material;
+    const resolvedGeometry = mesh.geometry;
+
+    // A resolve spy proves the registry is never even consulted again once
+    // owned.image is already set - not merely that the result "happens to"
+    // stay the same.
+    const resolveSpy = vi.fn(() => texture);
+    const spiedCtx: NodeFactoryContext = { ...ctx, textureRegistry: { resolve: resolveSpy } };
+    applyNodeProperties(node, mesh, spiedCtx, 1, built.owned);
+
+    expect(resolveSpy).not.toHaveBeenCalled();
+    expect(mesh.material).toBe(resolvedMaterial);
+    expect(mesh.geometry).toBe(resolvedGeometry);
+  });
 });
 
 describe("node-factory: video texture rendering", () => {

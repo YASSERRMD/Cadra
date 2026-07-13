@@ -140,7 +140,12 @@ export type {
   HealthCheckPayload,
   StartCadraMcpServerHttpOptions,
 } from "./http.js";
-export { DEFAULT_MCP_PATH, HEALTH_CHECK_PATH, startCadraMcpServerHttp } from "./http.js";
+export {
+  ASSET_BYTES_PATH,
+  DEFAULT_MCP_PATH,
+  HEALTH_CHECK_PATH,
+  startCadraMcpServerHttp,
+} from "./http.js";
 export type { LogEntry, LogFields, Logger, LogLevel, LogSink } from "./logger.js";
 export { createLogger } from "./logger.js";
 export type {
