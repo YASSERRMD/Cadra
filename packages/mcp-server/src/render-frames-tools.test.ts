@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +16,7 @@ import {
   Sequence,
   Shape,
   Text,
+  Video,
 } from "@cadra/core";
 import { createNativeGpuDevice } from "@cadra/headless";
 import type { SceneDocument } from "@cadra/schema";
@@ -510,6 +512,196 @@ describe("render_frames: real ImageNode texture rendering", () => {
     const blueOutput = await renderWithImage("frames-blue-image", blueAssetRef);
 
     expect(Buffer.compare(redOutput, blueOutput)).not.toBe(0);
+  }, 30_000);
+});
+
+/** Whether a real `ffmpeg` binary is on `PATH` - checked once per test, mirroring `render_frames`' own native-GPU-device-acquisition skip-guard, since real Node-side video decoding needs both a real device *and* a real `ffmpeg`. */
+function ffmpegAvailable(): Promise<boolean> {
+  return new Promise((resolvePromise) => {
+    const child = spawn("ffmpeg", ["-version"], { stdio: "ignore" });
+    child.on("error", () => resolvePromise(false));
+    child.on("close", (code) => resolvePromise(code === 0));
+  });
+}
+
+/** A real, real-encoded MP4 - solid pure red across its own top half, solid pure blue across its own bottom half (via ffmpeg's own `vstack` filter combining two solid-color `lavfi` sources) - the video-asset counterpart to `buildTwoToneTestPng`, deliberately asymmetric top-vs-bottom for the exact same reason. */
+function buildTwoToneTestVideo(size: number): Promise<Buffer> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(
+      "ffmpeg",
+      [
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        `color=red:size=${size}x${size / 2}:duration=1:rate=4`,
+        "-f",
+        "lavfi",
+        "-i",
+        `color=blue:size=${size}x${size / 2}:duration=1:rate=4`,
+        "-filter_complex",
+        "[0:v][1:v]vstack=inputs=2",
+        "-pix_fmt",
+        "yuv420p",
+        "-f",
+        "mp4",
+        "-movflags",
+        "frag_keyframe+empty_moov",
+        "pipe:1",
+      ],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    const chunks: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(`ffmpeg exited with code ${code} while encoding the two-tone test video fixture`));
+        return;
+      }
+      resolvePromise(Buffer.concat(chunks));
+    });
+  });
+}
+
+/** A minimal scene document with one `VideoNode` (scaled to fill the whole frame, mirroring `buildImageFillsFrameDocument`'s own size/camera-distance math - a video node's own geometry is the same unit-plane-sized-to-aspect convention an image node's is) and a `CameraNode`, no lights (a `VideoNode`'s `MeshBasicMaterial` is unlit). */
+function buildVideoFillsFrameDocument(sceneId: string, compositionId: string, size: number, assetRef: string): SceneDocument {
+  const video = Video({
+    id: "video-1",
+    assetRef,
+    transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [8, 8, 8] },
+  });
+  const camera = Camera({
+    id: "camera-1",
+    transform: { position: [0, 0, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  });
+  const composition = createComposition({
+    id: compositionId,
+    name: "Main",
+    fps: FPS,
+    durationInFrames: 1,
+    width: size,
+    height: size,
+    tracks: [
+      { id: "track-video", clips: [Sequence({ id: "clip-video", from: 0, durationInFrames: 1, content: video })] },
+      { id: "track-camera", clips: [Sequence({ id: "clip-camera", from: 0, durationInFrames: 1, content: camera })] },
+    ],
+  });
+  const withActiveCameraTrack: Composition = {
+    ...composition,
+    activeCameraTrack: [{ startFrame: 0, durationInFrames: 1, cameraNodeId: "camera-1" }],
+  };
+  const project: Project = createProject({ id: sceneId, name: "Frames video scene", compositions: [withActiveCameraTrack] });
+  return { schemaVersion: 1, project } as SceneDocument;
+}
+
+/**
+ * Proves `render_frames`' own native-GPU-headless path actually delivers
+ * real, uploaded video asset frames - pixel-verified, including
+ * orientation - via a real `ffmpeg` child process
+ * (`@cadra/encode`'s own `decodeVideoFramesWithFfmpeg`), the one asset kind
+ * with no pure-JS decode path the way `pngjs` covers images: this tool
+ * silently rendered every `VideoNode` as the documented gray placeholder
+ * before this wiring existed. Mirrors "real ImageNode texture rendering"'s
+ * own rigor exactly, with an added skip guard: this needs a real `ffmpeg`
+ * on `PATH`, not just a real native GPU device.
+ */
+describe("render_frames: real VideoNode texture rendering", () => {
+  let workspaceRoot: string | undefined;
+  let client: Client | undefined;
+
+  afterEach(async () => {
+    await client?.close();
+    client = undefined;
+    if (workspaceRoot !== undefined) {
+      await rm(workspaceRoot, { recursive: true, force: true });
+      workspaceRoot = undefined;
+    }
+  });
+
+  it("renders a real, uploaded video asset's own real decoded frame content, right-side up (not vertically mirrored, not the gray placeholder)", async () => {
+    try {
+      const device = await createNativeGpuDevice();
+      device.destroy();
+    } catch (error) {
+      console.log(
+        "render_frames VideoNode texture e2e test: skipping, a real native WebGPU device could not " +
+          `be acquired on this machine (${String(error)}).`,
+      );
+      return;
+    }
+    if (!(await ffmpegAvailable())) {
+      console.log(
+        "render_frames VideoNode texture e2e test: skipping, a real ffmpeg binary is not available on this machine's PATH.",
+      );
+      return;
+    }
+
+    workspaceRoot = await mkdtemp(join(tmpdir(), "cadra-render-frames-video-test-"));
+    const { server } = createCadraMcpServer({
+      config: { workspaceRoot, outputDirectory: join(workspaceRoot, "out") },
+      logger: createLogger("test", {}, () => {
+        // Swallow log output in tests.
+      }),
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const connectedClient = new Client({ name: "test-client", version: "0.0.0" });
+    await Promise.all([server.connect(serverTransport), connectedClient.connect(clientTransport)]);
+    client = connectedClient;
+
+    const videoBytes = await buildTwoToneTestVideo(32);
+    const uploadResult = await connectedClient.callTool({
+      name: UPLOAD_ASSET_TOOL_NAME,
+      arguments: { bytesBase64: videoBytes.toString("base64"), contentType: "video/mp4" },
+    });
+    const uploadPayload = parseJson<UploadAssetSummary>(uploadResult as ToolTextResult);
+    expect(uploadPayload.success).toBe(true);
+    const assetRef = uploadPayload.assetRef!;
+
+    await connectedClient.callTool({
+      name: CREATE_SCENE_TOOL_NAME,
+      arguments: {
+        sceneId: "frames-video-scene",
+        name: "Frames video scene",
+        composition: { id: "comp-1", name: "Main", fps: FPS, durationInFrames: 1, width: 32, height: 32 },
+      },
+    });
+    await connectedClient.callTool({
+      name: UPDATE_SCENE_TOOL_NAME,
+      arguments: {
+        sceneId: "frames-video-scene",
+        mode: "replace",
+        document: buildVideoFillsFrameDocument("frames-video-scene", "comp-1", 32, assetRef),
+      },
+    });
+
+    const result = await connectedClient.callTool({
+      name: RENDER_FRAMES_TOOL_NAME,
+      arguments: { sceneId: "frames-video-scene", compositionId: "comp-1", frames: [0], seed: "frames-video-seed" },
+    });
+
+    const summary = parseSummary(result as ToolTextResult);
+    expect(summary.success).toBe(true);
+
+    const images = imageBlocks(result as ToolTextResult);
+    expect(images).toHaveLength(1);
+    const png = PNG.sync.read(Buffer.from(images[0]!.data, "base64"));
+
+    // Sampled a few pixels in from the vertical center, clear of any
+    // decode/render antialiasing bleed at the red/blue boundary row.
+    const topPixel = pixelAt(png.data, png.width, 16, 4);
+    const bottomPixel = pixelAt(png.data, png.width, 16, 28);
+
+    // Top of frame: the source video's own top half was pure red. A
+    // flipY-class bug would show blue here instead (the source's own
+    // bottom half, mirrored to the top) - the gray placeholder (0x404040)
+    // would show neither channel dominant.
+    expect(topPixel.r).toBeGreaterThan(150);
+    expect(topPixel.b).toBeLessThan(100);
+
+    // Bottom of frame: the source video's own bottom half was pure blue.
+    expect(bottomPixel.b).toBeGreaterThan(150);
+    expect(bottomPixel.r).toBeLessThan(100);
   }, 30_000);
 });
 

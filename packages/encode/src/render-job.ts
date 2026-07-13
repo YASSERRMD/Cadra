@@ -1,7 +1,13 @@
 import { readFileSync } from "node:fs";
 
 import type { Project, SatoriNode, SceneNode, TextNode, VideoFrameMapping } from "@cadra/core";
-import { isKeyframeTrack, resolveAudioMixdown, resolveVariationAxesProperty, resolveVideoSourceFrame } from "@cadra/core";
+import {
+  isKeyframeTrack,
+  resolveAudioMixdown,
+  resolveVariationAxesProperty,
+  resolveVideoSourceFrame,
+  videoSampleTimestamp,
+} from "@cadra/core";
 import type {
   BrowserLauncher,
   HeadlessBrowserLike,
@@ -33,6 +39,7 @@ import {
   createInMemorySatoriLayerRenderRegistry,
   createInMemoryTextRenderRegistry,
   createInMemoryTextureRegistry,
+  createInMemoryVideoFrameRegistry,
   type EnvironmentRegistry,
   type LoadedModel,
   type LutRegistry,
@@ -42,6 +49,7 @@ import {
   type SatoriLayerRenderRegistry,
   type TextRenderRegistry,
   type TextureRegistry,
+  type VideoFrameRegistry,
 } from "@cadra/renderer";
 import { prepareSatoriLayerRenderData } from "@cadra/renderer/svg-layer/prepare-satori-layer-render-data.js";
 import type { SatoriLayerFont } from "@cadra/satori-layer";
@@ -58,6 +66,7 @@ import { PNG } from "pngjs";
 import type { EncodedAudioChunkResult } from "./encode-audio.js";
 import type { EncodedChunkResult } from "./encode-frames.js";
 import { DEFAULT_KEYFRAME_INTERVAL_FRAMES } from "./encode-frames.js";
+import { decodeVideoFramesWithFfmpeg, FfmpegNotFoundError } from "./ffmpeg-video-frame-decoder.js";
 import type { MuxMp4AudioTrackOptions } from "./mux-mp4.js";
 import { muxToMp4Stream } from "./mux-mp4.js";
 import type { NodeWritableLike } from "./mux-stream-target.js";
@@ -479,6 +488,36 @@ function computeNeededVideoSamplesForRange(
 
   for (const mapping of videoNodeMappings) {
     for (let frame = startFrame; frame < endFrame; frame += 1) {
+      const sourceFrame = resolveVideoSourceFrame(mapping, frame);
+      const key = computeVideoFrameCacheKey(mapping.assetRef, sourceFrame);
+      if (seenKeys.has(key)) {
+        continue;
+      }
+      seenKeys.add(key);
+      requests.push({ assetRef: mapping.assetRef, sourceFrame });
+    }
+  }
+
+  return requests;
+}
+
+/**
+ * `computeNeededVideoSamplesForRange`'s own counterpart for a discrete,
+ * possibly non-contiguous frame list rather than a `[startFrame, endFrame)`
+ * range - `render_frames`' own shape (a bounded, explicit list of frames to
+ * render, mirroring `buildSatoriLayerRenderRegistryForProject`'s own
+ * `frames` parameter immediately below) instead of `render_scene`'s own
+ * per-range windowing.
+ */
+function computeNeededVideoSamplesForFrames(
+  videoNodeMappings: readonly VideoNodeMapping[],
+  frames: readonly number[],
+): VideoSampleRequest[] {
+  const seenKeys = new Set<string>();
+  const requests: VideoSampleRequest[] = [];
+
+  for (const mapping of videoNodeMappings) {
+    for (const frame of frames) {
       const sourceFrame = resolveVideoSourceFrame(mapping, frame);
       const key = computeVideoFrameCacheKey(mapping.assetRef, sourceFrame);
       if (seenKeys.has(key)) {
@@ -1017,6 +1056,113 @@ export async function buildTextureRegistryForProject(
       );
     }
   }
+  return registry;
+}
+
+/**
+ * Builds a real (non-serialized) `VideoFrameRegistry` for `project`'s own
+ * `VideoNode`s, restricted to exactly the samples `frames` (this call's own
+ * bounded, explicit frame list, mirroring `buildSatoriLayerRenderRegistryForProject`'s
+ * own `frames` parameter) actually needs - the `VideoFrameRegistry`
+ * counterpart to `buildTextureRegistryForProject` above, for the exact same
+ * "no browser page, no real `<video>` element to decode with" caller
+ * (`@cadra/headless`'s `createNativeGpuHeadlessRenderer`).
+ *
+ * Decodes each sample via `decodeVideoFramesWithFfmpeg`
+ * (`ffmpeg-video-frame-decoder.ts`) - a real system-installed `ffmpeg`
+ * spawned per sample, the one piece of this pipeline with no `pngjs`-class
+ * pure-JS equivalent, since Node has no built-in video demux/decode
+ * capability at all. Every distinct `assetRef` this project's `VideoNode`s
+ * reference has its bytes fetched, and its temp file written, at most once,
+ * regardless of how many distinct source frames it needs sampled - a video
+ * asset referenced from several `VideoNode`s (or needing several distinct
+ * `frames`) is only ever fetched and staged on disk once.
+ *
+ * Returns `undefined` (not an empty registry) when `project` has no video
+ * nodes at all, matching `TextRenderRegistry`'s/`TextureRegistry`'s own
+ * "omit entirely" convention. A specific sample failing to decode (a
+ * corrupt asset, an out-of-range seek) falls through to the renderer's own
+ * documented gray placeholder for that one `(assetRef, sourceFrame)` pair,
+ * the same "unresolved is an expected runtime state" contract every other
+ * registry builder in this file already establishes - `ffmpeg` itself not
+ * being installed at all is different (every sample would fail identically),
+ * so that specific failure is logged once per asset, clearly naming the
+ * missing prerequisite, rather than once per sample.
+ *
+ * `decodeVideoFrames` is injectable (defaults to the real
+ * `decodeVideoFramesWithFfmpeg`), mirroring every other real-dependency seam
+ * in this codebase (`ThreeRendererDependencies`, `fetchAssetBytes` itself):
+ * lets a test substitute a fast fake and never spawn a real `ffmpeg` child
+ * process just to exercise this function's own asset-collection/grouping/
+ * error-handling logic.
+ */
+export async function buildVideoFrameRegistryForProject(
+  project: Project,
+  frames: readonly number[],
+  fps: number,
+  fetchAssetBytes?: (assetRef: string) => Promise<Uint8Array | undefined>,
+  decodeVideoFrames: typeof decodeVideoFramesWithFfmpeg = decodeVideoFramesWithFfmpeg,
+): Promise<VideoFrameRegistry | undefined> {
+  if (fetchAssetBytes === undefined) {
+    return undefined;
+  }
+
+  const videoNodeMappings = collectVideoNodeMappingsForProject(project);
+  if (videoNodeMappings.length === 0) {
+    return undefined;
+  }
+
+  const samples = computeNeededVideoSamplesForFrames(videoNodeMappings, frames);
+  if (samples.length === 0) {
+    return undefined;
+  }
+
+  const sourceFramesByAssetRef = new Map<string, number[]>();
+  for (const sample of samples) {
+    const existing = sourceFramesByAssetRef.get(sample.assetRef);
+    if (existing === undefined) {
+      sourceFramesByAssetRef.set(sample.assetRef, [sample.sourceFrame]);
+    } else {
+      existing.push(sample.sourceFrame);
+    }
+  }
+
+  const registry = createInMemoryVideoFrameRegistry();
+  for (const [assetRef, sourceFrames] of sourceFramesByAssetRef) {
+    const bytes = await fetchAssetBytes(assetRef);
+    if (bytes === undefined) {
+      continue;
+    }
+
+    let decoded: Map<number, { width: number; height: number; pixels: Uint8Array }>;
+    try {
+      decoded = await decodeVideoFrames(
+        bytes,
+        sourceFrames.map((sourceFrame) => ({ sourceFrame, timestampSeconds: videoSampleTimestamp(sourceFrame, fps) })),
+      );
+    } catch (error) {
+      const message =
+        error instanceof FfmpegNotFoundError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      console.error(
+        `buildVideoFrameRegistryForProject: failed to decode video asset "${assetRef}" (${message}). ` +
+          "Every VideoNode referencing it renders as the documented gray placeholder instead.",
+      );
+      continue;
+    }
+
+    for (const [sourceFrame, frame] of decoded) {
+      registry.register(computeVideoFrameCacheKey(assetRef, sourceFrame), {
+        pixels: frame.pixels,
+        width: frame.width,
+        height: frame.height,
+      });
+    }
+  }
+
   return registry;
 }
 

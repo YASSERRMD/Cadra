@@ -149,6 +149,8 @@ export {
   encodeFrames,
   WebCodecsUnavailableForEncodingError,
 } from "./encode-frames.js";
+export type { DecodedVideoFrame, VideoFrameSampleRequest } from "./ffmpeg-video-frame-decoder.js";
+export { decodeVideoFramesWithFfmpeg, FfmpegNotFoundError } from "./ffmpeg-video-frame-decoder.js";
 export type { MergedChunkResult } from "./mux-audio-video-merge.js";
 export { mergeVideoAndAudioChunks } from "./mux-audio-video-merge.js";
 export type { RawChunkBytes } from "./mux-chunk-bytes.js";
@@ -229,6 +231,7 @@ export {
   buildSatoriLayerRenderRegistryForProject,
   buildTextRenderRegistryForProject,
   buildTextureRegistryForProject,
+  buildVideoFrameRegistryForProject,
   DEFAULT_RANGE_TIMEOUT_MS,
   getEncodedRenderJobStatus,
   resumeEncodedRenderJob,

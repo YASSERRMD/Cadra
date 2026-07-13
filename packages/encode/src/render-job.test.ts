@@ -14,14 +14,16 @@ import type {
   HeadlessPageLike,
 } from "@cadra/headless";
 import { RenderJobFailedError } from "@cadra/headless";
-import { computeTextNodeRenderKey } from "@cadra/renderer";
+import { computeTextNodeRenderKey, computeVideoFrameCacheKey } from "@cadra/renderer";
 import { PNG } from "pngjs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import type { DecodedVideoFrame, VideoFrameSampleRequest } from "./ffmpeg-video-frame-decoder.js";
 import { readMp4FragmentedDurationTicks, readMp4TrackTimescale } from "./mux-validate-mp4.js";
 import {
   buildTextRenderRegistryForProject,
   buildTextureRegistryForProject,
+  buildVideoFrameRegistryForProject,
   DEFAULT_RANGE_TIMEOUT_MS,
   type EncodedRenderJobHandle,
   getEncodedRenderJobStatus,
@@ -801,6 +803,140 @@ describe("buildTextureRegistryForProject", () => {
     expect(registry!.resolve("cadra-asset://bbb")).toBeDefined();
     // Corrupt PNG bytes fail PNG.sync.read and are silently skipped, not thrown.
     expect(registry!.resolve("cadra-asset://corrupt")).toBeUndefined();
+  });
+});
+
+describe("buildVideoFrameRegistryForProject", () => {
+  function buildProjectWithVideos(): Project {
+    const videoA1 = Video({ id: "vid-a1", assetRef: "cadra-asset://aaa" });
+    const videoA2 = Video({ id: "vid-a2", assetRef: "cadra-asset://aaa" });
+    const videoB = Video({ id: "vid-b", assetRef: "cadra-asset://bbb" });
+    const composition = createComposition({
+      id: "comp-1",
+      name: "Main",
+      fps: 30,
+      durationInFrames: 30,
+      width: 64,
+      height: 36,
+      tracks: [
+        {
+          id: "track-1",
+          clips: [
+            Sequence({ id: "clip-a1", from: 0, durationInFrames: 30, content: videoA1 }),
+            Sequence({ id: "clip-a2", from: 0, durationInFrames: 30, content: videoA2 }),
+            Sequence({ id: "clip-b", from: 0, durationInFrames: 30, content: videoB }),
+          ],
+        },
+      ],
+    });
+    return createProject({ id: "p1", name: "Project", compositions: [composition] });
+  }
+
+  /** A fake `DecodedVideoFrame`, distinct per assetRef so tests can tell which asset's own decode call actually produced a given registry entry. */
+  function fakeFrame(tag: number): DecodedVideoFrame {
+    return { width: 2, height: 2, pixels: new Uint8Array([tag, tag, tag, 255]) };
+  }
+
+  it("returns undefined when project has no video nodes at all", async () => {
+    const project = createProject({
+      id: "p1",
+      name: "Project",
+      compositions: [
+        createComposition({ id: "comp-1", name: "Main", fps: 30, durationInFrames: 1, width: 4, height: 4, tracks: [] }),
+      ],
+    });
+    const registry = await buildVideoFrameRegistryForProject(project, [0], 30, async () => new Uint8Array());
+    expect(registry).toBeUndefined();
+  });
+
+  it("returns undefined when fetchAssetBytes is not supplied, even though the project has VideoNodes", async () => {
+    const registry = await buildVideoFrameRegistryForProject(buildProjectWithVideos(), [0], 30);
+    expect(registry).toBeUndefined();
+  });
+
+  it("returns undefined when frames is empty, even though the project has VideoNodes", async () => {
+    const registry = await buildVideoFrameRegistryForProject(buildProjectWithVideos(), [], 30, async () => new Uint8Array());
+    expect(registry).toBeUndefined();
+  });
+
+  it("fetches bytes and decodes, at most once per distinct assetRef, regardless of how many VideoNodes or frames reference it", async () => {
+    const fetchCalls: string[] = [];
+    const fetchAssetBytes = async (assetRef: string): Promise<Uint8Array | undefined> => {
+      fetchCalls.push(assetRef);
+      return new TextEncoder().encode(assetRef);
+    };
+    const decodeCalls: { assetRef: string; samples: readonly VideoFrameSampleRequest[] }[] = [];
+    const decodeVideoFrames = vi.fn(
+      async (bytes: Uint8Array, samples: readonly VideoFrameSampleRequest[]): Promise<Map<number, DecodedVideoFrame>> => {
+        const assetRef = new TextDecoder().decode(bytes);
+        decodeCalls.push({ assetRef, samples });
+        return new Map(samples.map((sample) => [sample.sourceFrame, fakeFrame(assetRef === "cadra-asset://aaa" ? 1 : 2)]));
+      },
+    );
+
+    const registry = await buildVideoFrameRegistryForProject(
+      buildProjectWithVideos(),
+      [0, 5],
+      30,
+      fetchAssetBytes,
+      decodeVideoFrames,
+    );
+
+    expect(registry).toBeDefined();
+    expect(fetchCalls.sort()).toEqual(["cadra-asset://aaa", "cadra-asset://bbb"]);
+    expect(decodeVideoFrames).toHaveBeenCalledTimes(2);
+    // "aaa" is referenced by two VideoNodes (vid-a1, vid-a2) and two frames -
+    // still exactly one decode call, carrying every distinct sample needed.
+    const aaaCall = decodeCalls.find((call) => call.assetRef === "cadra-asset://aaa");
+    expect(aaaCall?.samples).toHaveLength(2);
+
+    expect(registry!.resolve(computeVideoFrameCacheKey("cadra-asset://aaa", 0))).toBeDefined();
+    expect(registry!.resolve(computeVideoFrameCacheKey("cadra-asset://aaa", 5))).toBeDefined();
+    expect(registry!.resolve(computeVideoFrameCacheKey("cadra-asset://bbb", 0))).toBeDefined();
+  });
+
+  it("restricts sampling to exactly the requested frames, not the whole composition", async () => {
+    const decodeVideoFrames = vi.fn(
+      async (_bytes: Uint8Array, samples: readonly VideoFrameSampleRequest[]): Promise<Map<number, DecodedVideoFrame>> =>
+        new Map(samples.map((sample) => [sample.sourceFrame, fakeFrame(1)])),
+    );
+
+    await buildVideoFrameRegistryForProject(
+      buildProjectWithVideos(),
+      [3],
+      30,
+      async () => new Uint8Array([1]),
+      decodeVideoFrames,
+    );
+
+    const requestedSourceFrames = decodeVideoFrames.mock.calls.flatMap(([, samples]) =>
+      samples.map((sample) => sample.sourceFrame),
+    );
+    expect(requestedSourceFrames.every((sourceFrame) => sourceFrame === 3)).toBe(true);
+  });
+
+  it("skips (not throws for) an asset whose decode fails entirely, while still registering every other asset's real frames", async () => {
+    const decodeVideoFrames = vi.fn(
+      async (bytes: Uint8Array, samples: readonly VideoFrameSampleRequest[]): Promise<Map<number, DecodedVideoFrame>> => {
+        const assetRef = new TextDecoder().decode(bytes);
+        if (assetRef === "cadra-asset://aaa") {
+          throw new Error("ffmpeg exited with code 1: simulated decode failure");
+        }
+        return new Map(samples.map((sample) => [sample.sourceFrame, fakeFrame(2)]));
+      },
+    );
+
+    const registry = await buildVideoFrameRegistryForProject(
+      buildProjectWithVideos(),
+      [0],
+      30,
+      async (assetRef) => new TextEncoder().encode(assetRef),
+      decodeVideoFrames,
+    );
+
+    expect(registry).toBeDefined();
+    expect(registry!.resolve(computeVideoFrameCacheKey("cadra-asset://aaa", 0))).toBeUndefined();
+    expect(registry!.resolve(computeVideoFrameCacheKey("cadra-asset://bbb", 0))).toBeDefined();
   });
 });
 

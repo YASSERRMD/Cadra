@@ -1,21 +1,36 @@
 import { resolveVideoSourceFrame, type VideoNode } from "@cadra/core";
 
-/** Everything the reconciler needs to place one `VideoNode`'s already-decoded current-frame pixels: just the pixels themselves, the same "resolve-only" shape `TextRenderRegistry`/`SatoriLayerRenderRegistry` already establish. */
-export interface VideoFrameRenderEntry {
-  /** The decoded frame, ready for `createImageTexture` to wrap - reusing the exact same wrap this reconciler already uses for a resolved `ImageNode`. */
-  image: ImageBitmap;
-}
+/**
+ * Everything the reconciler needs to place one `VideoNode`'s already-decoded
+ * current-frame pixels: just the pixels themselves, the same "resolve-only"
+ * shape `TextRenderRegistry`/`SatoriLayerRenderRegistry` already establish.
+ * Two shapes, one per decode path (see `VideoFrameRegistry`'s own doc):
+ * `{ image }` for a real browser's own `<video>`-element decode (an
+ * `ImageBitmap`, ready for `createImageTexture` to wrap - reusing the exact
+ * same wrap this reconciler already uses for a resolved `ImageNode`); `{
+ * pixels, width, height }` for a Node-only decode with no `ImageBitmap`
+ * available at all (`@cadra/encode`'s own `ffmpeg-video-frame-decoder.ts`),
+ * ready for `createDataTexture` to wrap instead - the same raw-RGBA8 path
+ * `TextureRegistry`'s own Node-side `pngjs` decode already establishes for
+ * images. Discriminated structurally (by which key is present), not via an
+ * explicit tag: this way every existing `{ image }` construction site
+ * (browser-side preparation, test fixtures) keeps working unchanged.
+ */
+export type VideoFrameRenderEntry = { image: ImageBitmap } | { pixels: Uint8Array; width: number; height: number };
 
 /**
  * Resolves a `VideoNode` (at a specific frame) to its already-decoded
  * current-frame `VideoFrameRenderEntry`. Resolve-only, mirroring
  * `SatoriLayerRenderRegistry`'s own contract exactly: something else
- * (a browser-side preparation step, since decoding an arbitrary uploaded
- * video format needs a real browser's own decoder - no Node-only
- * equivalent exists the way `pngjs` covers PNG for images) samples and
- * registers entries ahead of a `reconcile` call, the same "not yet ready
- * is an expected runtime state, not a programming error" shape every
- * other registry-resolved node kind in this codebase already has.
+ * samples and registers entries ahead of a `reconcile` call - a browser-side
+ * preparation step (a real `<video>` element's own decode) for
+ * `render_scene`'s own browser-based path, or a real `ffmpeg` child process
+ * (`@cadra/encode`'s own `ffmpeg-video-frame-decoder.ts`, `buildVideoFrameRegistryForProject`)
+ * for `render_frames`' own same-process native-GPU path, which has no
+ * browser page (and so no `<video>` element, and no Node-built-in video
+ * decode either) to decode with at all - the same "not yet ready is an
+ * expected runtime state, not a programming error" shape every other
+ * registry-resolved node kind in this codebase already has.
  */
 export interface VideoFrameRegistry {
   resolve(cacheKey: string): VideoFrameRenderEntry | undefined;
