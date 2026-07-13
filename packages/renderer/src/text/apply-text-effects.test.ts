@@ -2,11 +2,11 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { hashAssetBytes, type TextPathConfig, type TextPhysicsConfig, type TextStaggerConfig } from "@cadra/core";
-import { parseFontWithFontkit, prepareTextRenderData } from "@cadra/text";
+import { parseFontWithFontkit, prepareTextRenderData, type TextRenderData } from "@cadra/text";
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 
-import { applyTextEffects } from "./apply-text-effects.js";
+import { applyTextEffects, applyTextMorph } from "./apply-text-effects.js";
 import { buildTextGroup } from "./build-text-group.js";
 
 function loadRobotoFlex(): Uint8Array {
@@ -332,5 +332,179 @@ describe("applyTextEffects: robustness", () => {
 
     expect(() => applyTextEffects(resources.group, data.glyphs, {}, 5)).not.toThrow();
     expect(mesh.position.equals(positionBefore)).toBe(true);
+  });
+});
+
+/**
+ * Builds a real, shaped `TextGroupResources` for `text`, the same fixture
+ * shape every `applyTextMorph` test below needs on both its "from" and "to"
+ * side. Extruded (real `font`/`extrudeDepth`), not the flat MSDF default:
+ * the flat path holds opacity in a TSL uniform node rather than the classic
+ * `material.opacity` property (see `build-text-group.ts`'s own doc), so
+ * these tests - which assert on `material.opacity` directly, mirroring
+ * `applyTextEffects`'s own extruded-path opacity tests above - need the
+ * extruded path's plain `MeshStandardMaterial` to read a real value back.
+ */
+async function buildMorphSide(text: string) {
+  const data = await prepareTextRenderData(ROBOTO_FLEX, text);
+  const resources = buildTextGroup(data, {
+    color: [1, 1, 1, 1],
+    extrudeDepth: 0.2,
+    font: ROBOTO_FLEX_SOURCE,
+    perGlyphMaterial: true,
+  });
+  return { data, resources };
+}
+
+describe("applyTextMorph: opacity crossfade", () => {
+  it("fades 'from' out and 'to' in as progress moves from 0 to 1", async () => {
+    const from = await buildMorphSide("hello");
+    const to = await buildMorphSide("goodbye world");
+    const fromGlyph = from.data.glyphs[0]!;
+    const toGlyph = to.data.glyphs[0]!;
+    const fromMesh = from.resources.group.getObjectByName(
+      `glyph-${fromGlyph.cluster}-${fromGlyph.glyphId}`,
+    ) as THREE.Mesh;
+    const toMesh = to.resources.group.getObjectByName(`glyph-${toGlyph.cluster}-${toGlyph.glyphId}`) as THREE.Mesh;
+    const fromMaterial = fromMesh.material as THREE.Material & { opacity: number };
+    const toMaterial = toMesh.material as THREE.Material & { opacity: number };
+
+    applyTextMorph(to.resources.group, to.data.glyphs, from.resources.group, from.data.glyphs, "line", 0);
+    expect(fromMaterial.opacity).toBeCloseTo(1, 5);
+    expect(toMaterial.opacity).toBeCloseTo(0, 5);
+
+    applyTextMorph(to.resources.group, to.data.glyphs, from.resources.group, from.data.glyphs, "line", 0.5);
+    expect(fromMaterial.opacity).toBeCloseTo(0.5, 5);
+    expect(toMaterial.opacity).toBeCloseTo(0.5, 5);
+
+    applyTextMorph(to.resources.group, to.data.glyphs, from.resources.group, from.data.glyphs, "line", 1);
+    expect(fromMaterial.opacity).toBeCloseTo(0, 5);
+    expect(toMaterial.opacity).toBeCloseTo(1, 5);
+  });
+});
+
+/** A single-glyph `TextRenderData` whose one glyph's own quad is centered exactly at `centerX` - gives `applyTextMorph`'s position tests an exact, hand-controlled unit center instead of an incidentally-font-metric-dependent one. */
+function singleGlyphTextRenderData(centerX: number): TextRenderData {
+  return {
+    lineCount: 1,
+    atlasPages: [{ width: 4, height: 4, pixels: new Uint8Array(4 * 4 * 4).fill(255), png: new Uint8Array() }],
+    glyphs: [
+      {
+        glyphId: 1,
+        cluster: 0,
+        lineIndex: 0,
+        wordIndex: 0,
+        origin: { x: centerX - 0.5, y: 0 },
+        quad: { left: centerX - 0.5, right: centerX + 0.5, bottom: 0, top: 1 },
+        page: 0,
+        uv: { u0: 0, v0: 0, u1: 1, v1: 1 },
+        range: 0.1,
+      },
+    ],
+  };
+}
+
+describe("applyTextMorph: position convergence", () => {
+  it("moves a matched pair toward each other's natural center, converging to the same absolute position mid-morph", () => {
+    // Hand-crafted single-glyph fixtures (not real shaping): each side's
+    // one glyph is its own whole "word" unit, so its own basePosition
+    // trivially *is* resolveGlyphMorphStates' own unit center - an exact,
+    // hand-chosen 10-unit gap, not an incidental font-metric difference.
+    const fromData = singleGlyphTextRenderData(0);
+    const toData = singleGlyphTextRenderData(10);
+    const fromResources = buildTextGroup(fromData, { color: [1, 1, 1, 1], perGlyphMaterial: true });
+    const toResources = buildTextGroup(toData, { color: [1, 1, 1, 1], perGlyphMaterial: true });
+    const fromGlyph = fromData.glyphs[0]!;
+    const toGlyph = toData.glyphs[0]!;
+    const fromMesh = fromResources.group.getObjectByName(
+      `glyph-${fromGlyph.cluster}-${fromGlyph.glyphId}`,
+    ) as THREE.Mesh;
+    const toMesh = toResources.group.getObjectByName(`glyph-${toGlyph.cluster}-${toGlyph.glyphId}`) as THREE.Mesh;
+    const fromBase = fromMesh.userData["basePosition"] as THREE.Vector3;
+    const toBase = toMesh.userData["basePosition"] as THREE.Vector3;
+    expect(toBase.x - fromBase.x).toBeCloseTo(10, 5);
+
+    applyTextMorph(toResources.group, toData.glyphs, fromResources.group, fromData.glyphs, "word", 0);
+    // At progress 0, "from" sits at its own natural position...
+    expect(fromMesh.position.x).toBeCloseTo(fromBase.x, 4);
+    // ...and "to" has already moved to sit exactly on top of it.
+    expect(toMesh.position.x).toBeCloseTo(fromMesh.position.x, 3);
+
+    applyTextMorph(toResources.group, toData.glyphs, fromResources.group, fromData.glyphs, "word", 1);
+    // At progress 1, the two have swapped: "to" is home, "from" overlaps it.
+    expect(toMesh.position.x).toBeCloseTo(toBase.x, 4);
+    expect(fromMesh.position.x).toBeCloseTo(toMesh.position.x, 3);
+
+    applyTextMorph(toResources.group, toData.glyphs, fromResources.group, fromData.glyphs, "word", 0.5);
+    // Mid-morph, both sit at the exact same absolute position as each other
+    // (the halfway point between the two natural centers) - a true
+    // crossfade, not two independently-drifting texts.
+    expect(fromMesh.position.x).toBeCloseTo(toMesh.position.x, 3);
+    expect(fromMesh.position.x).toBeCloseTo((fromBase.x + toBase.x) / 2, 3);
+  });
+
+  it("leaves an unmatched (from-only) unit's own position untouched, only fading its opacity", async () => {
+    const from = await buildMorphSide("hello");
+    const to = await buildMorphSide("");
+    const fromGlyph = from.data.glyphs[0]!;
+    const fromMesh = from.resources.group.getObjectByName(
+      `glyph-${fromGlyph.cluster}-${fromGlyph.glyphId}`,
+    ) as THREE.Mesh;
+    const fromBase = fromMesh.userData["basePosition"] as THREE.Vector3;
+
+    applyTextMorph(to.resources.group, to.data.glyphs, from.resources.group, from.data.glyphs, "line", 0.5);
+
+    expect(fromMesh.position.x).toBeCloseTo(fromBase.x, 5);
+    expect(fromMesh.position.y).toBeCloseTo(fromBase.y, 5);
+  });
+});
+
+describe("applyTextMorph: 'from' and 'to' groups stay structurally independent", () => {
+  it("resolves a glyph shared by both texts (same cluster/glyphId) to two independently-correct meshes, not a colliding lookup", async () => {
+    // Both "aardvark" and "avocado" start with an "a" glyph at cluster 0,
+    // so `glyph-0-<idOfA>` names an existing mesh in *both* groups - the
+    // exact name collision applyTextMorph's own structural-separation
+    // design (two distinct THREE.Group subtrees, see its own doc) exists to
+    // guard against: a merged-group implementation would have
+    // getObjectByName return only one of the two "a" meshes for both
+    // lookups, silently leaving the other stuck at a stale state.
+    const from = await buildMorphSide("aardvark");
+    const to = await buildMorphSide("avocado");
+    const fromGlyph = from.data.glyphs[0]!;
+    const toGlyph = to.data.glyphs[0]!;
+    expect(fromGlyph.cluster).toBe(toGlyph.cluster);
+    expect(fromGlyph.glyphId).toBe(toGlyph.glyphId);
+
+    const fromMesh = from.resources.group.getObjectByName(
+      `glyph-${fromGlyph.cluster}-${fromGlyph.glyphId}`,
+    ) as THREE.Mesh;
+    const toMesh = to.resources.group.getObjectByName(`glyph-${toGlyph.cluster}-${toGlyph.glyphId}`) as THREE.Mesh;
+    expect(fromMesh).not.toBe(toMesh);
+
+    const fromMaterial = fromMesh.material as THREE.Material & { opacity: number };
+    const toMaterial = toMesh.material as THREE.Material & { opacity: number };
+
+    applyTextMorph(to.resources.group, to.data.glyphs, from.resources.group, from.data.glyphs, "character", 0.25);
+
+    // Each side's own "a" mesh resolves its own side's own opacity,
+    // independently - not both landing on whichever side was applied last.
+    expect(fromMaterial.opacity).toBeCloseTo(0.75, 5);
+    expect(toMaterial.opacity).toBeCloseTo(0.25, 5);
+  });
+
+  it("resolves the 'to' side correctly even when the 'from' side is completely empty", async () => {
+    const to = await buildMorphSide("a");
+    const toGlyph = to.data.glyphs[0]!;
+    const toMesh = to.resources.group.getObjectByName(`glyph-${toGlyph.cluster}-${toGlyph.glyphId}`) as THREE.Mesh;
+    const toMaterial = toMesh.material as THREE.Material & { opacity: number };
+    const positionBefore = toMesh.position.clone();
+
+    // An empty fromGroup/fromGlyphs (e.g. a morph.from of ""): nothing for a
+    // "from" lookup to ever match, but the "to" side must still resolve
+    // correctly as a from-less fade-in against its own real group.
+    applyTextMorph(to.resources.group, to.data.glyphs, new THREE.Group(), [], "character", 0.5);
+
+    expect(toMaterial.opacity).toBeCloseTo(0.5, 5);
+    expect(toMesh.position.equals(positionBefore)).toBe(true);
   });
 });

@@ -3,8 +3,14 @@ import type { FontParseBackend } from "@cadra/text";
 
 /** One `TextNode` a `GoldenScene` needs real, pre-shaped render data for before it can render correctly (see `render-raster-scene.ts`). */
 export interface GoldenSceneTextRequirement {
-  /** The exact fields `computeTextNodeRenderKey` reads: must match the actual `TextNode` in `buildProject()`'s output so the registered entry resolves at render time. */
-  node: Pick<TextNode, "fontRef" | "content" | "variationAxes">;
+  /**
+   * The exact fields `computeTextNodeRenderKey` reads, plus `morph`: must
+   * match the actual `TextNode` in `buildProject()`'s output so the
+   * registered entry (or, for a `morph`-configured node, entries -
+   * `render-raster-scene.ts`'s own `buildTextRenderRegistry` also registers
+   * `morph.from`) resolves at render time.
+   */
+  node: Pick<TextNode, "fontRef" | "content" | "variationAxes" | "morph">;
   /** Basename of a font file under this package's own `test-fixtures/fonts/`. */
   fontFixtureFileName: string;
   /** Which of `@cadra/text`'s two independent engines parses `fontFixtureFileName` for this scene. */

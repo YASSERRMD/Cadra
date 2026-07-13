@@ -1,6 +1,7 @@
-import type { TextPathConfig, TextPhysicsConfig, TextStaggerConfig } from "@cadra/core";
+import type { TextPathConfig, TextPhysicsConfig, TextStaggerConfig, TextStaggerGrouping } from "@cadra/core";
 import {
   type PositionedGlyph,
+  resolveGlyphMorphStates,
   resolveGlyphPathStates,
   resolveGlyphPhysicsStates,
   resolveGlyphStaggerStates,
@@ -141,5 +142,61 @@ export function applyTextEffects(
       const setOpacity = mesh.userData["setOpacity"] as ((a: number) => void) | undefined;
       setOpacity?.(opacity);
     }
+  }
+}
+
+/**
+ * Applies a `TextNode`'s own `morph` crossfade to its two already-built
+ * glyph-mesh groups (`toGroup`, built from `node.content`; `fromGroup`,
+ * built from `node.morph.from` - see `node-factory.ts`'s own
+ * `buildTextObject`), at `progress`. Delegates the actual per-glyph
+ * opacity/offset math entirely to `resolveGlyphMorphStates` (pure,
+ * THREE-free); this function only routes each resolved state onto whichever
+ * of the two groups its own `source` names, via the exact same
+ * `userData.basePosition`/`userData.setOpacity` mesh convention
+ * `applyTextEffects` above already established. The two groups are kept as
+ * structurally separate `THREE.Group` subtrees specifically so this
+ * `getObjectByName` lookup can never collide between a "from" glyph and a
+ * "to" glyph that happen to share the same `cluster`/`glyphId` (e.g. a
+ * letter common to both strings) - each lookup only ever searches its own
+ * group's own subtree.
+ *
+ * Deliberately does not touch shadow duplicate meshes
+ * (`glyph-shadow-${cluster}-${glyphId}-${step}`), mirroring
+ * `applyTextEffects`'s own identical scope boundary above: a shadow mesh's
+ * own position is only ever re-derived from its glyph's `basePosition`
+ * inside `setShadow` itself, not per-frame here.
+ */
+export function applyTextMorph(
+  toGroup: THREE.Group,
+  toGlyphs: readonly PositionedGlyph[],
+  fromGroup: THREE.Group,
+  fromGlyphs: readonly PositionedGlyph[],
+  grouping: TextStaggerGrouping,
+  progress: number,
+  toLineTexts?: readonly string[],
+  fromLineTexts?: readonly string[],
+): void {
+  const states = resolveGlyphMorphStates(fromGlyphs, toGlyphs, grouping, progress, fromLineTexts, toLineTexts);
+
+  for (const state of states) {
+    const group = state.source === "to" ? toGroup : fromGroup;
+    const glyphs = state.source === "to" ? toGlyphs : fromGlyphs;
+    const glyph = glyphs[state.glyphIndex];
+    if (glyph === undefined) {
+      continue;
+    }
+    const mesh = group.getObjectByName(`glyph-${glyph.cluster}-${glyph.glyphId}`);
+    if (!(mesh instanceof THREE.Mesh)) {
+      continue;
+    }
+
+    const basePosition = mesh.userData["basePosition"] as THREE.Vector3 | undefined;
+    if (basePosition !== undefined) {
+      mesh.position.set(basePosition.x + state.offsetX, basePosition.y + state.offsetY, basePosition.z);
+    }
+
+    const setOpacity = mesh.userData["setOpacity"] as ((a: number) => void) | undefined;
+    setOpacity?.(state.opacity);
   }
 }

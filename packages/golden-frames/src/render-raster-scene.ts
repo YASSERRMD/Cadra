@@ -55,6 +55,13 @@ export class GoldenSceneCompositionNotFoundError extends Error {
  * `textRenderRegistry` option is omitted entirely for non-text scenes,
  * exactly matching its documented "every text node renders as an empty
  * placeholder" default.
+ *
+ * A `morph`-configured requirement also registers a second entry for its own
+ * `morph.from` text (same font, synthetic `{...node, content: morph.from}`
+ * key), mirroring `@cadra/encode`'s own `render-job.ts`
+ * `prepareTextRenderEntriesForProject` - a scene author declares one
+ * `TextRenderRequirement` per morphing node, same as any other text node,
+ * not two.
  */
 async function buildTextRenderRegistry(scene: GoldenScene): Promise<TextRenderRegistry | undefined> {
   if (scene.textRequirements === undefined || scene.textRequirements.length === 0) {
@@ -74,6 +81,15 @@ async function buildTextRenderRegistry(scene: GoldenScene): Promise<TextRenderRe
       fontBytes,
       fontContentHash: font.contentHash,
     });
+
+    if (requirement.node.morph !== undefined) {
+      const fromData = await prepareTextRenderData(font, requirement.node.morph.from);
+      registry.register(computeTextNodeRenderKey({ ...requirement.node, content: requirement.node.morph.from }, 0), {
+        data: fromData,
+        fontBytes,
+        fontContentHash: font.contentHash,
+      });
+    }
   }
 
   return registry;

@@ -138,6 +138,7 @@ function text(
     content: string;
     color: [number, number, number, number];
     fontSize: number;
+    morph: { from: string; grouping: "character"; progress: number };
   }> = {},
 ): SceneNode {
   return {
@@ -522,6 +523,45 @@ describe("createReconciler: add, update, remove", () => {
 
     expect(geometryDisposeSpy).toHaveBeenCalledTimes(1);
     expect(materialDisposeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconcile(null) disposes every geometry and material owned by BOTH of a morph text node's own glyph groups", () => {
+    const textRenderRegistry = createInMemoryTextRenderRegistry();
+    textRenderRegistry.register(computeTextNodeRenderKey({ content: "hello" }, 0), {
+      data: FAKE_TEXT_RENDER_DATA,
+      fontBytes: new Uint8Array(),
+      fontContentHash: "fake-font",
+    });
+    textRenderRegistry.register(computeTextNodeRenderKey({ content: "bye" }, 0), {
+      data: FAKE_TEXT_RENDER_DATA,
+      fontBytes: new Uint8Array(),
+      fontContentHash: "fake-font",
+    });
+    const reconciler = createReconciler({ textRenderRegistry });
+    const node = text("t1", { morph: { from: "bye", grouping: "character", progress: 0.5 } });
+    reconciler.reconcile(node, 0);
+    // Re-reconcile once to reach into the live entry's owned resources via a
+    // second, identical tree, mirroring the non-morph text disposal test
+    // immediately above.
+    const rootObject = reconciler.reconcile(node, 0) as THREE.Group;
+    expect(rootObject.children).toHaveLength(2);
+    // One level deeper than the non-morph text test above: rootObject is
+    // here the wrapping parent (see buildTextObject's own doc), not
+    // resources.group directly, so reaching a glyph mesh needs an extra
+    // children[0] hop through that wrapper first.
+    const toGlyphMesh = rootObject.children[0]?.children[0]?.children[0]?.children[0] as THREE.Mesh;
+    const fromGlyphMesh = rootObject.children[1]?.children[0]?.children[0]?.children[0] as THREE.Mesh;
+    const toGeometryDisposeSpy = vi.spyOn(toGlyphMesh.geometry, "dispose");
+    const toMaterialDisposeSpy = vi.spyOn(toGlyphMesh.material as THREE.Material, "dispose");
+    const fromGeometryDisposeSpy = vi.spyOn(fromGlyphMesh.geometry, "dispose");
+    const fromMaterialDisposeSpy = vi.spyOn(fromGlyphMesh.material as THREE.Material, "dispose");
+
+    reconciler.reconcile(null, 0);
+
+    expect(toGeometryDisposeSpy).toHaveBeenCalledTimes(1);
+    expect(toMaterialDisposeSpy).toHaveBeenCalledTimes(1);
+    expect(fromGeometryDisposeSpy).toHaveBeenCalledTimes(1);
+    expect(fromMaterialDisposeSpy).toHaveBeenCalledTimes(1);
   });
 
   it("reconcile(null) disposes the geometry, material, and texture a satori node's own render resources own", () => {

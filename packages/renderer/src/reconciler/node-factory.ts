@@ -42,7 +42,7 @@ import {
   computeSatoriLayerRenderKey,
   type SatoriLayerRenderRegistry,
 } from "../svg-layer/satori-layer-render-registry.js";
-import { applyTextEffects } from "../text/apply-text-effects.js";
+import { applyTextEffects, applyTextMorph } from "../text/apply-text-effects.js";
 import { buildTextGroup, type TextGroupResources } from "../text/build-text-group.js";
 import { computeTextNodeRenderKey, type TextRenderRegistry } from "../text/text-render-registry.js";
 import {
@@ -271,6 +271,19 @@ export interface OwnedResources {
    * itself, not on every subsequent per-frame call.
    */
   textGlyphs?: readonly PositionedGlyph[];
+  /**
+   * A `morph`-configured `text` node's own second glyph group, rendering
+   * `node.morph.from` - kept as a fully separate `TextGroupResources` (its
+   * own geometries/materials/textures, disposed alongside `text`'s own
+   * above) rather than merged into it, so `applyTextMorph`'s own
+   * `getObjectByName` lookups can never collide between a "from" glyph and
+   * a "to" glyph sharing the same `cluster`/`glyphId` - see
+   * `buildTextObject`'s own doc. `fromGlyphs` mirrors `textGlyphs` above,
+   * just for this second group. `undefined` whenever `node.morph` is
+   * absent, exactly like `text`/`textGlyphs` are `undefined` before any
+   * `TextRenderEntry` is registered.
+   */
+  textMorph?: { from: TextGroupResources; fromGlyphs: readonly PositionedGlyph[] };
   /** A `satori` node's own owned resources; see `SatoriLayerResources`'s own doc. */
   satori?: SatoriLayerResources;
   /**
@@ -674,6 +687,22 @@ function buildImageObject(node: ImageNode, ctx: NodeFactoryContext): BuiltObject
  * each is configured *at all* is frame-0-only, matching `TextGroupResources`'s
  * own `setFill`/`setOutline`/`setGlow`/`setShadow` each being present only
  * when their config was.
+ *
+ * A `node.morph` config builds a *second* `TextGroupResources` from
+ * `node.morph.from` (via a synthetic `{...node, content: node.morph.from}`
+ * render key - the same font/style, just different text), rendered under a
+ * new wrapping parent `THREE.Group` alongside the primary `content` group
+ * rather than merged into one. Both groups share this wrapper as their
+ * `Object3D` (so `applyNodeProperties`'s per-frame `fontSize` scale and the
+ * node's own authored transform still apply once, uniformly, to both) but
+ * stay structurally separate subtrees, so `applyTextMorph`'s own
+ * `getObjectByName` lookups can never collide between a "from" glyph and a
+ * "to" glyph that happen to share the same `cluster`/`glyphId` (e.g. a
+ * letter common to both strings) - see that function's own doc. Falls back
+ * to rendering only the primary group (no crossfade, same as a non-morphing
+ * node) when the "from" text's own `TextRenderEntry` is not yet registered -
+ * the same "asset not ready" runtime state `entry` above already handles
+ * for the primary text.
  */
 function buildTextObject(node: TextNode, ctx: NodeFactoryContext): BuiltObject {
   const entry = ctx.textRenderRegistry?.resolve(computeTextNodeRenderKey(node, 0));
@@ -682,23 +711,59 @@ function buildTextObject(node: TextNode, ctx: NodeFactoryContext): BuiltObject {
   }
 
   const extrudeDepth = resolveNumberProperty(node.extrudeDepth ?? 0, 0);
-  const resources = buildTextGroup(entry.data, {
+  // A staggered or physics-animated node needs every glyph's own opacity/
+  // position independently settable each frame (apply-text-effects.ts),
+  // which the default shared-by-(page,color) materials do not allow; see
+  // buildTextGroup's own doc. Shared between the primary and (when present)
+  // "from" morph group builds below: node.morph itself does not need this
+  // (resolveGlyphMorphStates resolves the same opacity for every glyph on a
+  // given side, so sharing materials within a side stays correct), but a
+  // node combining morph with stagger/physics on its primary text still
+  // needs it for that text's own group.
+  const styleOptions = {
     color: resolveColorProperty(node.color, 0),
     extrudeDepth,
-    font: { bytes: entry.fontBytes, contentHash: entry.fontContentHash },
     whiteBalanceGain: ctx.whiteBalanceGain,
-    // A staggered or physics-animated node needs every glyph's own opacity/
-    // position independently settable each frame (apply-text-effects.ts),
-    // which the default shared-by-(page,color) materials do not allow; see
-    // buildTextGroup's own doc.
     perGlyphMaterial: node.stagger !== undefined || node.physics !== undefined,
     ...(node.fill !== undefined && { fill: resolveTextFill(node.fill, 0) }),
     ...(node.outline !== undefined && { outline: resolveTextOutline(node.outline, 0) }),
     ...(node.glow !== undefined && { glow: resolveTextGlow(node.glow, 0) }),
     ...(node.shadow !== undefined && { shadow: resolveTextShadow(node.shadow, 0) }),
+  };
+
+  const resources = buildTextGroup(entry.data, {
+    ...styleOptions,
+    font: { bytes: entry.fontBytes, contentHash: entry.fontContentHash },
   });
 
-  return { object3D: resources.group, owned: { text: resources, textGlyphs: entry.data.glyphs } };
+  if (node.morph === undefined) {
+    return { object3D: resources.group, owned: { text: resources, textGlyphs: entry.data.glyphs } };
+  }
+
+  const fromEntry = ctx.textRenderRegistry?.resolve(
+    computeTextNodeRenderKey({ ...node, content: node.morph.from }, 0),
+  );
+  if (fromEntry === undefined) {
+    return { object3D: resources.group, owned: { text: resources, textGlyphs: entry.data.glyphs } };
+  }
+
+  const fromResources = buildTextGroup(fromEntry.data, {
+    ...styleOptions,
+    font: { bytes: fromEntry.fontBytes, contentHash: fromEntry.fontContentHash },
+  });
+
+  const group = new THREE.Group();
+  group.add(resources.group);
+  group.add(fromResources.group);
+
+  return {
+    object3D: group,
+    owned: {
+      text: resources,
+      textGlyphs: entry.data.glyphs,
+      textMorph: { from: fromResources, fromGlyphs: fromEntry.data.glyphs },
+    },
+  };
 }
 
 /**
@@ -782,30 +847,59 @@ export function applyNodeProperties(
       // render-key/extrusion state changes; see buildTextObject).
       object3D.scale.multiplyScalar(fontSize);
       owned?.text?.setColor(color[0], color[1], color[2], color[3]);
+      owned?.textMorph?.from.setColor(color[0], color[1], color[2], color[3]);
       if (node.fill !== undefined) {
-        owned?.text?.setFill?.(resolveTextFill(node.fill, frame));
+        const fill = resolveTextFill(node.fill, frame);
+        owned?.text?.setFill?.(fill);
+        owned?.textMorph?.from.setFill?.(fill);
       }
       if (node.outline !== undefined) {
-        owned?.text?.setOutline?.(resolveTextOutline(node.outline, frame));
+        const outline = resolveTextOutline(node.outline, frame);
+        owned?.text?.setOutline?.(outline);
+        owned?.textMorph?.from.setOutline?.(outline);
       }
       if (node.glow !== undefined) {
-        owned?.text?.setGlow?.(resolveTextGlow(node.glow, frame));
+        const glow = resolveTextGlow(node.glow, frame);
+        owned?.text?.setGlow?.(glow);
+        owned?.textMorph?.from.setGlow?.(glow);
       }
       if (node.shadow !== undefined) {
-        owned?.text?.setShadow?.(resolveTextShadow(node.shadow, frame));
+        const shadow = resolveTextShadow(node.shadow, frame);
+        owned?.text?.setShadow?.(shadow);
+        owned?.textMorph?.from.setShadow?.(shadow);
       }
       if (
         (node.stagger !== undefined || node.physics !== undefined || node.path !== undefined) &&
-        owned?.textGlyphs !== undefined
+        owned?.text !== undefined &&
+        owned.textGlyphs !== undefined
       ) {
         const needsLineTexts = node.stagger?.grouping === "grapheme" || node.physics?.grouping === "grapheme";
         const lineTexts = needsLineTexts ? node.content.split("\n") : undefined;
         applyTextEffects(
-          object3D as THREE.Group,
+          owned.text.group,
           owned.textGlyphs,
           { stagger: node.stagger, physics: node.physics, path: node.path },
           frame,
           lineTexts,
+        );
+      }
+      if (
+        node.morph !== undefined &&
+        owned?.text !== undefined &&
+        owned.textGlyphs !== undefined &&
+        owned.textMorph !== undefined
+      ) {
+        const progress = resolveNumberProperty(node.morph.progress, frame);
+        const needsLineTexts = node.morph.grouping === "grapheme";
+        applyTextMorph(
+          owned.text.group,
+          owned.textGlyphs,
+          owned.textMorph.from.group,
+          owned.textMorph.fromGlyphs,
+          node.morph.grouping,
+          progress,
+          needsLineTexts ? node.content.split("\n") : undefined,
+          needsLineTexts ? node.morph.from.split("\n") : undefined,
         );
       }
       return;
