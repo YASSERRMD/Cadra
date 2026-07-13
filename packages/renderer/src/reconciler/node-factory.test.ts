@@ -1060,6 +1060,164 @@ describe("node-factory: text physics", () => {
   });
 });
 
+describe("node-factory: text morph", () => {
+  const TWO_GLYPH_TEXT_RENDER_DATA: TextRenderData = {
+    lineCount: 1,
+    atlasPages: [{ width: 4, height: 4, pixels: new Uint8Array(4 * 4 * 4).fill(255), png: new Uint8Array() }],
+    glyphs: [
+      {
+        glyphId: 1,
+        cluster: 0,
+        lineIndex: 0,
+        wordIndex: 0,
+        origin: { x: 0, y: 0 },
+        quad: { left: 0, right: 1, bottom: 0, top: 1 },
+        page: 0,
+        uv: { u0: 0, v0: 0, u1: 1, v1: 1 },
+        range: 0.1,
+      },
+      {
+        glyphId: 2,
+        cluster: 1,
+        lineIndex: 0,
+        wordIndex: 0,
+        origin: { x: 1, y: 0 },
+        quad: { left: 1, right: 2, bottom: 0, top: 1 },
+        page: 0,
+        uv: { u0: 0, v0: 0, u1: 1, v1: 1 },
+        range: 0.1,
+      },
+    ],
+  };
+
+  /** `makeCtx` plus a `textRenderRegistry` pre-populated for every one of `contents` (one real entry per distinct primary/`morph.from` text a test needs registered). */
+  function makeCtxWithMorphTexts(...contents: string[]): NodeFactoryContext {
+    const textRenderRegistry = createInMemoryTextRenderRegistry();
+    for (const content of contents) {
+      textRenderRegistry.register(computeTextNodeRenderKey({ content }, 0), {
+        data: TWO_GLYPH_TEXT_RENDER_DATA,
+        fontBytes: new Uint8Array(),
+        fontContentHash: "fake-font",
+      });
+    }
+    return { ...makeCtx(), textRenderRegistry };
+  }
+
+  function morphTextNode(content: string, from: string, progress: number): SceneNode {
+    return {
+      id: "t",
+      kind: "text",
+      transform: createIdentityTransform(),
+      visible: true,
+      children: [],
+      content,
+      fontSize: 12,
+      color: [1, 1, 1, 1],
+      morph: { from, grouping: "character", progress },
+    };
+  }
+
+  it("builds two structurally-separate glyph groups under a shared wrapper when both the primary and 'from' text are registered", () => {
+    const ctx = makeCtxWithMorphTexts("ab", "cd");
+    const node = morphTextNode("ab", "cd", 0);
+
+    const built = createThreeObject(node, ctx);
+
+    expect(built.object3D.children).toHaveLength(2);
+    expect(built.owned?.textMorph).toBeDefined();
+    const toResources = built.owned?.text as TextGroupResources;
+    const fromResources = built.owned?.textMorph?.from as TextGroupResources;
+    expect(built.object3D.children[0]).toBe(toResources.group);
+    expect(built.object3D.children[1]).toBe(fromResources.group);
+    // Genuinely distinct groups, not the same one referenced twice.
+    expect(toResources.group).not.toBe(fromResources.group);
+  });
+
+  it("falls back to a single, non-wrapped group (no crossfade) when the 'from' text is not yet registered", () => {
+    const ctx = makeCtxWithMorphTexts("ab");
+    const node = morphTextNode("ab", "cd", 0);
+
+    const built = createThreeObject(node, ctx);
+
+    const toResources = built.owned?.text as TextGroupResources;
+    expect(built.object3D).toBe(toResources.group);
+    expect(built.owned?.textMorph).toBeUndefined();
+  });
+
+  it("does not build a morph wrapper at all when node.morph is undefined (Phase 50/51 behavior preserved)", () => {
+    const ctx = makeCtxWithText("ab");
+    const node: SceneNode = {
+      id: "t",
+      kind: "text",
+      transform: createIdentityTransform(),
+      visible: true,
+      children: [],
+      content: "ab",
+      fontSize: 12,
+      color: [1, 1, 1, 1],
+    };
+
+    const built = createThreeObject(node, ctx);
+
+    const toResources = built.owned?.text as TextGroupResources;
+    expect(built.object3D).toBe(toResources.group);
+    expect(built.owned?.textMorph).toBeUndefined();
+  });
+
+  it("drives each group's own glyph opacity independently, matching resolveGlyphMorphStates' own crossfade", () => {
+    const ctx = makeCtxWithMorphTexts("ab", "cd");
+    const node = morphTextNode("ab", "cd", 0.25);
+
+    const built = createThreeObject(node, ctx);
+    const toResources = built.owned?.text as TextGroupResources;
+    const fromResources = built.owned?.textMorph?.from as TextGroupResources;
+    const toMesh = toResources.group.children[0]?.children[0]?.children[0] as THREE.Mesh;
+    const fromMesh = fromResources.group.children[0]?.children[0]?.children[0] as THREE.Mesh;
+    const toSetOpacity = vi.spyOn(toMesh.userData as Record<string, (a: number) => void>, "setOpacity");
+    const fromSetOpacity = vi.spyOn(fromMesh.userData as Record<string, (a: number) => void>, "setOpacity");
+
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+
+    expect(toSetOpacity).toHaveBeenLastCalledWith(0.25);
+    expect(fromSetOpacity).toHaveBeenLastCalledWith(0.75);
+  });
+
+  it("re-resolves progress fresh every frame from a keyframed morph.progress", () => {
+    const ctx = makeCtxWithMorphTexts("ab", "cd");
+    const node = morphTextNode("ab", "cd", 0);
+    node.morph = {
+      from: "cd",
+      grouping: "character",
+      progress: { type: "keyframeTrack", keyframes: [{ frame: 0, value: 0 }, { frame: 10, value: 1 }] },
+    };
+
+    const built = createThreeObject(node, ctx);
+    const toResources = built.owned?.text as TextGroupResources;
+    const fromResources = built.owned?.textMorph?.from as TextGroupResources;
+    const toMesh = toResources.group.children[0]?.children[0]?.children[0] as THREE.Mesh;
+    const fromMesh = fromResources.group.children[0]?.children[0]?.children[0] as THREE.Mesh;
+    const toSetOpacity = vi.spyOn(toMesh.userData as Record<string, (a: number) => void>, "setOpacity");
+    const fromSetOpacity = vi.spyOn(fromMesh.userData as Record<string, (a: number) => void>, "setOpacity");
+
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+    expect(toSetOpacity).toHaveBeenLastCalledWith(0);
+    expect(fromSetOpacity).toHaveBeenLastCalledWith(1);
+
+    applyNodeProperties(node, built.object3D, ctx, 10, built.owned);
+    expect(toSetOpacity).toHaveBeenLastCalledWith(1);
+    expect(fromSetOpacity).toHaveBeenLastCalledWith(0);
+  });
+
+  it("does not call applyTextMorph (no crash, no-op) once built without a 'from' group even if node.morph is present", () => {
+    const ctx = makeCtxWithMorphTexts("ab");
+    const node = morphTextNode("ab", "cd", 0.5);
+
+    const built = createThreeObject(node, ctx);
+
+    expect(() => applyNodeProperties(node, built.object3D, ctx, 0, built.owned)).not.toThrow();
+  });
+});
+
 describe("node-factory: text materials (Phase 53)", () => {
   function textNodeWith(extra: Partial<SceneNode>): SceneNode {
     return {

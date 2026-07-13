@@ -1,4 +1,4 @@
-import { Camera, type Composition, Light, Shape } from "@cadra/core";
+import { Camera, type Composition, Light, Shape, Text } from "@cadra/core";
 import { describe, expect, it } from "vitest";
 
 import { encodePixelBufferToPng } from "./png-codec.js";
@@ -62,6 +62,131 @@ function buildSharpenProbeScene(): GoldenScene {
     height: 256,
     seed: "golden-sharpen-probe",
   };
+}
+
+/**
+ * A single glyph, morphing from `"A"` to `"B"` at `progress` - real,
+ * independent-of-any-unit-test coverage that `TextNode.morph` actually
+ * renders through this driver end to end (registry preparation in
+ * `render-raster-scene.ts`'s own `buildTextRenderRegistry`, then the
+ * two-group build/per-frame crossfade in `@cadra/renderer`'s
+ * `node-factory.ts`/`apply-text-effects.ts`), not just that its own
+ * isolated pieces individually do. `"character"` grouping: with a single
+ * glyph on each side there is exactly one unit, always matched.
+ */
+function buildMorphProbeScene(progress: number): GoldenScene {
+  function buildProject() {
+    const camera = Camera({
+      id: "camera-1",
+      transform: { position: [0, 0, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    });
+    const text = Text({
+      id: "title",
+      content: "B",
+      fontSize: 1.6,
+      color: [1, 1, 1, 1],
+      transform: { position: [-0.5, -0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      morph: { from: "A", grouping: "character", progress },
+    });
+    const ambientLight = Light({ id: "light-ambient", lightType: "ambient", intensity: 1.5 });
+    const directionalLight = Light({
+      id: "light-directional",
+      transform: { position: [2, 3, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      lightType: "directional",
+      intensity: 1.5,
+    });
+    return buildSingleTrackProject({
+      projectId: "p-morph-probe",
+      compositionId: "comp-morph-probe",
+      fps: 10,
+      durationInFrames: 1,
+      width: 256,
+      height: 256,
+      nodes: [camera, text, ambientLight, directionalLight],
+      activeCameraNodeId: "camera-1",
+    });
+  }
+  return {
+    name: `morph-probe-${progress}`,
+    driver: "nativeGpuHeadless",
+    buildProject,
+    compositionId: "comp-morph-probe",
+    frame: 0,
+    width: 256,
+    height: 256,
+    seed: "golden-morph-probe",
+    // computeTextNodeRenderKey never reads morph.progress (see its own
+    // doc), so the exact value declared here is irrelevant to which
+    // entries buildTextRenderRegistry registers - only morph's own
+    // presence (triggering the "also register .from" branch) matters.
+    textRequirements: [
+      {
+        node: { content: "B", morph: { from: "A", grouping: "character", progress: 0 } },
+        fontFixtureFileName: "Inter-Variable.ttf",
+        backend: "opentype",
+      },
+    ],
+  };
+}
+
+/** The same single glyph, statically (no `morph`) - `buildMorphProbeScene`'s own reference endpoints. */
+function buildPlainGlyphProbeScene(content: string): GoldenScene {
+  function buildProject() {
+    const camera = Camera({
+      id: "camera-1",
+      transform: { position: [0, 0, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    });
+    const text = Text({
+      id: "title",
+      content,
+      fontSize: 1.6,
+      color: [1, 1, 1, 1],
+      transform: { position: [-0.5, -0.5, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    });
+    const ambientLight = Light({ id: "light-ambient", lightType: "ambient", intensity: 1.5 });
+    const directionalLight = Light({
+      id: "light-directional",
+      transform: { position: [2, 3, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      lightType: "directional",
+      intensity: 1.5,
+    });
+    return buildSingleTrackProject({
+      projectId: "p-morph-probe-plain",
+      compositionId: "comp-morph-probe-plain",
+      fps: 10,
+      durationInFrames: 1,
+      width: 256,
+      height: 256,
+      nodes: [camera, text, ambientLight, directionalLight],
+      activeCameraNodeId: "camera-1",
+    });
+  }
+  return {
+    name: `morph-probe-plain-${content}`,
+    driver: "nativeGpuHeadless",
+    buildProject,
+    compositionId: "comp-morph-probe-plain",
+    frame: 0,
+    width: 256,
+    height: 256,
+    seed: "golden-morph-probe-plain",
+    textRequirements: [{ node: { content }, fontFixtureFileName: "Inter-Variable.ttf", backend: "opentype" }],
+  };
+}
+
+/** Count of pixels differing by more than a rounding-level amount in any RGBA channel, mirroring this file's own inline diff loops (`buildSharpenProbeScene`'s own test, `postProcessingScene`'s own test). */
+function countDiffPixels(a: Uint8ClampedArray, b: Uint8ClampedArray): number {
+  let count = 0;
+  for (let i = 0; i < a.length; i += 4) {
+    const rDiff = Math.abs((a[i] ?? 0) - (b[i] ?? 0));
+    const gDiff = Math.abs((a[i + 1] ?? 0) - (b[i + 1] ?? 0));
+    const bDiff = Math.abs((a[i + 2] ?? 0) - (b[i + 2] ?? 0));
+    const aDiff = Math.abs((a[i + 3] ?? 0) - (b[i + 3] ?? 0));
+    if (rDiff > 2 || gDiff > 2 || bDiff > 2 || aDiff > 2) {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 /** How many of a `PixelBuffer`'s pixels have any non-zero color/alpha channel at all. */
@@ -178,6 +303,49 @@ describe("renderRasterGoldenScene: real native GPU renders (no browser)", () => 
 
     const nonBlank = countNonBlankPixels(pixels.data);
     expect(nonBlank).toBeGreaterThan((pixels.width * pixels.height) / 100);
+  });
+
+  it("renders a real TextNode.morph crossfade: progress 0/1 resemble their own endpoint glyph, and progress 0.5 is genuinely distinct from both", async () => {
+    if (!(await nativeGpuAvailable)) {
+      return;
+    }
+
+    // Sequential, not Promise.all: concurrent createNativeGpuHeadlessRenderer
+    // create/dispose cycles race on Rapier's shared WASM module state (see
+    // physics-bake.ts's own dispose path) and throw "attempted to take
+    // ownership of Rust value while it was borrowed" - every other
+    // multi-render test in this file already awaits one at a time for the
+    // same reason.
+    const atZero = await renderRasterGoldenScene(buildMorphProbeScene(0));
+    const atHalf = await renderRasterGoldenScene(buildMorphProbeScene(0.5));
+    const atOne = await renderRasterGoldenScene(buildMorphProbeScene(1));
+    const plainA = await renderRasterGoldenScene(buildPlainGlyphProbeScene("A"));
+    const plainB = await renderRasterGoldenScene(buildPlainGlyphProbeScene("B"));
+
+    expect(countNonBlankPixels(atZero.data)).toBeGreaterThan(0);
+    expect(countNonBlankPixels(atOne.data)).toBeGreaterThan(0);
+
+    // "A" and "B" are visibly different glyph shapes, so the two morph
+    // endpoints must differ substantially from each other - a regression
+    // that left morph fully unwired (content always renders as-is,
+    // regardless of progress) would instead render "B" identically at
+    // every one of the three progress values.
+    expect(countDiffPixels(atZero.data, atOne.data)).toBeGreaterThan(300);
+
+    // Direction, not just difference: progress 0 must actually resemble the
+    // "from" glyph ("A") more than the "to" glyph ("B"), and progress 1 the
+    // reverse - catches a from/to transposition bug (e.g. the two groups or
+    // resolveGlyphMorphStates' own from/to argument order swapped) that a
+    // plain "0 differs from 1" check alone would not.
+    expect(countDiffPixels(atZero.data, plainA.data)).toBeLessThan(countDiffPixels(atZero.data, plainB.data));
+    expect(countDiffPixels(atOne.data, plainB.data)).toBeLessThan(countDiffPixels(atOne.data, plainA.data));
+
+    // Progress 0.5 is a real interpolated frame (both glyphs' own partial
+    // opacity, both partway through their own position travel) - not a
+    // step function that snaps to one endpoint or the other partway
+    // through, and not stuck motionless at either end.
+    expect(countDiffPixels(atHalf.data, atZero.data)).toBeGreaterThan(100);
+    expect(countDiffPixels(atHalf.data, atOne.data)).toBeGreaterThan(100);
   });
 
   it("renders the minimal-defaults scene's own sphere with real, varied shading, not a flat silhouette (Phase 73 task 6: quality defaults alone)", async () => {

@@ -337,6 +337,20 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
         texture.dispose();
       }
     }
+    if (entry.owned?.textMorph !== undefined) {
+      // The "from" half of a morphing text node: its own fully separate
+      // TextGroupResources (see OwnedResources.textMorph's own doc), so
+      // disposed the same way as entry.owned.text above, independently.
+      for (const geometry of entry.owned.textMorph.from.geometries) {
+        geometry.dispose();
+      }
+      for (const material of entry.owned.textMorph.from.materials) {
+        material.dispose();
+      }
+      for (const texture of entry.owned.textMorph.from.textures) {
+        texture.dispose();
+      }
+    }
     if (entry.owned?.satori !== undefined) {
       entry.owned.satori.geometry.dispose();
       entry.owned.satori.material?.dispose();

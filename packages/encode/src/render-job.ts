@@ -503,8 +503,14 @@ interface PreparedTextRenderEntry {
  * Prepares a `PreparedTextRenderEntry` for every distinct `TextNode`
  * (deduped by `computeTextNodeRenderKey(node, 0)`, mirroring
  * `TextRenderRegistry`'s own resolve-by-key contract) found anywhere in
- * `project`'s own scene graph, across every composition/track/clip. Font
- * loading, HarfBuzz shaping, and MSDF atlas generation are all
+ * `project`'s own scene graph, across every composition/track/clip - plus
+ * one more per `morph`-configured `TextNode`, for its own `morph.from` text
+ * (deduped the same way, via `computeTextNodeRenderKey` applied to a
+ * synthetic `{...node, content: node.morph.from}`), since a morphing node's
+ * renderer-side `Object3D` needs both texts' own shaped/atlas-generated data
+ * registered before it can build either glyph group - see
+ * `node-factory.ts`'s own `buildTextObject`. Font loading, HarfBuzz shaping,
+ * and MSDF atlas generation are all
  * Node-only-dependency-laden work (`fontkit`'s `Buffer` usage,
  * `msdfgen-wasm`'s `createRequire`, `subset-font`'s `fs`), so this always
  * runs here, server-side, in real Node - see this module's two callers for
@@ -549,13 +555,26 @@ async function prepareTextRenderEntriesForProject(
   const fontRegistry = createFontRegistry("opentype");
   const font = await fontRegistry.registerBytes(fontBytes).ready;
 
-  const entries = new Map<string, PreparedTextRenderEntry>();
+  // Every distinct (cacheKey, content) this project's text needs shaped: one
+  // pair per TextNode's own `content`, plus one more per `morph.from` for a
+  // morphing node - the crossfade's own "from" text needs exactly the same
+  // shaped/atlas-generated treatment as any other rendered text (see
+  // TextNode.morph's own doc), just keyed by a synthetic node whose content
+  // is `morph.from` instead. Keying this map by computeTextNodeRenderKey
+  // itself (not by node) both dedupes naturally (two nodes/sides that happen
+  // to resolve the same key only ever get shaped once) and guarantees this
+  // stays consistent with node-factory.ts's buildTextObject, which resolves
+  // against the exact same key for both the primary and "from" text.
+  const requestedContent = new Map<string, string>();
   for (const node of textNodes) {
-    const cacheKey = computeTextNodeRenderKey(node, 0);
-    if (entries.has(cacheKey)) {
-      continue;
+    requestedContent.set(computeTextNodeRenderKey(node, 0), node.content);
+    if (node.morph !== undefined) {
+      requestedContent.set(computeTextNodeRenderKey({ ...node, content: node.morph.from }, 0), node.morph.from);
     }
+  }
 
+  const entries = new Map<string, PreparedTextRenderEntry>();
+  for (const [cacheKey, content] of requestedContent) {
     // A 128px-per-em MSDF (vs the library's 42px default, tuned for
     // preview-sized text) keeps glyph edges crisp when a title fills a large
     // fraction of a 1080p+ frame: at the default, a full-width title
@@ -563,7 +582,7 @@ async function prepareTextRenderEntriesForProject(
     // the encoded output. `range` stays at its default: the MSDF material's
     // alpha ramp is calibrated against that default, and a wider range
     // leaves a visible haze out to each glyph quad's own bounds.
-    const data = await prepareTextRenderData(font, node.content, {
+    const data = await prepareTextRenderData(font, content, {
       atlasOptions: { fontSize: 128 },
     });
     entries.set(cacheKey, { cacheKey, data, fontBytes, fontContentHash: font.contentHash });
