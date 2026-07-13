@@ -41,14 +41,14 @@ export interface TextureRegistry {
 }
 
 /** Ids the default geometry registry seeds itself with. */
-export const DEFAULT_GEOMETRY_REFS = ["box", "sphere", "plane"] as const;
+export const DEFAULT_GEOMETRY_REFS = ["box", "sphere", "plane", "torus", "cylinder", "cone"] as const;
 
 /** Ids the default material registry seeds itself with. */
 export const DEFAULT_MATERIAL_REFS = ["default", "wireframe"] as const;
 
 /**
- * A simple in-memory `GeometryRegistry` seeded with a box, a sphere, and a
- * flat plane, so tests (and early authoring) can exercise real mesh
+ * A simple in-memory `GeometryRegistry` seeded with a handful of common
+ * primitives, so tests (and early authoring) can exercise real mesh
  * reconciliation without waiting on Phase 12's real asset pipeline. Every
  * call to `resolve` with a seeded ref returns the exact same shared
  * instance. `"plane"` is unit-sized (`1x1`, same "scale it via the node's
@@ -56,13 +56,20 @@ export const DEFAULT_MATERIAL_REFS = ["default", "wireframe"] as const;
  * already establishes), facing `+Z` (`THREE.PlaneGeometry`'s own default
  * orientation) - the same orientation a camera at a positive `Z` position
  * looking toward the origin (every curated example's own camera convention)
- * already faces.
+ * already faces. `"torus"`/`"cylinder"`/`"cone"` use the same dimensions
+ * `MeshGeometryConfig`'s own `buildProceduralGeometry` (`../reconciler/
+ * node-factory.ts`) defaults to for each shape, so a `geometryRef` naming
+ * one of these and an equivalent bare `{ type: "..." }` inline `geometry`
+ * produce the same shape.
  */
 export function createDefaultGeometryRegistry(): GeometryRegistry {
   const geometries = new Map<string, THREE.BufferGeometry>([
     ["box", new THREE.BoxGeometry(1, 1, 1)],
     ["sphere", new THREE.SphereGeometry(0.5, 16, 12)],
     ["plane", new THREE.PlaneGeometry(1, 1)],
+    ["torus", new THREE.TorusGeometry(0.4, 0.15, 12, 24)],
+    ["cylinder", new THREE.CylinderGeometry(0.5, 0.5, 1, 16)],
+    ["cone", new THREE.ConeGeometry(0.5, 1, 16)],
   ]);
 
   return {

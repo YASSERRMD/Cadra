@@ -25,9 +25,10 @@ describe("Shape", () => {
     expect("name" in node).toBe(false);
   });
 
-  it("does not set material, castShadow, receiveShadow, or rigidBody keys when omitted", () => {
+  it("does not set geometry, material, castShadow, receiveShadow, or rigidBody keys when omitted", () => {
     const node = Shape({ id: "shape-1" });
 
+    expect("geometry" in node).toBe(false);
     expect("material" in node).toBe(false);
     expect("castShadow" in node).toBe(false);
     expect("receiveShadow" in node).toBe(false);
@@ -47,6 +48,7 @@ describe("Shape", () => {
       children: [child],
       geometryRef: "sphere",
       materialRef: "glass",
+      geometry: { type: "torus", radius: 0.9, tube: 0.35 },
       material: { baseColor: [0.8, 0.2, 0.2, 1], metalness: 1, roughness: 0.3 },
       castShadow: true,
       receiveShadow: true,
@@ -62,6 +64,7 @@ describe("Shape", () => {
       children: [child],
       geometryRef: "sphere",
       materialRef: "glass",
+      geometry: { type: "torus", radius: 0.9, tube: 0.35 },
       material: { baseColor: [0.8, 0.2, 0.2, 1], metalness: 1, roughness: 0.3 },
       castShadow: true,
       receiveShadow: true,
@@ -72,5 +75,11 @@ describe("Shape", () => {
   it("passing visible explicitly overrides the true default", () => {
     expect(Shape({ id: "s", visible: false }).visible).toBe(false);
     expect(Shape({ id: "s", visible: true }).visible).toBe(true);
+  });
+
+  it("passing geometry alone (no geometryRef override) sets it alongside the default geometryRef", () => {
+    const node = Shape({ id: "s", geometry: { type: "cylinder" } });
+    expect(node.geometryRef).toBe("box");
+    expect(node.geometry).toEqual({ type: "cylinder" });
   });
 });

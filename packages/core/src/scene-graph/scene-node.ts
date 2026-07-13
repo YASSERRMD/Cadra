@@ -166,6 +166,32 @@ export interface RigidBodyConfig {
 }
 
 /**
+ * A procedural primitive geometry, generated directly rather than resolved
+ * from a registry - the geometry-side counterpart to `MeshMaterialConfig`
+ * (see `MeshNode.material`'s own doc): a mesh whose shape need goes no
+ * further than a handful of common primitives can be authored without a
+ * `geometryRef` naming an id nothing has registered. Every field is a plain
+ * number, not `Property<T>` (mirroring `ColliderConfig`'s own precedent): a
+ * shape's own defining dimensions are a per-node authoring choice, not
+ * continuously animated content - `MeshNode.transform.scale` already covers
+ * smoothly animating a shape's own apparent size.
+ *
+ * Segment counts (`*Segments`) trade visual smoothness for triangle count;
+ * defaults below match Three.js's own constructor defaults except where a
+ * lower default already reads acceptably smooth at typical on-screen sizes
+ * for less GPU cost (mirroring `createDefaultGeometryRegistry`'s own
+ * `"sphere"` preset, `16`/`12` instead of Three.js's own default `32`/`16`).
+ */
+export type MeshGeometryConfig =
+  | { type: "box"; width?: number; height?: number; depth?: number }
+  | { type: "sphere"; radius?: number; widthSegments?: number; heightSegments?: number }
+  | { type: "plane"; width?: number; height?: number }
+  | { type: "torus"; radius?: number; tube?: number; radialSegments?: number; tubularSegments?: number }
+  | { type: "cylinder"; radiusTop?: number; radiusBottom?: number; height?: number; radialSegments?: number }
+  | { type: "cone"; radius?: number; height?: number; radialSegments?: number }
+  | { type: "capsule"; radius?: number; length?: number; capSegments?: number; radialSegments?: number };
+
+/**
  * A renderable mesh. `geometryRef` and `materialRef` are ids resolved
  * against a geometry and material registry by a later phase (the renderer's
  * scene-graph-to-Three.js mapping); the scene graph itself stays agnostic to
@@ -174,6 +200,8 @@ export interface RigidBodyConfig {
 export interface MeshNode extends SceneNodeBase<"mesh"> {
   geometryRef: string;
   materialRef: string;
+  /** A procedural primitive geometry, taking over from `geometryRef` entirely when present. Omitted means `geometryRef`'s registry-resolved geometry (the pre-existing behavior). */
+  geometry?: MeshGeometryConfig;
   /** A physically based material, taking over from `materialRef` entirely when present. Omitted means `materialRef`'s registry-resolved material (the pre-Phase-55 behavior). */
   material?: MeshMaterialConfig;
   /** Whether this mesh casts a shadow onto other shadow-receiving surfaces. Defaults to `false`. */

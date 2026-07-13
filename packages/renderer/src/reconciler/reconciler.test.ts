@@ -3,6 +3,7 @@ import {
   createIdentityTransform,
   type KeyframeTrack,
   type LayerElement,
+  type MeshGeometryConfig,
   type MeshMaterialConfig,
   type SceneNode,
   type Transform,
@@ -77,6 +78,7 @@ function mesh(
     transform: Transform;
     children: SceneNode[];
     material: MeshMaterialConfig;
+    geometry: MeshGeometryConfig;
   }> = {},
 ): SceneNode {
   return {
@@ -645,6 +647,31 @@ describe("createReconciler: add, update, remove", () => {
     // making that texture genuinely reconciler-owned, so unlike image's,
     // it must be disposed here.
     expect(textureDisposeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconcile(null) disposes a mesh node's own inline procedural geometry, but never a bare geometryRef's registry-owned one", () => {
+    const geometryRegistry = createDefaultGeometryRegistry();
+    const reconciler = createReconciler({ geometryRegistry });
+    const proceduralMesh = reconciler.reconcile(mesh("m1", "box", "default", { geometry: { type: "torus" } }), 0) as THREE.Mesh;
+    const registryGeometry = geometryRegistry.resolve("box") as THREE.BufferGeometry;
+    const proceduralGeometryDisposeSpy = vi.spyOn(proceduralMesh.geometry, "dispose");
+    const registryGeometryDisposeSpy = vi.spyOn(registryGeometry, "dispose");
+
+    reconciler.reconcile(null, 0);
+
+    expect(proceduralGeometryDisposeSpy).toHaveBeenCalledTimes(1);
+    expect(registryGeometryDisposeSpy).not.toHaveBeenCalled();
+  });
+
+  it("reconcile(null) never disposes a plain geometryRef-only mesh's own registry-owned geometry", () => {
+    const geometryRegistry = createDefaultGeometryRegistry();
+    const reconciler = createReconciler({ geometryRegistry });
+    const plainMesh = reconciler.reconcile(mesh("m1"), 0) as THREE.Mesh;
+    const geometryDisposeSpy = vi.spyOn(plainMesh.geometry, "dispose");
+
+    reconciler.reconcile(null, 0);
+
+    expect(geometryDisposeSpy).not.toHaveBeenCalled();
   });
 
   it("disposes the previous frame's own wrapping texture (not just the material) when a later frame swaps to a different source frame", () => {

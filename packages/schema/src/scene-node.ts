@@ -8,6 +8,7 @@ import type {
   LightNode,
   LightShadowConfig,
   LightType,
+  MeshGeometryConfig,
   MeshMaterialConfig,
   MeshNode,
   ModelClipConfig,
@@ -335,6 +336,58 @@ export const rigidBodyConfigSchema = z.strictObject({
 
 type _CheckRigidBodyConfig = AssertTrue<AssertEqual<z.infer<typeof rigidBodyConfigSchema>, RigidBodyConfig>>;
 
+/** A procedural primitive geometry, mirroring `MeshGeometryConfig`. A discriminated union on `type`. */
+export const meshGeometryConfigSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.literal("box"),
+    width: z.number().positive().optional(),
+    height: z.number().positive().optional(),
+    depth: z.number().positive().optional(),
+  }),
+  z.strictObject({
+    type: z.literal("sphere"),
+    radius: z.number().positive().optional(),
+    widthSegments: z.number().int().positive().optional(),
+    heightSegments: z.number().int().positive().optional(),
+  }),
+  z.strictObject({
+    type: z.literal("plane"),
+    width: z.number().positive().optional(),
+    height: z.number().positive().optional(),
+  }),
+  z.strictObject({
+    type: z.literal("torus"),
+    radius: z.number().positive().optional(),
+    tube: z.number().positive().optional(),
+    radialSegments: z.number().int().positive().optional(),
+    tubularSegments: z.number().int().positive().optional(),
+  }),
+  z.strictObject({
+    type: z.literal("cylinder"),
+    radiusTop: z.number().min(0).optional(),
+    radiusBottom: z.number().min(0).optional(),
+    height: z.number().positive().optional(),
+    radialSegments: z.number().int().positive().optional(),
+  }),
+  z.strictObject({
+    type: z.literal("cone"),
+    radius: z.number().positive().optional(),
+    height: z.number().positive().optional(),
+    radialSegments: z.number().int().positive().optional(),
+  }),
+  z.strictObject({
+    type: z.literal("capsule"),
+    radius: z.number().positive().optional(),
+    length: z.number().min(0).optional(),
+    capSegments: z.number().int().positive().optional(),
+    radialSegments: z.number().int().positive().optional(),
+  }),
+]);
+
+type _CheckMeshGeometryConfig = AssertTrue<
+  AssertEqual<z.infer<typeof meshGeometryConfigSchema>, MeshGeometryConfig>
+>;
+
 /**
  * A renderable mesh. `geometryRef` and `materialRef` are ids resolved
  * against a geometry and material registry by a later phase; the scene DSL
@@ -359,6 +412,9 @@ export const meshNodeSchema = z.strictObject({
   materialRef: z
     .string()
     .describe("Id of a material asset, resolved against a material registry by the renderer."),
+  geometry: meshGeometryConfigSchema
+    .optional()
+    .describe("A procedural primitive geometry, taking over from geometryRef entirely when present."),
   material: meshMaterialConfigSchema
     .optional()
     .describe("A physically based material, taking over from materialRef entirely when present."),

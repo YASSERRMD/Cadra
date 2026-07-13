@@ -1,6 +1,6 @@
 import type { Property } from "../keyframes/keyframe-track.js";
 import { type AnimatableTransform, createIdentityTransform } from "../scene-graph/primitives.js";
-import type { MeshMaterialConfig, MeshNode, RigidBodyConfig } from "../scene-graph/scene-node.js";
+import type { MeshGeometryConfig, MeshMaterialConfig, MeshNode, RigidBodyConfig } from "../scene-graph/scene-node.js";
 
 /**
  * Props for `Shape`. Only `id` is required; everything else defaults.
@@ -10,6 +10,10 @@ import type { MeshMaterialConfig, MeshNode, RigidBodyConfig } from "../scene-gra
  * `@cadra/renderer`, so it has no visibility into which refs a renderer's
  * registries actually resolve. `"box"` and `"default"` are chosen only as
  * zero-config, readable placeholder literals.
+ *
+ * `geometry`, when provided, takes over from `geometryRef` entirely (see
+ * `MeshGeometryConfig`'s own doc); omit it to keep using `geometryRef`'s
+ * registry-resolved geometry, the pre-existing default.
  *
  * `material`, when provided, takes over from `materialRef` entirely (see
  * `MeshMaterialConfig`'s own doc); omit it to keep using `materialRef`'s
@@ -31,6 +35,7 @@ export interface ShapeProps {
   children?: MeshNode["children"];
   geometryRef?: string;
   materialRef?: string;
+  geometry?: MeshGeometryConfig;
   material?: MeshMaterialConfig;
   castShadow?: boolean;
   receiveShadow?: boolean;
@@ -41,9 +46,9 @@ export interface ShapeProps {
  * Creates a `MeshNode`: a renderable shape.
  *
  * Defaults: identity transform, `visible: true`, no children,
- * `geometryRef: "box"`, `materialRef: "default"`, no inline `material`,
- * `castShadow`/`receiveShadow` both `false`, and no `rigidBody` (not
- * physics-driven).
+ * `geometryRef: "box"`, `materialRef: "default"`, no inline `geometry`/
+ * `material`, `castShadow`/`receiveShadow` both `false`, and no `rigidBody`
+ * (not physics-driven).
  */
 export function Shape(props: ShapeProps): MeshNode {
   return {
@@ -55,6 +60,7 @@ export function Shape(props: ShapeProps): MeshNode {
     children: props.children ?? [],
     geometryRef: props.geometryRef ?? "box",
     materialRef: props.materialRef ?? "default",
+    ...(props.geometry !== undefined && { geometry: props.geometry }),
     ...(props.material !== undefined && { material: props.material }),
     ...(props.castShadow !== undefined && { castShadow: props.castShadow }),
     ...(props.receiveShadow !== undefined && { receiveShadow: props.receiveShadow }),

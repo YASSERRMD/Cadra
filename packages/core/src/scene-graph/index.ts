@@ -15,6 +15,7 @@ export type {
   LightNode,
   LightShadowConfig,
   LightType,
+  MeshGeometryConfig,
   MeshMaterialConfig,
   MeshNode,
   ModelClipConfig,

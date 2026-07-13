@@ -4,6 +4,7 @@ import {
   type LightNode,
   type LightShadowConfig,
   type LightType,
+  type MeshGeometryConfig,
   type MeshNode,
   type ModelNode,
   resolveBooleanProperty,
@@ -349,6 +350,21 @@ export interface OwnedResources {
    * to dispose) while still on the shared `PLACEHOLDER_PLANE_GEOMETRY`.
    */
   video?: { geometry: THREE.BufferGeometry; texture: THREE.Texture; lastRenderKey: string };
+  /**
+   * A `mesh` node's own procedurally built geometry, populated only when
+   * `MeshNode.geometry` is set (see `resolveMeshNodeGeometry`'s own doc):
+   * unlike `geometryRef`'s registry-resolved geometry (pooled, shared, never
+   * disposed here - see `GeometryRegistry`'s own doc), a `new THREE.*Geometry(...)`
+   * built from an inline `MeshGeometryConfig` is unique to this one node and
+   * must be disposed like any other owned resource, both on the next rebuild
+   * (a different `geometry` config, `geometryKey` mismatches) and on final
+   * teardown (`disposeEntry`). `geometryKey` is a `JSON.stringify` of the
+   * `MeshGeometryConfig` this node's current `geometry` was last built from,
+   * mirroring `OwnedResources.video`'s own `lastRenderKey` field: rebuilt
+   * only when the config actually changes, not on every single
+   * `applyNodeProperties` call.
+   */
+  meshGeometry?: { geometry: THREE.BufferGeometry; geometryKey: string };
 }
 
 /**
@@ -407,11 +423,15 @@ function buildThreeObject(node: SceneNode, ctx: NodeFactoryContext): BuiltObject
       return { object3D: new THREE.Group(), owned: undefined };
 
     case "mesh": {
-      const geometry = resolveMeshGeometry(node.geometryRef, ctx.geometryRegistry);
-      const { material, owned } = resolveMeshNodeMaterial(node, ctx);
+      const { geometry, owned: geometryOwned } = resolveMeshNodeGeometry(node, ctx);
+      const { material, owned: materialOwned } = resolveMeshNodeMaterial(node, ctx);
       const mesh = new THREE.Mesh(geometry, material);
       mesh.castShadow = node.castShadow ?? false;
       mesh.receiveShadow = node.receiveShadow ?? false;
+      const owned =
+        geometryOwned !== undefined || materialOwned !== undefined
+          ? { ...geometryOwned, ...materialOwned }
+          : undefined;
       return { object3D: mesh, owned };
     }
 
@@ -829,7 +849,21 @@ export function applyNodeProperties(
 
     case "mesh": {
       const mesh = object3D as THREE.Mesh;
-      mesh.geometry = resolveMeshGeometry(node.geometryRef, ctx.geometryRegistry);
+      if (node.geometry !== undefined && owned?.meshGeometry !== undefined) {
+        // Mirrors OwnedResources.video's own identical "rebuild only when the
+        // key actually changes" gate: a node.geometry edit is rare relative
+        // to every other per-frame call, so this avoids allocating (and
+        // disposing) a brand new BufferGeometry on every single frame for a
+        // shape whose own parameters never change.
+        const geometryKey = JSON.stringify(node.geometry);
+        if (owned.meshGeometry.geometryKey !== geometryKey) {
+          owned.meshGeometry.geometry.dispose();
+          owned.meshGeometry = { geometry: buildProceduralGeometry(node.geometry), geometryKey };
+        }
+        mesh.geometry = owned.meshGeometry.geometry;
+      } else {
+        mesh.geometry = resolveMeshGeometry(node.geometryRef, ctx.geometryRegistry);
+      }
       if (node.material !== undefined && owned?.material instanceof THREE.MeshPhysicalMaterial) {
         // Mutates the same owned material in place rather than reconstructing
         // it, so its identity (and any GPU-side compiled shader variant)
@@ -1185,6 +1219,64 @@ function applyPhysicsTransform(node: MeshNode, object3D: THREE.Object3D, ctx: No
 
 function resolveMeshGeometry(ref: string, registry: GeometryRegistry): THREE.BufferGeometry {
   return registry.resolve(ref) ?? DEFAULT_MESH_GEOMETRY;
+}
+
+/** Constructs a real `THREE.BufferGeometry` from an inline `MeshGeometryConfig`; see `resolveMeshNodeGeometry`. */
+function buildProceduralGeometry(config: MeshGeometryConfig): THREE.BufferGeometry {
+  switch (config.type) {
+    case "box":
+      return new THREE.BoxGeometry(config.width ?? 1, config.height ?? 1, config.depth ?? 1);
+    case "sphere":
+      return new THREE.SphereGeometry(config.radius ?? 0.5, config.widthSegments ?? 16, config.heightSegments ?? 12);
+    case "plane":
+      return new THREE.PlaneGeometry(config.width ?? 1, config.height ?? 1);
+    case "torus":
+      return new THREE.TorusGeometry(
+        config.radius ?? 0.4,
+        config.tube ?? 0.15,
+        config.radialSegments ?? 12,
+        config.tubularSegments ?? 24,
+      );
+    case "cylinder":
+      return new THREE.CylinderGeometry(
+        config.radiusTop ?? 0.5,
+        config.radiusBottom ?? 0.5,
+        config.height ?? 1,
+        config.radialSegments ?? 16,
+      );
+    case "cone":
+      return new THREE.ConeGeometry(config.radius ?? 0.5, config.height ?? 1, config.radialSegments ?? 16);
+    case "capsule":
+      return new THREE.CapsuleGeometry(
+        config.radius ?? 0.3,
+        config.length ?? 0.5,
+        config.capSegments ?? 4,
+        config.radialSegments ?? 12,
+      );
+  }
+}
+
+/**
+ * Decides what `THREE.BufferGeometry` a `mesh` node's own `THREE.Mesh`
+ * carries, and what (if anything) the reconciler comes to own as a result -
+ * the geometry-side counterpart to `resolveMeshNodeMaterial` immediately
+ * below, same shape: `node.geometry` (a `MeshGeometryConfig`), when present,
+ * takes over entirely from `geometryRef` and gets a freshly constructed,
+ * per-node `THREE.BufferGeometry` that only this node's own entry owns
+ * (tracked so `disposeEntry` in `reconciler.ts` disposes it - never a
+ * shared/pooled registry instance). Otherwise, falls back to `geometryRef`'s
+ * registry-resolved (possibly shared/pooled) geometry, owning nothing, the
+ * pre-existing behavior.
+ */
+function resolveMeshNodeGeometry(
+  node: MeshNode,
+  ctx: NodeFactoryContext,
+): { geometry: THREE.BufferGeometry; owned: OwnedResources | undefined } {
+  if (node.geometry === undefined) {
+    return { geometry: resolveMeshGeometry(node.geometryRef, ctx.geometryRegistry), owned: undefined };
+  }
+  const geometry = buildProceduralGeometry(node.geometry);
+  return { geometry, owned: { meshGeometry: { geometry, geometryKey: JSON.stringify(node.geometry) } } };
 }
 
 function resolveMeshMaterialRef(ref: string, registry: MaterialRegistry): THREE.Material {

@@ -97,6 +97,53 @@ describe("sceneNodeSchema: mesh", () => {
   });
 });
 
+describe("sceneNodeSchema: mesh inline procedural geometry", () => {
+  function meshWithGeometry(geometry: unknown) {
+    return sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "mesh",
+      geometryRef: "geo-1",
+      materialRef: "mat-1",
+      geometry,
+    });
+  }
+
+  it("accepts every geometry type with no optional parameters given", () => {
+    for (const type of ["box", "sphere", "plane", "torus", "cylinder", "cone", "capsule"]) {
+      expect(meshWithGeometry({ type }).success, type).toBe(true);
+    }
+  });
+
+  it("accepts a fully-specified geometry with every optional parameter", () => {
+    expect(meshWithGeometry({ type: "torus", radius: 1, tube: 0.3, radialSegments: 16, tubularSegments: 32 }).success).toBe(
+      true,
+    );
+  });
+
+  it("rejects an unrecognized geometry type", () => {
+    expect(meshWithGeometry({ type: "dodecahedron" }).success).toBe(false);
+  });
+
+  it("rejects a non-positive radius", () => {
+    expect(meshWithGeometry({ type: "sphere", radius: 0 }).success).toBe(false);
+    expect(meshWithGeometry({ type: "sphere", radius: -1 }).success).toBe(false);
+  });
+
+  it("rejects a field that does not belong to the given type (strict, no cross-type leakage)", () => {
+    expect(meshWithGeometry({ type: "box", radius: 1 }).success).toBe(false);
+  });
+
+  it("accepts a mesh node with no geometry field at all (pre-existing, geometryRef-only behavior)", () => {
+    const result = sceneNodeSchema.safeParse({
+      ...baseFields(),
+      kind: "mesh",
+      geometryRef: "geo-1",
+      materialRef: "mat-1",
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
 describe("sceneNodeSchema: mesh rigidBody (Phase 66)", () => {
   function meshWith(rigidBody: unknown) {
     return sceneNodeSchema.safeParse({
