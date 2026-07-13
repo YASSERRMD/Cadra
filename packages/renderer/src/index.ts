@@ -108,12 +108,20 @@ export { loadVideo, sampleVideoFrame } from "./assets/video-loader.js";
 export type { WebGpuDetector } from "./capability-detection.js";
 export type { CreateRendererOptions } from "./create-renderer.js";
 export { createRenderer } from "./create-renderer.js";
+export type { EnvironmentRegistry } from "./environment/environment-registry.js";
+export { createDefaultEnvironmentRegistry, DEFAULT_ENVIRONMENT_REFS } from "./environment/environment-registry.js";
+export type { LoadedHdrEnvironment, LoadHdrEnvironmentDependencies } from "./environment/hdr-environment-loader.js";
+export { loadHdrEnvironment, parseHdrEnvironment } from "./environment/hdr-environment-loader.js";
 export type {
   AttachedTransformGizmo,
   AttachTransformGizmoOptions,
   TransformGizmoMode,
 } from "./gizmo/attach-transform-gizmo.js";
 export { attachTransformGizmo } from "./gizmo/attach-transform-gizmo.js";
+export type { LoadedCubeLut, LoadLutFromCubeDependencies } from "./lut/lut-file-loader.js";
+export { loadLutFromCube, parseCubeLut } from "./lut/lut-file-loader.js";
+export type { LutRegistry } from "./lut/lut-registry.js";
+export { createDefaultLutRegistry, DEFAULT_LUT_REFS } from "./lut/lut-registry.js";
 export type {
   NormalizedDeviceCoordinates,
   PickNodeAtPointOptions,

@@ -1,4 +1,6 @@
 import type {
+  EnvironmentRegistry,
+  LutRegistry,
   ModelRegistry,
   PixelReadableRenderer,
   RenderSize,
@@ -514,6 +516,29 @@ export interface CreateNativeGpuHeadlessRendererOptions {
    * no-browser-process render path).
    */
   textureRegistry?: TextureRegistry;
+  /**
+   * Resolves a `Composition.environment.envMapRef` to a real equirectangular
+   * environment texture. Defaults to `createDefaultEnvironmentRegistry()`
+   * (mirroring `ThreeRenderer`'s own constructor default), which resolves
+   * only the two built-in procedural refs (`"studio"`/`"outdoor"`) - a real
+   * uploaded HDR environment needs a caller to supply a registry populated
+   * ahead of time (decoding is async/file-I/O-bound; see
+   * `parseHdrEnvironment`/`loadHdrEnvironment` in `@cadra/renderer`, and
+   * `@cadra/encode`'s `buildEnvironmentRegistryForProject` for the one real
+   * implementation this codebase's own callers use).
+   */
+  environmentRegistry?: EnvironmentRegistry;
+  /**
+   * Resolves a `LutEffectConfig.lutRef` to a real 3D LUT texture. Defaults to
+   * `createDefaultLutRegistry()` (mirroring `ThreeRenderer`'s own constructor
+   * default), which resolves only the three built-in procedural looks
+   * (`"warm"`/`"tealOrange"`/`"filmStock"`) - a real uploaded `.cube` file
+   * needs a caller to supply a registry populated ahead of time (decoding is
+   * async/file-I/O-bound; see `parseCubeLut`/`loadLutFromCube` in
+   * `@cadra/renderer`, and `@cadra/encode`'s `buildLutRegistryForProject` for
+   * the one real implementation this codebase's own callers use).
+   */
+  lutRegistry?: LutRegistry;
 }
 
 /**
@@ -565,6 +590,8 @@ export function createNativeGpuHeadlessRenderer(
   const textRenderRegistry = options.textRenderRegistry;
   const satoriLayerRenderRegistry = options.satoriLayerRenderRegistry;
   const textureRegistry = options.textureRegistry;
+  const environmentRegistry = options.environmentRegistry;
+  const lutRegistry = options.lutRegistry;
 
   let headlessTarget: ReturnType<typeof createHeadlessGpuCanvasTarget> | undefined;
   let device: GPUDevice | undefined;
@@ -629,8 +656,8 @@ export function createNativeGpuHeadlessRenderer(
 
   const inner = new ThreeRenderer(
     deps,
-    undefined,
-    undefined,
+    environmentRegistry,
+    lutRegistry,
     modelRegistry,
     textRenderRegistry,
     satoriLayerRenderRegistry,

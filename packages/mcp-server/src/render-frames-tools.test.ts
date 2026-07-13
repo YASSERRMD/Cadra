@@ -979,3 +979,351 @@ describe("render_frames: real ModelNode rendering", () => {
     expect(Buffer.compare(redOutput, blueOutput)).not.toBe(0);
   }, 30_000);
 });
+
+/**
+ * Encodes one new-RLE-format Radiance scanline whose entire width is a
+ * single solid RGBE color: a 4-byte marker (`[2, 2, hi(width), lo(width)]`,
+ * the documented "new RLE" signature `HDRLoader` requires for any scanline
+ * width `>= 8`) followed by one run-length chunk per channel (R, G, B, E),
+ * each `[128 + width, value]` - a byte `> 128` means "repeat the next byte
+ * `(byte - 128)` times", the documented encoding for a run. `width` must fit
+ * in that single run-count byte (`<= 127`).
+ */
+function encodeUniformHdrRow(width: number, r: number, g: number, b: number, e: number): Buffer {
+  if (width > 127) {
+    throw new Error("encodeUniformHdrRow: run length must fit in one byte (<=127)");
+  }
+  return Buffer.from([
+    2, 2, (width >> 8) & 0xff, width & 0xff,
+    128 + width, r,
+    128 + width, g,
+    128 + width, b,
+    128 + width, e,
+  ]);
+}
+
+/**
+ * A real, hand-built, new-RLE-encoded Radiance HDR (`.hdr`) file: 64
+ * wide (`@cadra/renderer`'s own `PMREMGenerator`-driven prefiltering
+ * requires at least 64x32 - see `ENVIRONMENT_TEXTURE_WIDTH`/`_HEIGHT` in
+ * that package's own `environment-registry.ts` - a smaller fixture
+ * empirically produces a fully black prefiltered result instead, verified
+ * directly against this exact test), top half solid red and bottom half
+ * solid green, so a metal sphere reflecting it picks up real, non-neutral
+ * color unmistakably different from the built-in "studio" rig's own
+ * neutral grey tones.
+ */
+function buildStripedHdrBytes(): Buffer {
+  const width = 64;
+  const header = Buffer.from(`#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 32 +X ${width}\n`, "utf8");
+  const rows: Buffer[] = [];
+  for (let i = 0; i < 16; i += 1) {
+    rows.push(encodeUniformHdrRow(width, 128, 0, 0, 128)); // R=0.5
+  }
+  for (let i = 0; i < 16; i += 1) {
+    rows.push(encodeUniformHdrRow(width, 0, 128, 0, 128)); // G=0.5
+  }
+  return Buffer.concat([header, ...rows]);
+}
+
+/** A minimal, real, hand-written `.cube` file that maps every input color to solid pure green, regardless of input - deliberately extreme (not a subtle grade) so its effect on any rendered content is unambiguous. */
+function buildSolidGreenCubeText(): Buffer {
+  const line = "0.0 1.0 0.0";
+  return Buffer.from(["TITLE \"Solid Green\"", "LUT_3D_SIZE 2", line, line, line, line, line, line, line, line, ""].join("\n"), "utf8");
+}
+
+/** A near-mirror metal sphere plus a camera, no explicit lights - deliberately relying purely on `environment`'s own IBL contribution, so whatever `envMapRef` resolves to is the dominant (only) thing visible in the render. */
+function buildReflectiveSphereDocument(
+  sceneId: string,
+  compositionId: string,
+  size: number,
+  envMapRef: string,
+): SceneDocument {
+  const sphere = Shape({
+    id: "sphere-1",
+    geometryRef: "sphere",
+    transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [2.2, 2.2, 2.2] },
+    material: { baseColor: [1, 1, 1, 1], metalness: 1, roughness: 0.05 },
+  });
+  const camera = Camera({
+    id: "camera-1",
+    transform: { position: [0, 0, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  });
+  const composition = createComposition({
+    id: compositionId,
+    name: "Main",
+    fps: FPS,
+    durationInFrames: 1,
+    width: size,
+    height: size,
+    environment: { envMapRef, intensity: 1.5 },
+    tracks: [
+      { id: "track-sphere", clips: [Sequence({ id: "clip-sphere", from: 0, durationInFrames: 1, content: sphere })] },
+      { id: "track-camera", clips: [Sequence({ id: "clip-camera", from: 0, durationInFrames: 1, content: camera })] },
+    ],
+  });
+  const withActiveCameraTrack: Composition = {
+    ...composition,
+    activeCameraTrack: [{ startFrame: 0, durationInFrames: 1, cameraNodeId: "camera-1" }],
+  };
+  const project: Project = createProject({
+    id: sceneId,
+    name: "Frames environment scene",
+    compositions: [withActiveCameraTrack],
+  });
+  return { schemaVersion: 1, project } as SceneDocument;
+}
+
+/** A plain lit box, camera, and a `lut` post-processing effect - any rendered content works for a LUT test (it grades the whole final image), so this deliberately reuses no other asset kind. */
+function buildLutGradedBoxDocument(
+  sceneId: string,
+  compositionId: string,
+  size: number,
+  lutRef: string,
+): SceneDocument {
+  const box = Shape({
+    id: "box-1",
+    material: { baseColor: [0.6, 0.6, 0.6, 1], metalness: 0, roughness: 0.8 },
+    transform: { position: [0, 0, 0], rotation: [0.3, 0.4, 0], scale: [2, 2, 2] },
+  });
+  const camera = Camera({
+    id: "camera-1",
+    transform: { position: [0, 0, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  });
+  const ambientLight = Light({ id: "light-ambient", lightType: "ambient", intensity: 1.5 });
+  const directionalLight = Light({
+    id: "light-directional",
+    transform: { position: [2, 3, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    lightType: "directional",
+    intensity: 1.5,
+  });
+  const composition = createComposition({
+    id: compositionId,
+    name: "Main",
+    fps: FPS,
+    durationInFrames: 1,
+    width: size,
+    height: size,
+    postProcessing: { effects: [{ type: "lut", lutRef, intensity: 1 }] },
+    tracks: [
+      { id: "track-box", clips: [Sequence({ id: "clip-box", from: 0, durationInFrames: 1, content: box })] },
+      { id: "track-camera", clips: [Sequence({ id: "clip-camera", from: 0, durationInFrames: 1, content: camera })] },
+      {
+        id: "track-ambient",
+        clips: [Sequence({ id: "clip-ambient", from: 0, durationInFrames: 1, content: ambientLight })],
+      },
+      {
+        id: "track-directional",
+        clips: [Sequence({ id: "clip-directional", from: 0, durationInFrames: 1, content: directionalLight })],
+      },
+    ],
+  });
+  const withActiveCameraTrack: Composition = {
+    ...composition,
+    activeCameraTrack: [{ startFrame: 0, durationInFrames: 1, cameraNodeId: "camera-1" }],
+  };
+  const project: Project = createProject({ id: sceneId, name: "Frames LUT scene", compositions: [withActiveCameraTrack] });
+  return { schemaVersion: 1, project } as SceneDocument;
+}
+
+/**
+ * Proves `render_frames`' own native-GPU-headless path actually resolves a
+ * real uploaded HDR environment through `Composition.environment.envMapRef`
+ * - beyond the renderer's own built-in `"studio"`/`"outdoor"` procedural
+ * refs, which is all this path previously ever reached (see
+ * `buildEnvironmentRegistryForProject`'s own doc in `@cadra/encode`).
+ */
+describe("render_frames: real environment map (envMapRef) rendering", () => {
+  let workspaceRoot: string | undefined;
+  let client: Client | undefined;
+
+  afterEach(async () => {
+    await client?.close();
+    client = undefined;
+    if (workspaceRoot !== undefined) {
+      await rm(workspaceRoot, { recursive: true, force: true });
+      workspaceRoot = undefined;
+    }
+  });
+
+  it("renders visibly different output for a real uploaded HDR envMapRef than for the built-in 'studio' default", async () => {
+    try {
+      const device = await createNativeGpuDevice();
+      device.destroy();
+    } catch (error) {
+      console.log(
+        "render_frames environment e2e test: skipping, a real native WebGPU device could not be " +
+          `acquired on this machine (${String(error)}).`,
+      );
+      return;
+    }
+
+    workspaceRoot = await mkdtemp(join(tmpdir(), "cadra-render-frames-environment-test-"));
+    const { server } = createCadraMcpServer({
+      config: { workspaceRoot, outputDirectory: join(workspaceRoot, "out") },
+      logger: createLogger("test", {}, () => {
+        // Swallow log output in tests.
+      }),
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const connectedClient = new Client({ name: "test-client", version: "0.0.0" });
+    await Promise.all([server.connect(serverTransport), connectedClient.connect(clientTransport)]);
+    client = connectedClient;
+
+    const uploadResult = await connectedClient.callTool({
+      name: UPLOAD_ASSET_TOOL_NAME,
+      arguments: { bytesBase64: buildStripedHdrBytes().toString("base64"), contentType: "application/octet-stream" },
+    });
+    const uploadPayload = parseJson<UploadAssetSummary>(uploadResult as ToolTextResult);
+    expect(uploadPayload.success).toBe(true);
+    const envAssetRef = uploadPayload.assetRef!;
+
+    async function renderWithEnvMapRef(sceneId: string, envMapRef: string): Promise<Buffer> {
+      await connectedClient.callTool({
+        name: CREATE_SCENE_TOOL_NAME,
+        arguments: {
+          sceneId,
+          name: "Frames environment scene",
+          composition: { id: "comp-1", name: "Main", fps: FPS, durationInFrames: 1, width: 32, height: 32 },
+        },
+      });
+      await connectedClient.callTool({
+        name: UPDATE_SCENE_TOOL_NAME,
+        arguments: {
+          sceneId,
+          mode: "replace",
+          document: buildReflectiveSphereDocument(sceneId, "comp-1", 32, envMapRef),
+        },
+      });
+      const result = await connectedClient.callTool({
+        name: RENDER_FRAMES_TOOL_NAME,
+        arguments: { sceneId, compositionId: "comp-1", frames: [0], seed: "fixed-seed" },
+      });
+      const images = imageBlocks(result as ToolTextResult);
+      expect(images).toHaveLength(1);
+      return Buffer.from(images[0]!.data, "base64");
+    }
+
+    const builtInOutput = await renderWithEnvMapRef("frames-env-builtin", "studio");
+    const uploadedOutput = await renderWithEnvMapRef("frames-env-uploaded", envAssetRef);
+
+    expect(Buffer.compare(builtInOutput, uploadedOutput)).not.toBe(0);
+
+    // Stronger than "the two renders merely differ": the built-in "studio"
+    // environment is a neutral grey-toned rig (see
+    // `studioEnvironmentPixel` in `@cadra/renderer`), so a metal sphere
+    // reflecting it stays roughly neutral (R/G/B channels close together).
+    // The uploaded HDR fixture is a saturated red/green/blue/black
+    // checkerboard - if it genuinely reached the renderer, the sphere's own
+    // reflection picks up real, non-neutral color (one channel clearly
+    // dominant somewhere on its surface), not just "some other pixel
+    // values" that could equally result from silently falling back to no
+    // environment at all (this exact false positive was caught empirically:
+    // an `environmentRegistry` that fails to resolve the uploaded ref still
+    // produces *some* different image via the renderer's own default-lighting
+    // fallback, which a bare "outputs differ" check cannot tell apart from a
+    // real fix).
+    const uploadedPng = PNG.sync.read(uploadedOutput);
+    let maxChannelSpread = 0;
+    for (let i = 0; i < uploadedPng.data.length; i += 4) {
+      const r = uploadedPng.data[i]!;
+      const g = uploadedPng.data[i + 1]!;
+      const b = uploadedPng.data[i + 2]!;
+      const spread = Math.max(r, g, b) - Math.min(r, g, b);
+      maxChannelSpread = Math.max(maxChannelSpread, spread);
+    }
+    expect(maxChannelSpread).toBeGreaterThan(40);
+  }, 30_000);
+});
+
+/**
+ * Proves `render_frames`' own native-GPU-headless path actually resolves a
+ * real uploaded `.cube` LUT through a `postProcessing` `lut` effect's own
+ * `lutRef` - beyond the renderer's own built-in `"warm"`/`"tealOrange"`/
+ * `"filmStock"` procedural looks, which is all this path previously ever
+ * reached (see `buildLutRegistryForProject`'s own doc in `@cadra/encode`).
+ */
+describe("render_frames: real LUT (lutRef) rendering", () => {
+  let workspaceRoot: string | undefined;
+  let client: Client | undefined;
+
+  afterEach(async () => {
+    await client?.close();
+    client = undefined;
+    if (workspaceRoot !== undefined) {
+      await rm(workspaceRoot, { recursive: true, force: true });
+      workspaceRoot = undefined;
+    }
+  });
+
+  it("renders a real uploaded .cube LUT's own extreme grade (forced solid green), not the built-in look", async () => {
+    try {
+      const device = await createNativeGpuDevice();
+      device.destroy();
+    } catch (error) {
+      console.log(
+        "render_frames LUT e2e test: skipping, a real native WebGPU device could not be acquired on " +
+          `this machine (${String(error)}).`,
+      );
+      return;
+    }
+
+    workspaceRoot = await mkdtemp(join(tmpdir(), "cadra-render-frames-lut-test-"));
+    const { server } = createCadraMcpServer({
+      config: { workspaceRoot, outputDirectory: join(workspaceRoot, "out") },
+      logger: createLogger("test", {}, () => {
+        // Swallow log output in tests.
+      }),
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const connectedClient = new Client({ name: "test-client", version: "0.0.0" });
+    await Promise.all([server.connect(serverTransport), connectedClient.connect(clientTransport)]);
+    client = connectedClient;
+
+    const uploadResult = await connectedClient.callTool({
+      name: UPLOAD_ASSET_TOOL_NAME,
+      arguments: { bytesBase64: buildSolidGreenCubeText().toString("base64"), contentType: "application/octet-stream" },
+    });
+    const uploadPayload = parseJson<UploadAssetSummary>(uploadResult as ToolTextResult);
+    expect(uploadPayload.success).toBe(true);
+    const lutAssetRef = uploadPayload.assetRef!;
+
+    await connectedClient.callTool({
+      name: CREATE_SCENE_TOOL_NAME,
+      arguments: {
+        sceneId: "frames-lut-scene",
+        name: "Frames LUT scene",
+        composition: { id: "comp-1", name: "Main", fps: FPS, durationInFrames: 1, width: 32, height: 32 },
+      },
+    });
+    await connectedClient.callTool({
+      name: UPDATE_SCENE_TOOL_NAME,
+      arguments: {
+        sceneId: "frames-lut-scene",
+        mode: "replace",
+        document: buildLutGradedBoxDocument("frames-lut-scene", "comp-1", 32, lutAssetRef),
+      },
+    });
+
+    const result = await connectedClient.callTool({
+      name: RENDER_FRAMES_TOOL_NAME,
+      arguments: { sceneId: "frames-lut-scene", compositionId: "comp-1", frames: [0], seed: "frames-lut-seed" },
+    });
+
+    const summary = parseSummary(result as ToolTextResult);
+    expect(summary.success).toBe(true);
+
+    const images = imageBlocks(result as ToolTextResult);
+    expect(images).toHaveLength(1);
+    const png = PNG.sync.read(Buffer.from(images[0]!.data, "base64"));
+
+    const centerPixel = pixelAt(png.data, png.width, 16, 16);
+    // The solid-green LUT forces every graded pixel to (0, 255, 0),
+    // regardless of the box's own gray material or the scene's own
+    // lighting - only reachable if the uploaded .cube file's own bytes
+    // actually made it through to the renderer.
+    expect(centerPixel.g).toBeGreaterThan(200);
+    expect(centerPixel.r).toBeLessThan(50);
+    expect(centerPixel.b).toBeLessThan(50);
+  }, 30_000);
+});

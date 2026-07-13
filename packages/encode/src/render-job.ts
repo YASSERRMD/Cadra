@@ -26,13 +26,19 @@ import {
   computeTextNodeRenderKey,
   computeVideoFrameCacheKey,
   createDataTexture,
+  createDefaultEnvironmentRegistry,
+  createDefaultLutRegistry,
   createDefaultParseGltf,
   createInMemoryModelRegistry,
   createInMemorySatoriLayerRenderRegistry,
   createInMemoryTextRenderRegistry,
   createInMemoryTextureRegistry,
+  type EnvironmentRegistry,
   type LoadedModel,
+  type LutRegistry,
   type ModelRegistry,
+  parseCubeLut,
+  parseHdrEnvironment,
   type SatoriLayerRenderRegistry,
   type TextRenderRegistry,
   type TextureRegistry,
@@ -250,6 +256,18 @@ interface SerializedModelAssetEntry {
   bytes: number[];
 }
 
+/** Mirrors `browser-headless-render-entry.ts`'s own `SerializedEnvironmentAssetEntry`; duplicated for the same reason `SerializedImageRenderEntry` above is. */
+interface SerializedEnvironmentAssetEntry {
+  envMapRef: string;
+  bytes: number[];
+}
+
+/** Mirrors `browser-headless-render-entry.ts`'s own `SerializedLutAssetEntry`; duplicated for the same reason `SerializedImageRenderEntry` above is. */
+interface SerializedLutAssetEntry {
+  lutRef: string;
+  bytes: number[];
+}
+
 /** Mirrors `browser-headless-render-entry.ts`'s own `SerializedVideoAssetEntry`; duplicated for the same reason `SerializedImageRenderEntry` above is. */
 interface SerializedVideoAssetEntry {
   assetRef: string;
@@ -297,6 +315,8 @@ interface BrowserRangeConfigArg {
   textRenderEntries: SerializedTextRenderEntry[];
   imageRenderEntries: SerializedImageRenderEntry[];
   modelRenderEntries: SerializedModelAssetEntry[];
+  environmentRenderEntries: SerializedEnvironmentAssetEntry[];
+  lutRenderEntries: SerializedLutAssetEntry[];
   videoAssetEntries: SerializedVideoAssetEntry[];
   videoSamplesNeeded: VideoSampleRequest[];
   satoriLayerRenderEntries: SerializedSatoriLayerRenderEntry[];
@@ -714,6 +734,75 @@ async function buildModelRenderEntriesForProject(
   return entries.map((entry) => ({ assetRef: entry.assetRef, bytes: Array.from(entry.bytes) }));
 }
 
+/**
+ * Fetches every distinct `CompositionEnvironment.envMapRef` this project's
+ * own compositions reference (via `collectEnvMapRefsForProject`, shared with
+ * this same module's own same-process `buildEnvironmentRegistryForProject`)
+ * and serializes each one's raw bytes to cross a `page.evaluate`
+ * structured-clone boundary - the `environmentRenderEntries` counterpart to
+ * `buildModelRenderEntriesForProject` immediately above, for
+ * `browser-headless-render-entry.ts`'s own `runBrowserHeadlessRenderRange`/
+ * `runBrowserHeadlessRender` caller.
+ *
+ * No decoding happens here: `parseHdrEnvironment` (like
+ * `createDefaultParseGltf`) works identically in Node or in a real browser
+ * page, so decoding stays deferred to whichever environment actually
+ * renders, exactly like `buildModelRenderEntriesForProject`'s own doc
+ * explains for GLTF. A ref `fetchAssetBytes` cannot resolve (including,
+ * by design, every built-in name - see `buildEnvironmentRegistryForProject`'s
+ * own doc) is simply omitted; the in-page registry falls back to the
+ * renderer's own built-in procedural refs for anything not present here,
+ * the same way the same-process path does.
+ */
+async function buildEnvironmentRenderEntriesForProject(
+  project: Project,
+  fetchAssetBytes?: (assetRef: string) => Promise<Uint8Array | undefined>,
+): Promise<SerializedEnvironmentAssetEntry[]> {
+  if (fetchAssetBytes === undefined) {
+    return [];
+  }
+
+  const entries: SerializedEnvironmentAssetEntry[] = [];
+  for (const envMapRef of collectEnvMapRefsForProject(project)) {
+    const bytes = await fetchAssetBytes(envMapRef);
+    if (bytes === undefined) {
+      continue;
+    }
+    entries.push({ envMapRef, bytes: Array.from(bytes) });
+  }
+  return entries;
+}
+
+/**
+ * Fetches every distinct `LutEffectConfig.lutRef` this project's own
+ * compositions reference (via `collectLutRefsForProject`, shared with this
+ * same module's own same-process `buildLutRegistryForProject`) and
+ * serializes each one's raw bytes to cross a `page.evaluate`
+ * structured-clone boundary - the `lutRenderEntries` counterpart to
+ * `buildEnvironmentRenderEntriesForProject` immediately above, sharing its
+ * exact same rationale (no decoding here; a ref that cannot be fetched is
+ * simply omitted, falling back to the renderer's own built-in procedural
+ * looks in-page).
+ */
+async function buildLutRenderEntriesForProject(
+  project: Project,
+  fetchAssetBytes?: (assetRef: string) => Promise<Uint8Array | undefined>,
+): Promise<SerializedLutAssetEntry[]> {
+  if (fetchAssetBytes === undefined) {
+    return [];
+  }
+
+  const entries: SerializedLutAssetEntry[] = [];
+  for (const lutRef of collectLutRefsForProject(project)) {
+    const bytes = await fetchAssetBytes(lutRef);
+    if (bytes === undefined) {
+      continue;
+    }
+    entries.push({ lutRef, bytes: Array.from(bytes) });
+  }
+  return entries;
+}
+
 /** Mirrors `PreparedImageEntry`, for the video case. */
 interface PreparedVideoEntry {
   assetRef: string;
@@ -855,6 +944,154 @@ export async function buildTextureRegistryForProject(
     }
   }
   return registry;
+}
+
+/** Every distinct `envMapRef` any composition in `project` actually references. */
+function collectEnvMapRefsForProject(project: Project): Set<string> {
+  const refs = new Set<string>();
+  for (const composition of project.compositions) {
+    if (composition.environment !== undefined) {
+      refs.add(composition.environment.envMapRef);
+    }
+  }
+  return refs;
+}
+
+/** Every distinct `lutRef` any composition's `postProcessing` effect stack in `project` actually references. */
+function collectLutRefsForProject(project: Project): Set<string> {
+  const refs = new Set<string>();
+  for (const composition of project.compositions) {
+    for (const effect of composition.postProcessing?.effects ?? []) {
+      if (effect.type === "lut") {
+        refs.add(effect.lutRef);
+      }
+    }
+  }
+  return refs;
+}
+
+/**
+ * Builds a real (non-serialized) `EnvironmentRegistry` for `project`,
+ * fetching and decoding every distinct `CompositionEnvironment.envMapRef`
+ * found anywhere in its own compositions via `fetchAssetBytes` - the
+ * `EnvironmentRegistry` counterpart to `buildTextureRegistryForProject`
+ * immediately above, for the exact same "no browser page, no `page.evaluate`
+ * structured-clone boundary at all" caller (`@cadra/headless`'s
+ * `createNativeGpuHeadlessRenderer`, which already accepts an
+ * `environmentRegistry` option - see that function's own doc - but had no
+ * caller building a real one until now; every prior caller of either that
+ * function or `@cadra/renderer`'s own `createRenderer` silently fell back to
+ * `createDefaultEnvironmentRegistry()`'s two built-in procedural refs only,
+ * `"studio"`/`"outdoor"`, so a scene author's real uploaded HDR environment
+ * - a validly-typed `envMapRef`, per `parse.ts`'s own `ASSET_REF_FIELD_NAMES`
+ * classification - rendered with no environment lighting/reflections at all,
+ * with no error or diagnostic).
+ *
+ * A ref `fetchAssetBytes` cannot resolve (including, by design, every
+ * built-in name - `createAssetBytesFetcher` returns `undefined` for anything
+ * outside its own `cadra-asset://` scheme) is simply not added to this
+ * registry's own custom map; `resolve` falls through to a real
+ * `createDefaultEnvironmentRegistry()` for anything this project-specific
+ * registry does not itself know about, so built-in refs keep working
+ * unchanged and only real uploaded HDR environments need this function at
+ * all. Bytes that fail to decode as a real HDR file are logged and skipped
+ * the same "unresolved is an expected runtime state" way an unresolved
+ * `ModelNode`/`ImageNode` asset already is - that composition's environment
+ * then resolves exactly as if `envMapRef` were never set.
+ *
+ * Returns `undefined` (not an empty registry) when `project` references no
+ * `envMapRef` at all, matching `TextRenderRegistry`'s/`TextureRegistry`'s
+ * own "omit entirely" convention - `ThreeRenderer`'s own constructor default
+ * already covers that case identically (a fresh
+ * `createDefaultEnvironmentRegistry()`), so there is nothing this function
+ * would add.
+ */
+export async function buildEnvironmentRegistryForProject(
+  project: Project,
+  fetchAssetBytes?: (assetRef: string) => Promise<Uint8Array | undefined>,
+): Promise<EnvironmentRegistry | undefined> {
+  if (fetchAssetBytes === undefined) {
+    return undefined;
+  }
+
+  const refs = collectEnvMapRefsForProject(project);
+  if (refs.size === 0) {
+    return undefined;
+  }
+
+  const custom = new Map<string, ReturnType<typeof parseHdrEnvironment>>();
+  for (const ref of refs) {
+    const bytes = await fetchAssetBytes(ref);
+    if (bytes === undefined) {
+      continue;
+    }
+    try {
+      custom.set(ref, parseHdrEnvironment(bytes));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(
+        `buildEnvironmentRegistryForProject: failed to decode environment asset "${ref}" as HDR (${message}). ` +
+          "This composition's environment resolves as if envMapRef were never set instead.",
+      );
+    }
+  }
+
+  const defaults = createDefaultEnvironmentRegistry();
+  return {
+    resolve: (ref: string) => custom.get(ref) ?? defaults.resolve(ref),
+  };
+}
+
+/**
+ * Builds a real (non-serialized) `LutRegistry` for `project`, fetching and
+ * decoding every distinct `LutEffectConfig.lutRef` found anywhere in any
+ * composition's `postProcessing.effects` via `fetchAssetBytes` - the
+ * `LutRegistry` counterpart to `buildEnvironmentRegistryForProject`
+ * immediately above, sharing its exact same rationale, fallback-to-built-ins
+ * shape, and "no caller built one until now" gap (`createNativeGpuHeadlessRenderer`'s
+ * own `lutRegistry` option; `createDefaultLutRegistry()`'s own three
+ * built-in procedural looks, `"warm"`/`"tealOrange"`/`"filmStock"`, were the
+ * only ones ever reachable in production - a real uploaded `.cube` file
+ * silently applied no grade at all).
+ *
+ * Returns `undefined` when `project` references no `lutRef` at all, for the
+ * same reason `buildEnvironmentRegistryForProject` does.
+ */
+export async function buildLutRegistryForProject(
+  project: Project,
+  fetchAssetBytes?: (assetRef: string) => Promise<Uint8Array | undefined>,
+): Promise<LutRegistry | undefined> {
+  if (fetchAssetBytes === undefined) {
+    return undefined;
+  }
+
+  const refs = collectLutRefsForProject(project);
+  if (refs.size === 0) {
+    return undefined;
+  }
+
+  const custom = new Map<string, ReturnType<typeof parseCubeLut>>();
+  for (const ref of refs) {
+    const bytes = await fetchAssetBytes(ref);
+    if (bytes === undefined) {
+      continue;
+    }
+    try {
+      const text = new TextDecoder("utf-8").decode(bytes);
+      custom.set(ref, parseCubeLut(text));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(
+        `buildLutRegistryForProject: failed to decode LUT asset "${ref}" as a .cube file (${message}). ` +
+          "This effect resolves as if lutRef were never set instead.",
+      );
+    }
+  }
+
+  const defaults = createDefaultLutRegistry();
+  return {
+    resolve: (ref: string) => custom.get(ref) ?? defaults.resolve(ref),
+  };
 }
 
 /**
@@ -1550,6 +1787,14 @@ async function runEncodedRenderJob(
     options.project,
     options.fetchAssetBytes,
   );
+  const environmentRenderEntries = await buildEnvironmentRenderEntriesForProject(
+    options.project,
+    options.fetchAssetBytes,
+  );
+  const lutRenderEntries = await buildLutRenderEntriesForProject(
+    options.project,
+    options.fetchAssetBytes,
+  );
   const videoAssetEntries = await buildVideoAssetEntriesForProject(
     options.project,
     options.fetchAssetBytes,
@@ -1621,6 +1866,8 @@ async function runEncodedRenderJob(
         textRenderEntries,
         imageRenderEntries,
         modelRenderEntries,
+        environmentRenderEntries,
+        lutRenderEntries,
         videoAssetEntries,
       },
       videoNodeMappings,

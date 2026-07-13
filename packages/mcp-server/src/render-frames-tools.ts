@@ -26,16 +26,19 @@
  * pre-rendered and rasterized at every one of this call's own `frames`
  * (unlike text/image, a satori layer's own pixels can vary by frame - see
  * that function's own doc). Model nodes (`"model"` scene nodes, glTF/GLB)
- * are prepared via `buildModelRegistryForProject` - unlike text/image/
- * satori, `render_scene`'s own real browser-based render path does not
- * resolve `ModelNode` assets at all yet (a separate, still-open gap this
- * tool's own parity does not yet cover), so a `ModelNode` renders correctly
- * through this tool today but still renders as an empty, invisible group
- * through `render_scene`.
+ * are prepared via `buildModelRegistryForProject`, matching `render_scene`'s
+ * own real browser-based render path (both resolve `ModelNode` assets the
+ * same way). A composition's own `environment.envMapRef`/`postProcessing`
+ * `lut` effect are prepared via `buildEnvironmentRegistryForProject`/
+ * `buildLutRegistryForProject` - real uploaded HDR/`.cube` assets, beyond
+ * the renderer's own built-in procedural `"studio"`/`"outdoor"` environments
+ * and `"warm"`/`"tealOrange"`/`"filmStock"` looks.
  */
 import type { Project } from "@cadra/core";
 import { createFrameContext, resolveSceneAtFrame } from "@cadra/core";
 import {
+  buildEnvironmentRegistryForProject,
+  buildLutRegistryForProject,
   buildModelRegistryForProject,
   buildSatoriLayerRenderRegistryForProject,
   buildTextRenderRegistryForProject,
@@ -208,11 +211,21 @@ export function registerCadraRenderFramesTools(
           project,
           createAssetBytesFetcher(config.workspaceRoot),
         );
+        const environmentRegistry = await buildEnvironmentRegistryForProject(
+          project,
+          createAssetBytesFetcher(config.workspaceRoot),
+        );
+        const lutRegistry = await buildLutRegistryForProject(
+          project,
+          createAssetBytesFetcher(config.workspaceRoot),
+        );
         renderer = createNativeGpuHeadlessRenderer({
           textRenderRegistry,
           textureRegistry,
           satoriLayerRenderRegistry,
           modelRegistry,
+          environmentRegistry,
+          lutRegistry,
         });
 
         await renderer.init(

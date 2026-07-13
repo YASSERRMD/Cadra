@@ -1,7 +1,9 @@
 import type { ModelRegistry } from "./assets/model-registry.js";
 import { createDefaultModelRegistry } from "./assets/model-registry.js";
 import type { WebGpuDetector } from "./capability-detection.js";
+import type { EnvironmentRegistry } from "./environment/environment-registry.js";
 import { createDefaultEnvironmentRegistry } from "./environment/environment-registry.js";
+import type { LutRegistry } from "./lut/lut-registry.js";
 import { createDefaultLutRegistry } from "./lut/lut-registry.js";
 import type { TextureRegistry } from "./reconciler/registries.js";
 import type { Renderer } from "./renderer.js";
@@ -11,14 +13,21 @@ import { defaultThreeRendererDependencies, ThreeRenderer } from "./three-rendere
 import type { VideoFrameRegistry } from "./video-layer/video-frame-registry.js";
 
 /**
- * Options for `createRenderer`. `detectWebGpuSupport`, `textRenderRegistry`,
- * `textureRegistry`, `videoFrameRegistry`, `satoriLayerRenderRegistry`, and
- * `modelRegistry` are the seams a consumer outside this package has a
- * legitimate reason to override: `textRenderRegistry` is required for any
- * `TextNode` to render at all (see `TextRenderRegistry`'s own doc - with
- * none supplied, `buildTextObject` resolves every text node to an empty,
- * glyph-less group rather than throwing, so this stays optional here too,
- * matching that same "not yet loaded is an expected runtime state"
+ * Options for `createRenderer`. `detectWebGpuSupport`, `environmentRegistry`,
+ * `lutRegistry`, `textRenderRegistry`, `textureRegistry`,
+ * `videoFrameRegistry`, `satoriLayerRenderRegistry`, and `modelRegistry` are
+ * the seams a consumer outside this package has a legitimate reason to
+ * override: `environmentRegistry` resolves a `Composition.environment.envMapRef`
+ * beyond the two built-in procedural refs (`"studio"`/`"outdoor"`) - a real
+ * uploaded HDR environment, decoded via `parseHdrEnvironment`/
+ * `loadHdrEnvironment` in this same package, needs a caller to populate one
+ * ahead of time; `lutRegistry` is the same story for a `LutEffectConfig.lutRef`
+ * beyond the three built-in procedural looks (`"warm"`/`"tealOrange"`/
+ * `"filmStock"`) via `parseCubeLut`/`loadLutFromCube`; `textRenderRegistry`
+ * is required for any `TextNode` to render at all (see `TextRenderRegistry`'s
+ * own doc - with none supplied, `buildTextObject` resolves every text node to
+ * an empty, glyph-less group rather than throwing, so this stays optional
+ * here too, matching that same "not yet loaded is an expected runtime state"
  * contract); `textureRegistry` is the same story for an `ImageNode`'s own
  * `assetRef` (see `TextureRegistry`'s own doc - with none supplied, every
  * image renders as its documented gray placeholder plane); `videoFrameRegistry`
@@ -38,6 +47,8 @@ import type { VideoFrameRegistry } from "./video-layer/video-frame-registry.js";
  */
 export interface CreateRendererOptions {
   detectWebGpuSupport?: WebGpuDetector;
+  environmentRegistry?: EnvironmentRegistry;
+  lutRegistry?: LutRegistry;
   textRenderRegistry?: TextRenderRegistry;
   textureRegistry?: TextureRegistry;
   videoFrameRegistry?: VideoFrameRegistry;
@@ -49,10 +60,12 @@ export interface CreateRendererOptions {
  * Creates a `Renderer`. With no `options`, constructs one backed by real
  * Three.js, selecting WebGPU when available and falling back to WebGL2
  * otherwise, and with no `TextRenderRegistry`/`TextureRegistry`/
- * `VideoFrameRegistry`/`SatoriLayerRenderRegistry` and an empty
+ * `VideoFrameRegistry`/`SatoriLayerRenderRegistry`, the two/three built-in
+ * procedural `EnvironmentRegistry`/`LutRegistry` refs only, and an empty
  * `ModelRegistry` (so every `TextNode`/`ImageNode`/`VideoNode`/`SatoriNode`/
- * `ModelNode` renders as its own documented placeholder - see
- * `CreateRendererOptions`' own doc).
+ * `ModelNode` renders as its own documented placeholder, and only the
+ * built-in `envMapRef`/`lutRef` names resolve - see `CreateRendererOptions`'
+ * own doc).
  *
  * `ThreeRenderer`'s constructor takes `textRenderRegistry`/
  * `satoriLayerRenderRegistry`/`textureRegistry`/`videoFrameRegistry` as
@@ -69,6 +82,8 @@ export function createRenderer(options?: CreateRendererOptions): Renderer {
   };
 
   if (
+    options?.environmentRegistry === undefined &&
+    options?.lutRegistry === undefined &&
     options?.textRenderRegistry === undefined &&
     options?.textureRegistry === undefined &&
     options?.videoFrameRegistry === undefined &&
@@ -80,8 +95,8 @@ export function createRenderer(options?: CreateRendererOptions): Renderer {
 
   return new ThreeRenderer(
     deps,
-    createDefaultEnvironmentRegistry(),
-    createDefaultLutRegistry(),
+    options.environmentRegistry ?? createDefaultEnvironmentRegistry(),
+    options.lutRegistry ?? createDefaultLutRegistry(),
     options.modelRegistry ?? createDefaultModelRegistry(),
     options.textRenderRegistry,
     options.satoriLayerRenderRegistry,
