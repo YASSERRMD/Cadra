@@ -10,6 +10,7 @@ import type {
   TextureRegistry,
   ThreeRendererDependencies,
   ThreeRendererFactory,
+  VideoFrameRegistry,
 } from "@cadra/renderer";
 import {
   applyProductionWebGpuBehavior,
@@ -517,6 +518,20 @@ export interface CreateNativeGpuHeadlessRendererOptions {
    */
   textureRegistry?: TextureRegistry;
   /**
+   * Resolves a `"video"` node's own already-decoded current-frame pixels
+   * (`VideoFrameRegistry`, `@cadra/renderer`). Defaults to `undefined`,
+   * mirroring `ThreeRenderer`'s own constructor default - every `"video"`
+   * node then renders as the documented gray placeholder plane until a
+   * caller supplies a real registry populated ahead of time. Node has no
+   * built-in video demux/decode capability at all (no WebCodecs globals),
+   * so the one real implementation this codebase's own callers use
+   * (`@cadra/encode`'s `buildVideoFrameRegistryForProject`) spawns a real,
+   * system-installed `ffmpeg` per sample rather than decoding in pure JS
+   * the way `pngjs` covers PNG for images - see that function's own doc,
+   * and `ffmpeg-video-frame-decoder.ts`, for the full rationale.
+   */
+  videoFrameRegistry?: VideoFrameRegistry;
+  /**
    * Resolves a `Composition.environment.envMapRef` to a real equirectangular
    * environment texture. Defaults to `createDefaultEnvironmentRegistry()`
    * (mirroring `ThreeRenderer`'s own constructor default), which resolves
@@ -590,6 +605,7 @@ export function createNativeGpuHeadlessRenderer(
   const textRenderRegistry = options.textRenderRegistry;
   const satoriLayerRenderRegistry = options.satoriLayerRenderRegistry;
   const textureRegistry = options.textureRegistry;
+  const videoFrameRegistry = options.videoFrameRegistry;
   const environmentRegistry = options.environmentRegistry;
   const lutRegistry = options.lutRegistry;
 
@@ -662,6 +678,7 @@ export function createNativeGpuHeadlessRenderer(
     textRenderRegistry,
     satoriLayerRenderRegistry,
     textureRegistry,
+    videoFrameRegistry,
   );
 
   return {

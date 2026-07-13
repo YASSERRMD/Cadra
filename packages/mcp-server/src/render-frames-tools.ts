@@ -28,7 +28,20 @@
  * that function's own doc). Model nodes (`"model"` scene nodes, glTF/GLB)
  * are prepared via `buildModelRegistryForProject`, matching `render_scene`'s
  * own real browser-based render path (both resolve `ModelNode` assets the
- * same way). A composition's own `environment.envMapRef`/`postProcessing`
+ * same way). Video nodes (`"video"` scene nodes) are prepared via
+ * `buildVideoFrameRegistryForProject`, restricted to exactly the source
+ * frames this call's own `frames` actually need (mirroring satori's own
+ * "can vary by frame" treatment) - unlike every other asset kind above,
+ * this one genuinely does spawn a real `ffmpeg` child process per sampled
+ * frame (`ffmpeg-video-frame-decoder.ts`), since Node has no built-in video
+ * demux/decode capability at all; this is a different use of `ffmpeg` than
+ * this tool's own opening paragraph describes replacing (that workaround
+ * extracted frames from this tool's own *rendered output*; this decodes
+ * frames *from an uploaded video asset a scene references*) - a missing
+ * `ffmpeg` binary degrades that one asset to the documented gray
+ * placeholder, the same "unresolved is an expected runtime state" contract
+ * every other registry-resolved node kind here already has, rather than
+ * failing the whole call. A composition's own `environment.envMapRef`/`postProcessing`
  * `lut` effect are prepared via `buildEnvironmentRegistryForProject`/
  * `buildLutRegistryForProject` - real uploaded HDR/`.cube` assets, beyond
  * the renderer's own built-in procedural `"studio"`/`"outdoor"` environments
@@ -43,6 +56,7 @@ import {
   buildSatoriLayerRenderRegistryForProject,
   buildTextRenderRegistryForProject,
   buildTextureRegistryForProject,
+  buildVideoFrameRegistryForProject,
 } from "@cadra/encode";
 import {
   createNativeGpuHeadlessRenderer,
@@ -219,6 +233,12 @@ export function registerCadraRenderFramesTools(
           project,
           createAssetBytesFetcher(config.workspaceRoot),
         );
+        const videoFrameRegistry = await buildVideoFrameRegistryForProject(
+          project,
+          frames,
+          composition.fps,
+          createAssetBytesFetcher(config.workspaceRoot),
+        );
         renderer = createNativeGpuHeadlessRenderer({
           textRenderRegistry,
           textureRegistry,
@@ -226,6 +246,7 @@ export function registerCadraRenderFramesTools(
           modelRegistry,
           environmentRegistry,
           lutRegistry,
+          videoFrameRegistry,
         });
 
         await renderer.init(

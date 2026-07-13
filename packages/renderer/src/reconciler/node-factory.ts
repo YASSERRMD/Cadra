@@ -51,7 +51,7 @@ import {
   type VideoFrameRegistry,
 } from "../video-layer/video-frame-registry.js";
 import type { GeometryRegistry, MaterialRegistry, TextureRegistry } from "./registries.js";
-import { createImageTexture } from "./registries.js";
+import { createDataTexture, createImageTexture } from "./registries.js";
 
 /**
  * Geometry shared by every `text`, `image`, and `video` placeholder node,
@@ -1499,11 +1499,13 @@ function applyLightShadowConfig(light: THREE.Light, shadow: LightShadowConfig | 
  * unlike `TextureRegistry` (which hands the reconciler an
  * already-wrapped, registry-owned `THREE.Texture` it correctly never
  * disposes), `VideoFrameRegistry` only ever hands back raw decoded pixels
- * (`entry.image`) - the `THREE.Texture` wrapping them is created fresh
- * right here via `createImageTexture`, so it is reconciler-owned and must
- * be disposed like any other owned resource, both on the next swap and
- * (via `owned.video.texture` - see `reconciler.ts`'s own `disposeEntry`)
- * on final teardown.
+ * (`entry.image`, or `entry.pixels`/`.width`/`.height` for a Node-decoded
+ * entry with no `ImageBitmap` at all - see `VideoFrameRenderEntry`'s own
+ * doc) - the `THREE.Texture` wrapping them is created fresh right here via
+ * `createImageTexture`/`createDataTexture` respectively, so it is
+ * reconciler-owned and must be disposed like any other owned resource,
+ * both on the next swap and (via `owned.video.texture` - see
+ * `reconciler.ts`'s own `disposeEntry`) on final teardown.
  *
  * No-ops the geometry/material/texture swap (but still applies `opacity`)
  * when `ctx.videoFrameRegistry` does not resolve anything for this exact
@@ -1526,14 +1528,16 @@ function applyVideoNodeProperties(
     owned.video?.texture.dispose();
     owned.material?.dispose();
 
-    const naturalWidth: number | undefined = (entry.image as { width?: number } | undefined)?.width;
-    const naturalHeight: number | undefined = (entry.image as { height?: number } | undefined)?.height;
+    const naturalWidth: number | undefined =
+      "image" in entry ? (entry.image as { width?: number } | undefined)?.width : entry.width;
+    const naturalHeight: number | undefined =
+      "image" in entry ? (entry.image as { height?: number } | undefined)?.height : entry.height;
     const aspect =
       naturalWidth !== undefined && naturalHeight !== undefined && naturalHeight > 0
         ? naturalWidth / naturalHeight
         : 1;
     const geometry = new THREE.PlaneGeometry(1, 1 / aspect);
-    const texture = createImageTexture(entry.image);
+    const texture = "image" in entry ? createImageTexture(entry.image) : createDataTexture(entry.pixels, entry.width, entry.height);
     const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
 
     mesh.geometry = geometry;

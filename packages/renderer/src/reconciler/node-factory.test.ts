@@ -363,6 +363,29 @@ describe("node-factory: video texture rendering", () => {
     expect(built.owned?.video?.geometry).toBe(geometry);
   });
 
+  it("renders a Node-decoded raw-pixels entry (no ImageBitmap at all) via the DataTexture path, sized to its own aspect ratio", () => {
+    const videoFrameRegistry = createInMemoryVideoFrameRegistry();
+    const ctx: NodeFactoryContext = { ...makeCtx(), videoFrameRegistry };
+    const node = videoNode();
+    const renderKey = computeVideoFrameRenderKey(node, 0);
+    // Exactly what a real ffmpeg-based Node decode produces
+    // (`@cadra/encode`'s own `decodeVideoFramesWithFfmpeg`) - raw RGBA8
+    // pixels plus explicit dimensions, no `ImageBitmap` in sight (Node has
+    // no such global at all).
+    videoFrameRegistry.register(renderKey, { pixels: new Uint8Array(400 * 200 * 4), width: 400, height: 200 });
+
+    const built = createThreeObject(node, ctx);
+    applyNodeProperties(node, built.object3D, ctx, 0, built.owned);
+
+    const mesh = built.object3D as THREE.Mesh;
+    const geometry = mesh.geometry as THREE.PlaneGeometry;
+    expect(geometry.parameters.width).toBe(1);
+    expect(geometry.parameters.height).toBeCloseTo(200 / 400, 5);
+    const texture = (mesh.material as THREE.MeshBasicMaterial).map;
+    expect(texture).toBeInstanceOf(THREE.DataTexture);
+    expect(built.owned?.video?.geometry).toBe(geometry);
+  });
+
   it("resolves opacity per frame, independent of whether the render key changed", () => {
     const videoFrameRegistry = createInMemoryVideoFrameRegistry();
     const ctx: NodeFactoryContext = { ...makeCtx(), videoFrameRegistry };
