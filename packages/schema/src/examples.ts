@@ -79,8 +79,9 @@ const TITLE_CARD: SceneDocument = {
                         scale: [16, 9, 1],
                       },
                       visible: true,
-                      geometryRef: "geometry-plane",
+                      geometryRef: "plane",
                       materialRef: "material-background-navy",
+                      material: { baseColor: [0.06, 0.1, 0.28, 1], metalness: 0, roughness: 0.8 },
                       children: [],
                     },
                     {
@@ -142,8 +143,13 @@ const MOVING_SHAPE: SceneDocument = {
                     scale: [1, 1, 1],
                   },
                   visible: true,
-                  geometryRef: "geometry-box",
+                  geometryRef: "box",
                   materialRef: "material-shape-gold",
+                  // Lower metalness than product-shot-ibl-dof's own
+                  // polishedGold instance: this composition has no
+                  // environment map, and a fully metallic surface has no
+                  // diffuse albedo to fall back on without IBL reflections.
+                  material: { baseColor: [1, 0.766, 0.336, 1], metalness: 0.4, roughness: 0.35 },
                   children: [],
                 },
               },
@@ -161,8 +167,13 @@ const MOVING_SHAPE: SceneDocument = {
                     scale: [1, 1, 1],
                   },
                   visible: true,
-                  geometryRef: "geometry-box",
+                  geometryRef: "box",
                   materialRef: "material-shape-gold",
+                  // Lower metalness than product-shot-ibl-dof's own
+                  // polishedGold instance: this composition has no
+                  // environment map, and a fully metallic surface has no
+                  // diffuse albedo to fall back on without IBL reflections.
+                  material: { baseColor: [1, 0.766, 0.336, 1], metalness: 0.4, roughness: 0.35 },
                   children: [],
                 },
               },
@@ -180,8 +191,13 @@ const MOVING_SHAPE: SceneDocument = {
                     scale: [1, 1, 1],
                   },
                   visible: true,
-                  geometryRef: "geometry-box",
+                  geometryRef: "box",
                   materialRef: "material-shape-gold",
+                  // Lower metalness than product-shot-ibl-dof's own
+                  // polishedGold instance: this composition has no
+                  // environment map, and a fully metallic surface has no
+                  // diffuse albedo to fall back on without IBL reflections.
+                  material: { baseColor: [1, 0.766, 0.336, 1], metalness: 0.4, roughness: 0.35 },
                   children: [],
                 },
               },
@@ -273,8 +289,13 @@ const CAMERA_PAN: SceneDocument = {
                     scale: [1, 1, 1],
                   },
                   visible: true,
-                  geometryRef: "geometry-box",
+                  geometryRef: "box",
                   materialRef: "material-shape-gold",
+                  // Lower metalness than product-shot-ibl-dof's own
+                  // polishedGold instance: this composition has no
+                  // environment map, and a fully metallic surface has no
+                  // diffuse albedo to fall back on without IBL reflections.
+                  material: { baseColor: [1, 0.766, 0.336, 1], metalness: 0.4, roughness: 0.35 },
                   children: [],
                 },
               },
@@ -368,8 +389,13 @@ const MULTI_TRACK_TRANSITION: SceneDocument = {
                     scale: [1, 1, 1],
                   },
                   visible: true,
-                  geometryRef: "geometry-box",
+                  geometryRef: "box",
                   materialRef: "material-shape-gold",
+                  // Lower metalness than product-shot-ibl-dof's own
+                  // polishedGold instance: this composition has no
+                  // environment map, and a fully metallic surface has no
+                  // diffuse albedo to fall back on without IBL reflections.
+                  material: { baseColor: [1, 0.766, 0.336, 1], metalness: 0.4, roughness: 0.35 },
                   children: [],
                 },
               },
@@ -387,8 +413,11 @@ const MULTI_TRACK_TRANSITION: SceneDocument = {
                     scale: [1, 1, 1],
                   },
                   visible: true,
-                  geometryRef: "geometry-sphere",
+                  geometryRef: "sphere",
                   materialRef: "material-shape-navy",
+                  // Lower metalness, same reasoning as shape-a's own gold
+                  // material above: no environment map in this composition.
+                  material: { baseColor: [0.05, 0.15, 0.55, 1], metalness: 0.3, roughness: 0.35 },
                   children: [],
                 },
                 transitionIn: {
@@ -585,7 +614,7 @@ const PRODUCT_SHOT_IBL_DOF: SceneDocument = {
                     scale: [1, 1, 1],
                   },
                   visible: true,
-                  geometryRef: "geometry-sphere",
+                  geometryRef: "sphere",
                   materialRef: "material-product-fallback",
                   material: {
                     baseColor: [1, 0.766, 0.336, 1],

@@ -1,7 +1,8 @@
-import type { Project, SceneNode } from "@cadra/core";
+import type { MeshNode, Project, SceneNode } from "@cadra/core";
 import { createFrameContext, resolveSceneAtFrame } from "@cadra/core";
 import { buildTextRenderRegistryForProject } from "@cadra/encode";
 import { createNativeGpuHeadlessRenderer } from "@cadra/headless";
+import { createDefaultGeometryRegistry, createDefaultMaterialRegistry } from "@cadra/renderer";
 import { EXAMPLE_SCENE_DOCUMENTS } from "@cadra/schema";
 import { describe, expect, it } from "vitest";
 
@@ -33,6 +34,64 @@ function projectHasTextNode(project: Project): boolean {
     composition.tracks.some((track) => track.clips.some((clip) => containsTextNode(clip.node))),
   );
 }
+
+/** Recursively collects every `MeshNode` in `node`'s own subtree into `out`. */
+function collectMeshNodes(node: SceneNode, out: MeshNode[]): void {
+  if (node.kind === "mesh") {
+    out.push(node);
+  }
+  for (const child of node.children) {
+    collectMeshNodes(child, out);
+  }
+}
+
+/**
+ * The regression `example-scenes-render.e2e.test.ts`'s own render-based
+ * checks below cannot catch: an unresolvable `geometryRef`/`materialRef`
+ * silently falls back to a documented placeholder (a small grey box -
+ * `node-factory.ts`'s own `DEFAULT_MESH_GEOMETRY`/`DEFAULT_MESH_MATERIAL`),
+ * still real, still non-blank, still passing every check below - not a
+ * crash, and (for a node whose *intended* shape genuinely is a box, e.g.
+ * `moving-shape`'s own boxes) not even a visibly different silhouette. A
+ * real render is the wrong tool for this; resolving each ref directly
+ * against the exact same default registries `render_frames`/`render_scene`
+ * actually use, with no GPU involved at all, is both precise (names exactly
+ * which node/ref is broken) and immediate.
+ */
+describe("curated example scenes: every mesh node's own geometryRef/materialRef actually resolves", () => {
+  const geometryRegistry = createDefaultGeometryRegistry();
+  const materialRegistry = createDefaultMaterialRegistry();
+
+  for (const example of EXAMPLE_SCENE_DOCUMENTS) {
+    const meshNodes: MeshNode[] = [];
+    for (const composition of example.document.project.compositions) {
+      for (const track of composition.tracks) {
+        for (const clip of track.clips) {
+          collectMeshNodes(clip.node, meshNodes);
+        }
+      }
+    }
+    if (meshNodes.length === 0) {
+      continue;
+    }
+
+    it(`every mesh node in "${example.name}" resolves a real geometryRef, and either a real materialRef or an inline material override`, () => {
+      for (const node of meshNodes) {
+        expect(geometryRegistry.resolve(node.geometryRef), `${example.name}/${node.id}: geometryRef "${node.geometryRef}"`).toBeDefined();
+        // Mirrors node-factory.ts's own resolveMeshNodeMaterial: an inline
+        // `material` takes over from `materialRef` entirely when present,
+        // so a materialRef that intentionally never resolves (documenting
+        // intent only, same as product-shot-ibl-dof's own
+        // "material-product-fallback") is not itself a bug.
+        const hasResolvableMaterialRef = materialRegistry.resolve(node.materialRef) !== undefined;
+        expect(
+          hasResolvableMaterialRef || node.material !== undefined,
+          `${example.name}/${node.id}: materialRef "${node.materialRef}" does not resolve and no inline material override is set`,
+        ).toBe(true);
+      }
+    });
+  }
+});
 
 /** Distinct (unquantized) RGB values in a frame - a cheap proxy for "how much real visual detail is here," since MSDF text's anti-aliased glyph edges alone contribute hundreds of intermediate blend colors a flat-shaded background/mesh does not. */
 function countDistinctColors(pixels: { data: Uint8ClampedArray | Uint8Array }): number {
