@@ -100,7 +100,7 @@ const POST_PROCESSING_CONFIG: RenderPassConfig = {
   frame: 0,
 };
 
-describe.each([
+const BACKENDS = [
   {
     backend: "WebGL2",
     apply: (renderer: FakeThreeRenderer, buildPipeline: unknown) =>
@@ -119,7 +119,9 @@ describe.each([
         buildPipeline as typeof buildWebGpuPipeline,
       ),
   },
-])("$backend post-processing pipeline: reentrant render() no longer disposes mid-use", ({ apply }) => {
+];
+
+describe.each(BACKENDS)("$backend post-processing pipeline: reentrant render() no longer disposes mid-use", ({ apply }) => {
   it("never disposes a pipeline while its own render() call is still executing, across several frames", () => {
     const createdHandles: TrackedFakeHandle[] = [];
     const buildPipeline = vi.fn((r: FakeThreeRenderer, scene: THREE.Scene, camera: THREE.Camera) => {
@@ -137,27 +139,9 @@ describe.each([
     renderer.render(scene, camera, { ...POST_PROCESSING_CONFIG, frame: 1 });
     renderer.render(scene, camera, { ...POST_PROCESSING_CONFIG, frame: 2 });
 
-    expect(createdHandles).toHaveLength(3);
     for (const handle of createdHandles) {
       expect(handle.wasDisposedDuringOwnRender()).toBe(false);
     }
-  });
-
-  it("builds a fresh pipeline every render call (not cached across frames - see three-renderer.ts's own doc for why)", () => {
-    const buildPipeline = vi.fn((r: FakeThreeRenderer, scene: THREE.Scene, camera: THREE.Camera) =>
-      fakeBuildPipeline(r, scene, camera),
-    );
-
-    const renderer = createFakeThreeRenderer();
-    apply(renderer, buildPipeline);
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera();
-
-    renderer.render(scene, camera, { ...POST_PROCESSING_CONFIG, frame: 0 });
-    renderer.render(scene, camera, { ...POST_PROCESSING_CONFIG, frame: 1 });
-    renderer.render(scene, camera, { ...POST_PROCESSING_CONFIG, frame: 2 });
-
-    expect(buildPipeline).toHaveBeenCalledTimes(3);
   });
 
   it("still performs a real draw every frame via the guarded nested call", () => {
@@ -176,6 +160,27 @@ describe.each([
     renderer.render(scene, camera, { ...POST_PROCESSING_CONFIG, frame: 2 });
 
     expect(originalRender).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("WebGPU post-processing pipeline: rebuilt every call, never cached across frames", () => {
+  const { apply } = BACKENDS[1]!;
+
+  it("builds a fresh pipeline every render call, even with an unchanged config", () => {
+    const buildPipeline = vi.fn((r: FakeThreeRenderer, scene: THREE.Scene, camera: THREE.Camera) =>
+      fakeBuildPipeline(r, scene, camera),
+    );
+
+    const renderer = createFakeThreeRenderer();
+    apply(renderer, buildPipeline);
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera();
+
+    renderer.render(scene, camera, { ...POST_PROCESSING_CONFIG, frame: 0 });
+    renderer.render(scene, camera, { ...POST_PROCESSING_CONFIG, frame: 1 });
+    renderer.render(scene, camera, { ...POST_PROCESSING_CONFIG, frame: 2 });
+
+    expect(buildPipeline).toHaveBeenCalledTimes(3);
   });
 
   it("disposes the previous frame's pipeline before building the next one, not after", () => {
@@ -204,5 +209,60 @@ describe.each([
     renderer.render(scene, camera, { ...POST_PROCESSING_CONFIG, frame: 1 });
 
     expect(disposeOrder).toEqual(["build-0", "build-1", "dispose-0"]);
+  });
+});
+
+describe("WebGL2 post-processing pipeline: cached across frames, rebuilt only when scene/camera/config change", () => {
+  const { apply } = BACKENDS[0]!;
+
+  it("builds the pipeline once across repeated renders with an unchanged config, despite three.js's own internal nested render() call", () => {
+    const buildPipeline = vi.fn((r: FakeThreeRenderer, scene: THREE.Scene, camera: THREE.Camera) =>
+      fakeBuildPipeline(r, scene, camera),
+    );
+
+    const renderer = createFakeThreeRenderer();
+    apply(renderer, buildPipeline);
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera();
+
+    renderer.render(scene, camera, { ...POST_PROCESSING_CONFIG, frame: 0 });
+    renderer.render(scene, camera, { ...POST_PROCESSING_CONFIG, frame: 1 });
+    renderer.render(scene, camera, { ...POST_PROCESSING_CONFIG, frame: 2 });
+
+    expect(buildPipeline).toHaveBeenCalledTimes(1);
+  });
+
+  it("still rebuilds when the config actually changes", () => {
+    const buildPipeline = vi.fn((r: FakeThreeRenderer, scene: THREE.Scene, camera: THREE.Camera) =>
+      fakeBuildPipeline(r, scene, camera),
+    );
+
+    const renderer = createFakeThreeRenderer();
+    apply(renderer, buildPipeline);
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera();
+
+    renderer.render(scene, camera, { ...POST_PROCESSING_CONFIG, frame: 0 });
+    renderer.render(scene, camera, {
+      postProcessing: { tier: "final", effects: [{ type: "sharpen", amount: 0.9 }] },
+      frame: 1,
+    });
+
+    expect(buildPipeline).toHaveBeenCalledTimes(2);
+  });
+
+  it("rebuilds when the scene or camera identity changes, even with the same config", () => {
+    const buildPipeline = vi.fn((r: FakeThreeRenderer, scene: THREE.Scene, camera: THREE.Camera) =>
+      fakeBuildPipeline(r, scene, camera),
+    );
+
+    const renderer = createFakeThreeRenderer();
+    apply(renderer, buildPipeline);
+    const camera = new THREE.PerspectiveCamera();
+
+    renderer.render(new THREE.Scene(), camera, { ...POST_PROCESSING_CONFIG, frame: 0 });
+    renderer.render(new THREE.Scene(), camera, { ...POST_PROCESSING_CONFIG, frame: 1 });
+
+    expect(buildPipeline).toHaveBeenCalledTimes(2);
   });
 });

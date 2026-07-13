@@ -281,7 +281,27 @@ function withEnvironmentMapSupport(
 }
 
 /**
- * Wraps `threeRendererLike`'s own `render` to route through a fresh
+ * A cheap, exact cache key over a `RenderPassConfig`'s own *structural*
+ * content, used by `withPostProcessingSupport` below to decide whether its
+ * cached `BuiltPipeline` needs rebuilding. `ThreeRenderer.renderFrame`
+ * resolves a fresh `RenderPassConfig` object every call (see
+ * `resolveAmbientOcclusion`/`resolvePostProcessing`), so a reference-identity
+ * check would always miss; every field on `AmbientOcclusionRenderConfig`/
+ * `PostProcessingRenderConfig` is a plain number, string, or array of those,
+ * so `JSON.stringify` is an exact, order-sensitive, cheap-for-these-small-
+ * configs equality check. `frame` is deliberately excluded (see
+ * `RenderPassConfig`'s own doc for why): it changes every call by
+ * construction, and only ever drives a `BuiltPipeline`'s own `updateFrame`,
+ * never a rebuild.
+ */
+function renderPassConfigKey(config: RenderPassConfig | undefined): string {
+  return JSON.stringify(
+    config === undefined ? null : { ambientOcclusion: config.ambientOcclusion, postProcessing: config.postProcessing },
+  );
+}
+
+/**
+ * Wraps `threeRendererLike`'s own `render` to route through a cached
  * `EffectComposer` (built by `buildWebGl2Pipeline`, `./post-processing/
  * post-processing-pipeline.ts`) whenever `config` carries an
  * `ambientOcclusion` and/or a non-empty `postProcessing`. Both concerns
@@ -295,9 +315,11 @@ function withEnvironmentMapSupport(
  * `applyColorWorkflowDefaults`'s own ACES/sRGB output the moment either is
  * enabled.
  *
- * Rebuilds the composer on every call rather than caching it across frames
- * - see `renderingPipeline`'s own doc below for why a cross-frame cache was
- * tried and reverted.
+ * Rebuilds the composer only when the scene, camera, or resolved config
+ * actually changes across calls, mirroring `ThreeRenderer`'s own
+ * `cachedEnvironment` cache-on-identity-change pattern - see
+ * `renderingPipeline`'s own doc below for why this is safe for
+ * `EffectComposer` specifically, unlike its WebGPU sibling below.
  */
 function withPostProcessingSupport(
   renderer: THREE.WebGLRenderer,
@@ -316,6 +338,9 @@ function withPostProcessingSupport(
   const originalRender = renderer.render.bind(renderer);
   const originalDispose = threeRendererLike.dispose.bind(threeRendererLike);
   let built: BuiltPipeline<EffectComposer> | undefined;
+  let cachedScene: THREE.Scene | undefined;
+  let cachedCamera: THREE.Camera | undefined;
+  let cachedKey: string | undefined;
   // `built.handle.render()` below drives `EffectComposer`'s own passes
   // (`RenderPass`/`SSAARenderPass` first among them), each of which calls
   // back into this exact `renderer`'s own `.render(scene, camera)` mid-render
@@ -329,20 +354,17 @@ function withPostProcessingSupport(
   // composition using `postProcessing`/`ambientOcclusion`, disposing GPU
   // resources that very same render call was still mid-use of).
   //
-  // A cross-frame cache (rebuild only when scene/camera/config actually
-  // change, mirroring `ThreeRenderer`'s own `cachedEnvironment`) was tried
-  // and reverted: verified directly, with a real native-GPU render of a
-  // moving box behind a cached pipeline, that three/webgpu's TSL
-  // `RenderPipeline`/`PassNode` (the WebGPU sibling below,
-  // `withWebGpuPostProcessingSupport`) stops refreshing its own scene-pass
-  // texture after the *second* reuse of the same instance across separate
-  // top-level `render()` calls, freezing the rendered output - while the
-  // exact same sequence renders correctly every frame when rebuilt each
-  // call. `EffectComposer` is a much older, non-TSL API with a
-  // well-established "construct once, call `.render()` every frame"
-  // contract and likely does not share this limitation, but this function
-  // deliberately matches its WebGPU sibling's rebuild-every-call behavior
-  // rather than ship an unverified asymmetry between the two backends.
+  // Unlike its WebGPU sibling below (`withWebGpuPostProcessingSupport`,
+  // which rebuilds every call rather than caching - see that function's own
+  // doc for why a cross-frame cache broke its TSL `RenderPipeline`/`PassNode`
+  // after the second reuse), caching here was verified safe directly: the
+  // exact same real-browser reproduction (a moving box behind a
+  // `postProcessing`-enabled composition, rendered frame by frame through a
+  // cached pipeline) rendered correctly every frame with this WebGL2/
+  // `EffectComposer` path, run twice for stability. `EffectComposer` is a
+  // much older, non-TSL API with a well-established "construct once, call
+  // `.render()` every frame" contract throughout the wider three.js
+  // ecosystem, and does not share the newer API's limitation.
   let renderingPipeline = false;
 
   function disposeComposer(): void {
@@ -366,9 +388,15 @@ function withPostProcessingSupport(
         return;
       }
 
-      disposeComposer();
-      const size = renderer.getSize(new THREE.Vector2());
-      built = buildPipeline(renderer, scene, camera, size.x, size.y, config);
+      const key = renderPassConfigKey(config);
+      if (built === undefined || cachedScene !== scene || cachedCamera !== camera || cachedKey !== key) {
+        disposeComposer();
+        const size = renderer.getSize(new THREE.Vector2());
+        built = buildPipeline(renderer, scene, camera, size.x, size.y, config);
+        cachedScene = scene;
+        cachedCamera = camera;
+        cachedKey = key;
+      }
 
       built.updateFrame(config.frame);
       renderingPipeline = true;
@@ -409,11 +437,40 @@ function withWebGpuPostProcessingSupport(
   // `RenderPipeline`'s own `PassNode` (`built.handle.render()` below) calls
   // back into this exact `renderer`'s own `.render(scene, camera)` mid-render
   // with no `config` argument, and without this guard that reentrant call
-  // disposes the pipeline it is still in the middle of using. The pipeline
-  // is rebuilt on every call rather than cached across frames - see
-  // `withPostProcessingSupport`'s own doc for the real native-GPU
-  // reproduction that ruled a cross-frame cache out for this specific TSL
-  // API.
+  // disposes the pipeline it is still in the middle of using.
+  //
+  // The pipeline is rebuilt on every call rather than cached across frames,
+  // unlike `withPostProcessingSupport`'s own `EffectComposer` above - root
+  // cause confirmed directly (three.js source: `nodes/core/NodeFrame.js`'s
+  // own `updateBeforeNode`, `renderers/common/nodes/NodeManager.js`,
+  // `renderers/common/Animation.js`): `PassNode.updateBeforeType` is
+  // `NodeUpdateType.FRAME`, gated on `NodeFrame.frameId` - a counter
+  // completely separate from `Renderer.info.calls`/`nodeFrame.renderId`
+  // (which *do* advance correctly on every `render()` call, real or nested;
+  // that part was never the problem). `frameId` only increments via
+  // `Animation.js`'s own internal `requestAnimationFrame` tick, started
+  // unconditionally once at the end of `Renderer.init()` regardless of
+  // whether the app ever calls `setAnimationLoop()` - so it advances on
+  // real display refresh cadence, not on how often this wrapped `render()`
+  // is actually called. The "already updated this frame" memo this gate
+  // consults lives in a WeakMap owned by the renderer's one long-lived
+  // `NodeFrame` instance, keyed by the `PassNode` object itself - so
+  // reusing the same `PassNode` across two `render()` calls that land
+  // within the same real animation frame (exactly what this renderer's own
+  // deterministic, synchronous, frame-exact render loop does - and what
+  // the native-GPU-headless backend, with no browser/display/rAF concept
+  // at all, does unconditionally) silently skips the second `updateBefore`
+  // call, freezing `PassNode`'s own render target at whatever it last drew.
+  // This is a structural mismatch between three.js's TSL `RenderPipeline`
+  // (designed around a real `setAnimationLoop`-driven render loop) and this
+  // renderer's own headless/deterministic one, not an incidental bug - so
+  // rebuilding fresh every call is this backend's correct, permanent
+  // behavior here, not a stopgap pending a fix. `EffectComposer`'s classic
+  // `RenderPass`/`SSAARenderPass` predate the TSL node system entirely and
+  // never go through `NodeFrame`'s `updateBeforeType` gating at all
+  // (`EffectComposer.render()` calls each pass directly in its own loop),
+  // which is exactly why the identical cross-frame cache is safe one
+  // function above and unsafe here.
   let renderingPipeline = false;
 
   function disposePipeline(): void {

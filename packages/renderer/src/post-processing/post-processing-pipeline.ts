@@ -89,12 +89,16 @@ export interface PostProcessingRenderConfig {
  * linear-HDR color before tone mapping, exactly where a `postProcessing`
  * effect's own `"preTonemap"` stage runs, so splitting them across two
  * independently-`RenderPass`-ing composers would either silently drop one or
- * double-render the scene. `frame` only ever drives a handful of
- * already-built passes' own per-frame uniforms (currently: film grain's
- * seed) via each built pipeline's own `updateFrame` (see
- * `withPostProcessingSupport`/`withWebGpuPostProcessingSupport`, `../
- * three-renderer.ts`, for why the composer/pipeline itself is otherwise
- * rebuilt fresh every call rather than cached across frames). `resolveLut`
+ * double-render the scene. `frame` is deliberately excluded from
+ * `withPostProcessingSupport`'s own cache key (see `renderPassConfigKey`,
+ * `../three-renderer.ts`): it changes every call by construction, and only
+ * ever drives a handful of already-built passes' own per-frame uniforms
+ * (currently: film grain's seed) via each built pipeline's own `updateFrame`,
+ * never a rebuild. `withWebGpuPostProcessingSupport` (the WebGPU backend)
+ * rebuilds its own pipeline fresh every call instead of caching at all - see
+ * that function's own doc for why a cross-frame cache is unsafe for its TSL
+ * `RenderPipeline` specifically, unlike this WebGL2 `EffectComposer` path.
+ * `resolveLut`
  * resolves a `LutEffectConfig.lutRef` to its own real `THREE.Data3DTexture`
  * (see `LutRegistry` in `../lut/lut-registry.ts`): resolution itself can
  * involve real file I/O (a real `.cube` file), so it always happens ahead of
