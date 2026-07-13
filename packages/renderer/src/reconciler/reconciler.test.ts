@@ -307,7 +307,10 @@ describe("createReconciler: kind-to-Three.js mapping", () => {
     const reconciler = createReconciler({ textRenderRegistry });
     const result = reconciler.reconcile(text("root", { color: [0, 1, 0, 1] }), 0) as THREE.Group;
 
-    const glyphMesh = result.children[0]?.children[0]?.children[0] as THREE.Mesh;
+    // One level deeper than a raw glyph hierarchy: result is now the
+    // reconciler-stable wrapper (see buildTextObject's own doc), not
+    // resources.group directly.
+    const glyphMesh = result.children[0]?.children[0]?.children[0]?.children[0] as THREE.Mesh;
     expect(glyphMesh).toBeInstanceOf(THREE.Mesh);
   });
 
@@ -515,7 +518,7 @@ describe("createReconciler: add, update, remove", () => {
     // second, identical tree - simplest way to observe what got built without
     // exposing the reconciler's private `entries` map.
     const rootObject = reconciler.reconcile(text("t1"), 0) as THREE.Group;
-    const glyphMesh = rootObject.children[0]?.children[0]?.children[0] as THREE.Mesh;
+    const glyphMesh = rootObject.children[0]?.children[0]?.children[0]?.children[0] as THREE.Mesh;
     const geometryDisposeSpy = vi.spyOn(glyphMesh.geometry, "dispose");
     const materialDisposeSpy = vi.spyOn(glyphMesh.material as THREE.Material, "dispose");
 
@@ -726,8 +729,13 @@ describe("createReconciler: reordering", () => {
     const reconciler = createReconciler({ textRenderRegistry });
 
     const first = reconciler.reconcile(group("root", [text("t1"), image("i1")]), 0) as THREE.Group;
+    // One level deeper than a raw glyph hierarchy: textObject is the
+    // reconciler-stable wrapper (see buildTextObject's own doc), with the
+    // real content (contentGroup, line/word/glyph groups beneath it) as its
+    // own child rather than being that content group directly.
     const textObject = first.children[0] as THREE.Group;
-    const innerLineGroup = textObject.children[0];
+    const contentGroup = textObject.children[0] as THREE.Group;
+    const innerLineGroup = contentGroup.children[0];
     expect(innerLineGroup?.name).toBe("line-0");
 
     // Reorder the two scene-graph siblings; the text node's own internal
@@ -736,7 +744,8 @@ describe("createReconciler: reordering", () => {
     const textObjectAfterReorder = second.children[1] as THREE.Group;
 
     expect(textObjectAfterReorder).toBe(textObject);
-    expect(textObjectAfterReorder.children).toContain(innerLineGroup);
+    expect(textObjectAfterReorder.children[0]).toBe(contentGroup);
+    expect(contentGroup.children).toContain(innerLineGroup);
   });
 
   it("reorders existing children to match new order without disposing or recreating them", () => {

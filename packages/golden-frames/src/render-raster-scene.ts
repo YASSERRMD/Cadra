@@ -1,6 +1,13 @@
 import { readFileSync } from "node:fs";
 
-import { createFrameContext, type Project, resolveSceneAtFrame, type SatoriNode, type SceneNode } from "@cadra/core";
+import {
+  createFrameContext,
+  type Project,
+  resolveSceneAtFrame,
+  resolveVariationAxesProperty,
+  type SatoriNode,
+  type SceneNode,
+} from "@cadra/core";
 import { createNativeGpuHeadlessRenderer } from "@cadra/headless";
 import {
   computeSatoriLayerRenderKey,
@@ -18,7 +25,7 @@ import {
 } from "@cadra/renderer";
 import { prepareSatoriLayerRenderData } from "@cadra/renderer/svg-layer/prepare-satori-layer-render-data.js";
 import type { SatoriLayerFont } from "@cadra/satori-layer";
-import { createFontRegistry, parseFontWithFontkit, prepareTextRenderData } from "@cadra/text";
+import { createFontRegistry, parseFontWithFontkit, prepareTextRenderData, resolveTextShapingFont } from "@cadra/text";
 
 import type { GoldenScene } from "./scenes/golden-scene.js";
 
@@ -42,13 +49,17 @@ export class GoldenSceneCompositionNotFoundError extends Error {
  * Prepares real, shaped `TextRenderEntry` data for every one of `scene`'s
  * `textRequirements` (Phase 71's own text-registry gap fix; see
  * `three-renderer.ts`'s constructor doc) and registers each under
- * `computeTextNodeRenderKey(requirement.node, 0)` - frame `0`, matching
- * `buildTextObject`'s own hardcoded lookup frame (`node-factory.ts`): text
- * geometry is a structural, build-once decision keyed off the node's
- * content/fontRef/variationAxes at frame 0, not the frame the scene is
- * actually screenshotted at (every curated text scene in this package holds
- * those fields constant across its own duration, so this is exact, not an
- * approximation).
+ * `computeTextNodeRenderKey(requirement.node, scene.frame)` - `scene.frame`
+ * (not always `0`), matching `buildTextObject`'s own per-frame lookup
+ * (`node-factory.ts`): a `GoldenScene` always renders exactly one frame
+ * (`GoldenScene.frame`'s own doc), so resolving `variationAxes` at that
+ * specific frame is exact, not an approximation, for both a static and a
+ * keyframed value alike - unlike `@cadra/encode`'s own `render-job.ts`
+ * `prepareTextRenderEntriesForProject`, which prepares a whole real
+ * composition's worth of frames, this harness never needs more than one.
+ * A resolved `variationAxes` bakes a real, glyph-outline-correct static font
+ * instance (`resolveTextShapingFont`, `@cadra/text`) before shaping, the
+ * same helper `render-job.ts` uses.
  *
  * Returns `undefined` (not an empty registry) when `scene` declares no text
  * requirements at all, so `createNativeGpuHeadlessRenderer`'s own
@@ -74,21 +85,51 @@ async function buildTextRenderRegistry(scene: GoldenScene): Promise<TextRenderRe
     const fontBytes = readFileSync(new URL(requirement.fontFixtureFileName, FONT_FIXTURES_DIR));
     const fontRegistry = createFontRegistry(requirement.backend);
     const font = await fontRegistry.registerBytes(fontBytes, { backend: requirement.backend }).ready;
-    const data = await prepareTextRenderData(font, requirement.node.content);
+    const variationAxes =
+      requirement.node.variationAxes !== undefined
+        ? resolveVariationAxesProperty(requirement.node.variationAxes, scene.frame)
+        : undefined;
+    // resolveTextShapingFont's own "variationSourceFont" param: only the
+    // "fontkit" backend actually populates variationAxes (see
+    // parseFontWithOpentype's own doc) - font above already has them when
+    // this requirement's own backend is "fontkit", but baking needs a
+    // *separate*, fontkit-parsed ParsedFont over the same bytes otherwise.
+    const variationSourceFont =
+      variationAxes !== undefined && requirement.backend !== "fontkit"
+        ? parseFontWithFontkit(new Uint8Array(fontBytes))
+        : undefined;
 
-    registry.register(computeTextNodeRenderKey(requirement.node, 0), {
+    const shapingFont = await resolveTextShapingFont(
+      fontRegistry,
+      font,
+      requirement.node.content,
+      variationAxes,
+      variationSourceFont,
+    );
+    const data = await prepareTextRenderData(shapingFont, requirement.node.content);
+    registry.register(computeTextNodeRenderKey(requirement.node, scene.frame), {
       data,
-      fontBytes,
-      fontContentHash: font.contentHash,
+      fontBytes: Buffer.from(shapingFont.bytes),
+      fontContentHash: shapingFont.contentHash,
     });
 
     if (requirement.node.morph !== undefined) {
-      const fromData = await prepareTextRenderData(font, requirement.node.morph.from);
-      registry.register(computeTextNodeRenderKey({ ...requirement.node, content: requirement.node.morph.from }, 0), {
-        data: fromData,
-        fontBytes,
-        fontContentHash: font.contentHash,
-      });
+      const fromShapingFont = await resolveTextShapingFont(
+        fontRegistry,
+        font,
+        requirement.node.morph.from,
+        variationAxes,
+        variationSourceFont,
+      );
+      const fromData = await prepareTextRenderData(fromShapingFont, requirement.node.morph.from);
+      registry.register(
+        computeTextNodeRenderKey({ ...requirement.node, content: requirement.node.morph.from }, scene.frame),
+        {
+          data: fromData,
+          fontBytes: Buffer.from(fromShapingFont.bytes),
+          fontContentHash: fromShapingFont.contentHash,
+        },
+      );
     }
   }
 

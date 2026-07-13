@@ -416,6 +416,26 @@ export function buildTextGroup(
   };
 }
 
+/**
+ * Disposes every geometry/material/texture a `TextGroupResources` owns -
+ * the exact set `buildTextGroup` allocated for it. Shared by the
+ * reconciler's own final teardown (`reconciler.ts`'s `disposeEntry`) and by
+ * `node-factory.ts`'s own mid-lifetime rebuild (a later frame resolving to
+ * a different render key - see `TextNode.variationAxes`' own doc on why
+ * that can happen), so both dispose exactly the same way.
+ */
+export function disposeTextGroupResources(resources: TextGroupResources): void {
+  for (const geometry of resources.geometries) {
+    geometry.dispose();
+  }
+  for (const material of resources.materials) {
+    material.dispose();
+  }
+  for (const texture of resources.textures) {
+    texture.dispose();
+  }
+}
+
 /** Resolves `options.fill`/`options.outline`/`options.glow` into the structural, build-time-only shape `createMsdfTextMaterial` needs. `"texture"`/`"video"` fills (and no fill at all) map to `"solid"` - see `BuildTextGroupOptions.fill`'s own doc on why. */
 function resolveMsdfMaterialConfig(options: BuildTextGroupOptions): MsdfMaterialConfig {
   const fill = options.fill;

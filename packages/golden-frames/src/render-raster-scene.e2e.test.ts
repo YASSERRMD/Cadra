@@ -174,6 +174,69 @@ function buildPlainGlyphProbeScene(content: string): GoldenScene {
   };
 }
 
+/**
+ * A single glyph, pinned to a specific `wght` variable-font axis value -
+ * real, end-to-end coverage that `TextNode.variationAxes` actually renders
+ * a genuinely different instance, not just wires a structurally-different
+ * cache key through to an unchanged glyph. `backend: "opentype"`
+ * deliberately, not `"fontkit"`: this is the exact path that was silently
+ * broken (the "opentype" backend never populates `variationAxes`, so
+ * `bakeVariationInstance` needs a separate, fontkit-parsed source font to
+ * pin against - see `resolveTextShapingFont`'s own doc), and every real
+ * production `TextNode.variationAxes` render (via `@cadra/encode`'s own
+ * `render-job.ts`) goes through this same "opentype"-backend default font.
+ */
+function buildVariationAxesProbeScene(wght: number): GoldenScene {
+  function buildProject() {
+    const camera = Camera({
+      id: "camera-1",
+      transform: { position: [0, 0, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    });
+    const text = Text({
+      id: "title",
+      content: "I",
+      fontSize: 3,
+      color: [1, 1, 1, 1],
+      transform: { position: [-0.3, -0.8, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      variationAxes: { wght },
+    });
+    const ambientLight = Light({ id: "light-ambient", lightType: "ambient", intensity: 1.5 });
+    const directionalLight = Light({
+      id: "light-directional",
+      transform: { position: [2, 3, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      lightType: "directional",
+      intensity: 1.5,
+    });
+    return buildSingleTrackProject({
+      projectId: "p-variation-axes-probe",
+      compositionId: "comp-variation-axes-probe",
+      fps: 10,
+      durationInFrames: 1,
+      width: 256,
+      height: 256,
+      nodes: [camera, text, ambientLight, directionalLight],
+      activeCameraNodeId: "camera-1",
+    });
+  }
+  return {
+    name: `variation-axes-probe-${wght}`,
+    driver: "nativeGpuHeadless",
+    buildProject,
+    compositionId: "comp-variation-axes-probe",
+    frame: 0,
+    width: 256,
+    height: 256,
+    seed: "golden-variation-axes-probe",
+    textRequirements: [
+      {
+        node: { content: "I", variationAxes: { wght } },
+        fontFixtureFileName: "Inter-Variable.ttf",
+        backend: "opentype",
+      },
+    ],
+  };
+}
+
 /** Count of pixels differing by more than a rounding-level amount in any RGBA channel, mirroring this file's own inline diff loops (`buildSharpenProbeScene`'s own test, `postProcessingScene`'s own test). */
 function countDiffPixels(a: Uint8ClampedArray, b: Uint8ClampedArray): number {
   let count = 0;
@@ -346,6 +409,39 @@ describe("renderRasterGoldenScene: real native GPU renders (no browser)", () => 
     // through, and not stuck motionless at either end.
     expect(countDiffPixels(atHalf.data, atZero.data)).toBeGreaterThan(100);
     expect(countDiffPixels(atHalf.data, atOne.data)).toBeGreaterThan(100);
+  });
+
+  it("renders a real TextNode.variationAxes instance: a heavier wght produces genuinely more glyph coverage, not the same glyph regardless of the requested weight", async () => {
+    if (!(await nativeGpuAvailable)) {
+      return;
+    }
+
+    // Sequential: see the morph test's own comment above on why (Rapier
+    // WASM disposal race under concurrent createNativeGpuHeadlessRenderer
+    // create/dispose cycles).
+    const light = await renderRasterGoldenScene(buildVariationAxesProbeScene(100));
+    const bold = await renderRasterGoldenScene(buildVariationAxesProbeScene(900));
+
+    const lightCoverage = countNonBlankPixels(light.data);
+    const boldCoverage = countNonBlankPixels(bold.data);
+    expect(lightCoverage).toBeGreaterThan(0);
+    expect(boldCoverage).toBeGreaterThan(0);
+
+    // Direct regression coverage for the bug this test caught while being
+    // written: baking against a font parsed via the "opentype" backend
+    // (render-job.ts's own default font loading, and this scene's own
+    // requirement.backend) silently resolves an *empty* variation pin
+    // (that backend never populates ParsedFont.variationAxes at all - see
+    // parseFontWithOpentype's own doc), producing byte-identical baked
+    // output regardless of the requested wght - i.e. this exact assertion
+    // would fail (light and bold pixel-identical) without
+    // resolveTextShapingFont's own separate fontkit-parsed
+    // "variationSourceFont" pinning against the font's own real axes.
+    expect(countDiffPixels(light.data, bold.data)).toBeGreaterThan(50);
+    // A genuinely bolder instance covers meaningfully more pixels with ink
+    // than a genuinely lighter one - not just "some pixels differ" (which
+    // could also be explained by e.g. anti-aliasing noise alone).
+    expect(boldCoverage).toBeGreaterThan(lightCoverage * 1.2);
   });
 
   it("renders the minimal-defaults scene's own sphere with real, varied shading, not a flat silhouette (Phase 73 task 6: quality defaults alone)", async () => {

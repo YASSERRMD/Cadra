@@ -5,6 +5,7 @@ import type * as THREE from "three";
 import type { ModelRegistry } from "../assets/model-registry.js";
 import type { RendererBackend } from "../renderer.js";
 import type { SatoriLayerRenderRegistry } from "../svg-layer/satori-layer-render-registry.js";
+import { disposeTextGroupResources } from "../text/build-text-group.js";
 import type { TextRenderRegistry } from "../text/text-render-registry.js";
 import type { VideoFrameRegistry } from "../video-layer/video-frame-registry.js";
 import {
@@ -327,29 +328,13 @@ export function createReconciler(options: ReconcilerOptions = {}): Reconciler {
     entry.object3D.removeFromParent();
     entry.owned?.material?.dispose();
     if (entry.owned?.text !== undefined) {
-      for (const geometry of entry.owned.text.geometries) {
-        geometry.dispose();
-      }
-      for (const material of entry.owned.text.materials) {
-        material.dispose();
-      }
-      for (const texture of entry.owned.text.textures) {
-        texture.dispose();
-      }
+      disposeTextGroupResources(entry.owned.text);
     }
     if (entry.owned?.textMorph !== undefined) {
       // The "from" half of a morphing text node: its own fully separate
       // TextGroupResources (see OwnedResources.textMorph's own doc), so
       // disposed the same way as entry.owned.text above, independently.
-      for (const geometry of entry.owned.textMorph.from.geometries) {
-        geometry.dispose();
-      }
-      for (const material of entry.owned.textMorph.from.materials) {
-        material.dispose();
-      }
-      for (const texture of entry.owned.textMorph.from.textures) {
-        texture.dispose();
-      }
+      disposeTextGroupResources(entry.owned.textMorph.from);
     }
     if (entry.owned?.satori !== undefined) {
       entry.owned.satori.geometry.dispose();

@@ -43,7 +43,7 @@ import {
   type SatoriLayerRenderRegistry,
 } from "../svg-layer/satori-layer-render-registry.js";
 import { applyTextEffects, applyTextMorph } from "../text/apply-text-effects.js";
-import { buildTextGroup, type TextGroupResources } from "../text/build-text-group.js";
+import { buildTextGroup, disposeTextGroupResources, type TextGroupResources } from "../text/build-text-group.js";
 import { computeTextNodeRenderKey, type TextRenderRegistry } from "../text/text-render-registry.js";
 import {
   computeVideoFrameRenderKey,
@@ -284,6 +284,17 @@ export interface OwnedResources {
    * `TextRenderEntry` is registered.
    */
   textMorph?: { from: TextGroupResources; fromGlyphs: readonly PositionedGlyph[] };
+  /**
+   * The `computeTextNodeRenderKey` this node's current `text`/`textGlyphs`/
+   * `textMorph` were last built from, mirroring `SatoriLayerResources.lastRenderKey`/
+   * `OwnedResources.video.lastRenderKey`'s own identical field: content is
+   * rebuilt only when a frame actually resolves to a different key (most
+   * often because a keyframed `variationAxes` resolves a genuinely
+   * different instance - see that field's own doc), not on every single
+   * `applyNodeProperties` call. `undefined` until the very first successful
+   * resolve, exactly like `text` itself.
+   */
+  textLastRenderKey?: string;
   /** A `satori` node's own owned resources; see `SatoriLayerResources`'s own doc. */
   satori?: SatoriLayerResources;
   /**
@@ -417,7 +428,7 @@ function buildThreeObject(node: SceneNode, ctx: NodeFactoryContext): BuiltObject
       return { object3D: createLight(node.lightType), owned: undefined };
 
     case "text":
-      return buildTextObject(node, ctx);
+      return buildTextObject();
 
     case "image":
       return buildImageObject(node, ctx);
@@ -666,51 +677,72 @@ function buildImageObject(node: ImageNode, ctx: NodeFactoryContext): BuiltObject
 }
 
 /**
- * Builds a `text` node's `Object3D`: an empty `THREE.Group` if its
- * `TextRenderEntry` is not yet registered (an expected "asset not ready"
- * runtime state, not a programming error - mirrors `image`/`video`'s own
- * placeholder fallback), or the real `Group(line) -> Group(word) ->
- * Mesh(glyph)` hierarchy `buildTextGroup` produces otherwise.
+ * Builds a `text` node's starting `Object3D`: always an empty, otherwise
+ * inert `THREE.Group` with no owned content yet. Unlike most kinds, a text
+ * node's real render key can genuinely vary by frame (`variationAxes` may
+ * be keyframed - see `computeTextNodeRenderKey`'s own doc), which this
+ * function - called once, at build time, before any frame is resolved -
+ * never receives; mirrors `"video"`'s own identical "frame-dependent
+ * content resolves lazily" reasoning (see that case's own doc above).
+ * `applyNodeProperties` (which does receive `frame`) builds the real
+ * content into this group via `buildTextContent` below, on its own first
+ * call and again on any later render-key change.
+ */
+function buildTextObject(): BuiltObject {
+  return { object3D: new THREE.Group(), owned: {} };
+}
+
+/** What `buildTextContent` returns when it successfully resolves `node`'s content at a given frame - everything the caller needs to swap into the scene graph and record onto `OwnedResources`. */
+interface TextContentBuild {
+  renderKey: string;
+  text: TextGroupResources;
+  textGlyphs: readonly PositionedGlyph[];
+  textMorph?: { from: TextGroupResources; fromGlyphs: readonly PositionedGlyph[] };
+}
+
+/**
+ * Builds the real `Group(line) -> Group(word) -> Mesh(glyph)` hierarchy
+ * (hierarchies, for a `morph`-configured node - see below) for `node` at
+ * `frame`, from whatever `ctx.textRenderRegistry` already has registered.
+ * `undefined` when the primary content's own `TextRenderEntry` is not yet
+ * registered - an expected "asset not ready" runtime state, not a
+ * programming error, mirroring `image`/`video`'s own placeholder fallback;
+ * the caller (`applyNodeProperties`'s `"text"` case) leaves whatever was
+ * previously built (if anything) in place rather than tearing it down over
+ * a transient miss.
  *
- * Whether to extrude is decided once here, at frame 0: `extrudeDepth` is a
- * `Property<number>` and so *can* be keyframed, but geometry (flat MSDF
- * quads vs. solid `ExtrudeGeometry`) is a structural choice this reconciler
- * only remakes when the node is rebuilt (a new node id, or a kind change),
- * not per frame - the same scope boundary `content`/`fontRef` themselves
- * are already under (changing either on a *persisting* node id without a
- * kind change does not yet trigger a rebuild; this mirrors `image`'s own
- * `assetRef` and `video` more broadly being resolved once at build time
- * rather than reactively, not a regression this phase introduces).
- * `fill`/`outline`/`glow`/`shadow` (Phase 53) are *presence* (structural,
- * decided once here, same as `extrudeDepth > 0`) plus *value* (re-resolved
- * every frame in `applyNodeProperties`, same as `color`) - only whether
- * each is configured *at all* is frame-0-only, matching `TextGroupResources`'s
- * own `setFill`/`setOutline`/`setGlow`/`setShadow` each being present only
- * when their config was.
+ * Called both from `applyNodeProperties`'s own first `"text"` call for a
+ * node (there is nothing to render until this succeeds at least once) and
+ * again on any later render-key change - most often a keyframed
+ * `variationAxes` resolving a genuinely different instance at `frame`, but
+ * structurally any `computeTextNodeRenderKey` change. Whether to extrude,
+ * and whether `fill`/`outline`/`glow`/`shadow` are configured *at all*
+ * (their *value*, unlike their presence, is re-resolved every frame
+ * unconditionally in `applyNodeProperties`, same as `color`) are decided
+ * fresh on each such call, matching `TextGroupResources`'s own
+ * `setFill`/`setOutline`/`setGlow`/`setShadow` each being present only when
+ * their config was.
  *
  * A `node.morph` config builds a *second* `TextGroupResources` from
  * `node.morph.from` (via a synthetic `{...node, content: node.morph.from}`
- * render key - the same font/style, just different text), rendered under a
- * new wrapping parent `THREE.Group` alongside the primary `content` group
- * rather than merged into one. Both groups share this wrapper as their
- * `Object3D` (so `applyNodeProperties`'s per-frame `fontSize` scale and the
- * node's own authored transform still apply once, uniformly, to both) but
- * stay structurally separate subtrees, so `applyTextMorph`'s own
- * `getObjectByName` lookups can never collide between a "from" glyph and a
- * "to" glyph that happen to share the same `cluster`/`glyphId` (e.g. a
- * letter common to both strings) - see that function's own doc. Falls back
- * to rendering only the primary group (no crossfade, same as a non-morphing
- * node) when the "from" text's own `TextRenderEntry` is not yet registered -
- * the same "asset not ready" runtime state `entry` above already handles
- * for the primary text.
+ * render key - the same font/style, just different text), returned
+ * alongside the primary one rather than merged into one: `applyTextMorph`'s
+ * own `getObjectByName` lookups can never collide between a "from" glyph
+ * and a "to" glyph that happen to share the same `cluster`/`glyphId` (e.g.
+ * a letter common to both strings) as long as the two stay structurally
+ * separate `THREE.Group` subtrees - see that function's own doc. Omitted
+ * when the "from" text's own `TextRenderEntry` is not yet registered - the
+ * primary content still renders alone (no crossfade) rather than nothing
+ * at all.
  */
-function buildTextObject(node: TextNode, ctx: NodeFactoryContext): BuiltObject {
-  const entry = ctx.textRenderRegistry?.resolve(computeTextNodeRenderKey(node, 0));
+function buildTextContent(node: TextNode, ctx: NodeFactoryContext, frame: number): TextContentBuild | undefined {
+  const renderKey = computeTextNodeRenderKey(node, frame);
+  const entry = ctx.textRenderRegistry?.resolve(renderKey);
   if (entry === undefined) {
-    return { object3D: new THREE.Group(), owned: undefined };
+    return undefined;
   }
 
-  const extrudeDepth = resolveNumberProperty(node.extrudeDepth ?? 0, 0);
+  const extrudeDepth = resolveNumberProperty(node.extrudeDepth ?? 0, frame);
   // A staggered or physics-animated node needs every glyph's own opacity/
   // position independently settable each frame (apply-text-effects.ts),
   // which the default shared-by-(page,color) materials do not allow; see
@@ -721,14 +753,14 @@ function buildTextObject(node: TextNode, ctx: NodeFactoryContext): BuiltObject {
   // node combining morph with stagger/physics on its primary text still
   // needs it for that text's own group.
   const styleOptions = {
-    color: resolveColorProperty(node.color, 0),
+    color: resolveColorProperty(node.color, frame),
     extrudeDepth,
     whiteBalanceGain: ctx.whiteBalanceGain,
     perGlyphMaterial: node.stagger !== undefined || node.physics !== undefined,
-    ...(node.fill !== undefined && { fill: resolveTextFill(node.fill, 0) }),
-    ...(node.outline !== undefined && { outline: resolveTextOutline(node.outline, 0) }),
-    ...(node.glow !== undefined && { glow: resolveTextGlow(node.glow, 0) }),
-    ...(node.shadow !== undefined && { shadow: resolveTextShadow(node.shadow, 0) }),
+    ...(node.fill !== undefined && { fill: resolveTextFill(node.fill, frame) }),
+    ...(node.outline !== undefined && { outline: resolveTextOutline(node.outline, frame) }),
+    ...(node.glow !== undefined && { glow: resolveTextGlow(node.glow, frame) }),
+    ...(node.shadow !== undefined && { shadow: resolveTextShadow(node.shadow, frame) }),
   };
 
   const resources = buildTextGroup(entry.data, {
@@ -737,14 +769,14 @@ function buildTextObject(node: TextNode, ctx: NodeFactoryContext): BuiltObject {
   });
 
   if (node.morph === undefined) {
-    return { object3D: resources.group, owned: { text: resources, textGlyphs: entry.data.glyphs } };
+    return { renderKey, text: resources, textGlyphs: entry.data.glyphs };
   }
 
   const fromEntry = ctx.textRenderRegistry?.resolve(
-    computeTextNodeRenderKey({ ...node, content: node.morph.from }, 0),
+    computeTextNodeRenderKey({ ...node, content: node.morph.from }, frame),
   );
   if (fromEntry === undefined) {
-    return { object3D: resources.group, owned: { text: resources, textGlyphs: entry.data.glyphs } };
+    return { renderKey, text: resources, textGlyphs: entry.data.glyphs };
   }
 
   const fromResources = buildTextGroup(fromEntry.data, {
@@ -752,17 +784,11 @@ function buildTextObject(node: TextNode, ctx: NodeFactoryContext): BuiltObject {
     font: { bytes: fromEntry.fontBytes, contentHash: fromEntry.fontContentHash },
   });
 
-  const group = new THREE.Group();
-  group.add(resources.group);
-  group.add(fromResources.group);
-
   return {
-    object3D: group,
-    owned: {
-      text: resources,
-      textGlyphs: entry.data.glyphs,
-      textMorph: { from: fromResources, fromGlyphs: fromEntry.data.glyphs },
-    },
+    renderKey,
+    text: resources,
+    textGlyphs: entry.data.glyphs,
+    textMorph: { from: fromResources, fromGlyphs: fromEntry.data.glyphs },
   };
 }
 
@@ -838,13 +864,47 @@ export function applyNodeProperties(
     }
 
     case "text": {
+      // Rebuilds this node's real content whenever the resolved render key
+      // at this frame differs from whatever it was last built from - most
+      // often because a keyframed variationAxes resolves a genuinely
+      // different instance (different glyph outlines, not just a different
+      // advance width; see TextNode.variationAxes' own doc), including the
+      // very first time this ever resolves at all (owned.textLastRenderKey
+      // starts undefined, which never equals a real key). A miss
+      // (buildTextContent returns undefined - the resolved key's own
+      // TextRenderEntry is not yet registered) leaves whatever was
+      // previously built, if anything, in place rather than tearing it
+      // down - the same "asset not ready" tolerance every other
+      // registry-resolved node kind already has.
+      const renderKey = computeTextNodeRenderKey(node, frame);
+      if (owned !== undefined && owned.textLastRenderKey !== renderKey) {
+        const built = buildTextContent(node, ctx, frame);
+        if (built !== undefined) {
+          if (owned.text !== undefined) {
+            object3D.remove(owned.text.group);
+            disposeTextGroupResources(owned.text);
+          }
+          if (owned.textMorph !== undefined) {
+            object3D.remove(owned.textMorph.from.group);
+            disposeTextGroupResources(owned.textMorph.from);
+          }
+          object3D.add(built.text.group);
+          if (built.textMorph !== undefined) {
+            object3D.add(built.textMorph.from.group);
+          }
+          owned.text = built.text;
+          owned.textGlyphs = built.textGlyphs;
+          owned.textMorph = built.textMorph;
+          owned.textLastRenderKey = built.renderKey;
+        }
+      }
+
       const color = resolveColorProperty(node.color, frame);
       const fontSize = resolveNumberProperty(node.fontSize, frame);
-      // Glyph geometry is built once, in font-size-independent em units (see
-      // build-text-group.ts); a fontSize *animating* over time is exactly
-      // why this is a per-frame scale multiply here rather than baked into
-      // the geometry, which is built only once (or when the resolved
-      // render-key/extrusion state changes; see buildTextObject).
+      // Glyph geometry is built once per resolved render key, in
+      // font-size-independent em units (see build-text-group.ts); a
+      // fontSize *animating* over time is exactly why this is a per-frame
+      // scale multiply here rather than baked into the geometry.
       object3D.scale.multiplyScalar(fontSize);
       owned?.text?.setColor(color[0], color[1], color[2], color[3]);
       owned?.textMorph?.from.setColor(color[0], color[1], color[2], color[3]);
