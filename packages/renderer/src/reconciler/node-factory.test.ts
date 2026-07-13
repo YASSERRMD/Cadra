@@ -7,6 +7,7 @@ import {
   type ModelNode,
   type SatoriNode,
   type SceneNode,
+  type TextNode,
   type TextPhysicsConfig,
   type TextStaggerConfig,
   toNumericSeed,
@@ -1112,7 +1113,7 @@ describe("node-factory: text morph", () => {
     return { ...makeCtx(), textRenderRegistry };
   }
 
-  function morphTextNode(content: string, from: string, progress: number): SceneNode {
+  function morphTextNode(content: string, from: string, progress: number): TextNode {
     return {
       id: "t",
       kind: "text",
