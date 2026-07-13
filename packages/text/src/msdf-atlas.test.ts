@@ -82,4 +82,37 @@ describe("generateMsdfAtlas", () => {
     expect(atlas.metrics.emSize).toBe(1);
     expect(atlas.metrics.ascenderY).toBeGreaterThan(0);
   });
+
+  it("degrades gracefully when every requested glyph has no ink to pack", async () => {
+    // A run of only whitespace (or any glyph set that packs to zero visible
+    // pixels) resolves to a real, non-missing glyph with nothing to pack -
+    // this must not crash the underlying native packer/PNG encoder, and
+    // (per placeGlyphQuad's own documented contract) a glyph absent from
+    // `atlas.glyphs` is treated identically to one with a zero-size
+    // placement: no quad, pen still advances from the shaped run's advance.
+    const atlas = await generateMsdfAtlas(ROBOTO_FLEX, shapedGlyphIds(" "));
+
+    expect(atlas.missingGlyphIds).toEqual([]);
+    expect(atlas.glyphs).toEqual([]);
+    expect(atlas.pages).toEqual([]);
+  });
+
+  it("does not corrupt the shared native instance for later calls, even after an all-ink-less atlas", async () => {
+    // Regression coverage for a real crash: generating an atlas for
+    // whitespace-only content used to leave the cached native Msdfgen
+    // instance in a state where the *next* call's `loadFont` crashed with a
+    // WASM "memory access out of bounds" fault inside its own native
+    // unloadGlyphs cleanup - reproduced by this exact call sequence against
+    // the pre-fix code. A real scene with 2+ text nodes, one of which is
+    // whitespace-only or entirely unsupported glyphs, hits this in
+    // production (e.g. an RTL node shaped against a font with no coverage
+    // for that script, followed by any other text node in the same job).
+    await generateMsdfAtlas(ROBOTO_FLEX, shapedGlyphIds(" "));
+
+    const atlas = await generateMsdfAtlas(ROBOTO_FLEX, shapedGlyphIds("Vote"));
+
+    expect(atlas.missingGlyphIds).toEqual([]);
+    expect(atlas.pages).toHaveLength(1);
+    expect(Array.from(atlas.pages[0]?.png.slice(0, 8) ?? [])).toEqual(PNG_SIGNATURE);
+  });
 });
