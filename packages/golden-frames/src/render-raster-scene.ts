@@ -17,7 +17,8 @@ import {
   type TextRenderRegistry,
 } from "@cadra/renderer";
 import { prepareSatoriLayerRenderData } from "@cadra/renderer/svg-layer/prepare-satori-layer-render-data.js";
-import { createFontRegistry, prepareTextRenderData } from "@cadra/text";
+import type { SatoriLayerFont } from "@cadra/satori-layer";
+import { createFontRegistry, parseFontWithFontkit, prepareTextRenderData } from "@cadra/text";
 
 import type { GoldenScene } from "./scenes/golden-scene.js";
 
@@ -127,9 +128,13 @@ function collectSatoriNodes(node: SceneNode, out: SatoriNode[]): void {
  * unconditionally, exactly like `@cadra/encode`'s own
  * `buildSatoriLayerRenderRegistryForProject` does for `render_frames`.
  *
- * Passes `fonts: []` for the same confirmed upstream Satori/opentype.js
- * `fvar`-parsing bug that function's own doc describes - every curated
- * satori golden scene is text-free for that reason.
+ * Fonts come from this package's own bundled `Inter-Variable.ttf` fixture,
+ * mirroring `@cadra/encode`'s own `render-job.ts` `loadDefaultSatoriFonts` -
+ * see that function's own doc for why passing it through
+ * `@cadra/satori-layer`'s `instanceFontForSatori` (invoked automatically
+ * inside `renderLayerToSvg` for every entry in `fonts`) avoids the `fvar`-
+ * parsing crash a *raw* variable font triggers in Satori's bundled font
+ * parser.
  *
  * Returns `undefined` when `project` has no satori nodes at all, matching
  * `buildTextRenderRegistry`'s/`buildModelRenderRegistry`'s own "omit
@@ -152,13 +157,17 @@ async function buildSatoriLayerRenderRegistry(
     return undefined;
   }
 
+  const fontBytes = readFileSync(new URL("Inter-Variable.ttf", FONT_FIXTURES_DIR));
+  const font = parseFontWithFontkit(new Uint8Array(fontBytes));
+  const fonts: SatoriLayerFont[] = [{ family: "Inter", font, weight: 400, style: "normal" }];
+
   const registry = createInMemorySatoriLayerRenderRegistry();
   for (const node of satoriNodes) {
     const cacheKey = computeSatoriLayerRenderKey(node, frame);
     if (registry.resolve(cacheKey) !== undefined) {
       continue;
     }
-    const rasterized = await prepareSatoriLayerRenderData(node, frame, []);
+    const rasterized = await prepareSatoriLayerRenderData(node, frame, fonts);
     registry.register(cacheKey, { rasterized });
   }
 

@@ -566,6 +566,59 @@ function buildSatoriFillsFrameDocument(
   return { schemaVersion: 1, project } as SceneDocument;
 }
 
+/** A `SatoriNode` layer containing real text (white on black, filling the frame) plus a `CameraNode` - proves real glyphs render, not just a solid-color layer (`buildSatoriFillsFrameDocument`'s own coverage). */
+function buildSatoriTextFillsFrameDocument(sceneId: string, compositionId: string, compositionSize: number): SceneDocument {
+  const satori = Satori({
+    id: "satori-1",
+    layer: {
+      type: "div",
+      style: {
+        width: "100%",
+        height: "100%",
+        backgroundColor: "#000000",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      },
+      children: [
+        {
+          type: "span",
+          style: { color: "#ffffff", fontSize: 28 },
+          children: ["Hi"],
+        },
+      ],
+    },
+    width: 400,
+    height: 400,
+  });
+  const camera = Camera({
+    id: "camera-1",
+    transform: { position: [0, 0, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+  });
+  const composition = createComposition({
+    id: compositionId,
+    name: "Main",
+    fps: FPS,
+    durationInFrames: 1,
+    width: compositionSize,
+    height: compositionSize,
+    tracks: [
+      { id: "track-satori", clips: [Sequence({ id: "clip-satori", from: 0, durationInFrames: 1, content: satori })] },
+      { id: "track-camera", clips: [Sequence({ id: "clip-camera", from: 0, durationInFrames: 1, content: camera })] },
+    ],
+  });
+  const withActiveCameraTrack: Composition = {
+    ...composition,
+    activeCameraTrack: [{ startFrame: 0, durationInFrames: 1, cameraNodeId: "camera-1" }],
+  };
+  const project: Project = createProject({
+    id: sceneId,
+    name: "Frames satori text scene",
+    compositions: [withActiveCameraTrack],
+  });
+  return { schemaVersion: 1, project } as SceneDocument;
+}
+
 /**
  * Proves `render_frames`' own native-GPU-headless path actually renders a
  * real `SatoriNode`, not the documented empty-group placeholder every
@@ -705,6 +758,72 @@ describe("render_frames: real SatoriNode rendering", () => {
     const blueOutput = await renderWithColor("frames-satori-blue", "#0000ff");
 
     expect(Buffer.compare(redOutput, blueOutput)).not.toBe(0);
+  }, 30_000);
+
+  it("renders a SatoriNode layer's own text as real glyphs, not blank space", async () => {
+    try {
+      const device = await createNativeGpuDevice();
+      device.destroy();
+    } catch (error) {
+      console.log(
+        "render_frames SatoriNode text e2e test: skipping, a real native WebGPU device could not be " +
+          `acquired on this machine (${String(error)}).`,
+      );
+      return;
+    }
+
+    workspaceRoot = await mkdtemp(join(tmpdir(), "cadra-render-frames-satori-text-test-"));
+    const { server } = createCadraMcpServer({
+      config: { workspaceRoot, outputDirectory: join(workspaceRoot, "out") },
+      logger: createLogger("test", {}, () => {
+        // Swallow log output in tests.
+      }),
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const connectedClient = new Client({ name: "test-client", version: "0.0.0" });
+    await Promise.all([server.connect(serverTransport), connectedClient.connect(clientTransport)]);
+    client = connectedClient;
+
+    await connectedClient.callTool({
+      name: CREATE_SCENE_TOOL_NAME,
+      arguments: {
+        sceneId: "frames-satori-text-scene",
+        name: "Frames satori text scene",
+        composition: { id: "comp-1", name: "Main", fps: FPS, durationInFrames: 1, width: 64, height: 64 },
+      },
+    });
+    await connectedClient.callTool({
+      name: UPDATE_SCENE_TOOL_NAME,
+      arguments: {
+        sceneId: "frames-satori-text-scene",
+        mode: "replace",
+        document: buildSatoriTextFillsFrameDocument("frames-satori-text-scene", "comp-1", 64),
+      },
+    });
+
+    const result = await connectedClient.callTool({
+      name: RENDER_FRAMES_TOOL_NAME,
+      arguments: { sceneId: "frames-satori-text-scene", compositionId: "comp-1", frames: [0], seed: "frames-satori-text-seed" },
+    });
+
+    const summary = parseSummary(result as ToolTextResult);
+    expect(summary.success).toBe(true);
+
+    const images = imageBlocks(result as ToolTextResult);
+    expect(images).toHaveLength(1);
+    const png = PNG.sync.read(Buffer.from(images[0]!.data, "base64"));
+
+    // Solid black background, solid white text: real glyphs mean a
+    // meaningful fraction of pixels are white; the pre-fix behavior (an
+    // empty fonts array, no glyphs drawn at all) would leave every pixel
+    // solid black instead.
+    let whitePixelCount = 0;
+    for (let i = 0; i < png.data.length; i += 4) {
+      if (png.data[i]! > 200 && png.data[i + 1]! > 200 && png.data[i + 2]! > 200) {
+        whitePixelCount += 1;
+      }
+    }
+    expect(whitePixelCount).toBeGreaterThan(20);
   }, 30_000);
 });
 

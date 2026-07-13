@@ -194,6 +194,9 @@ importers:
       '@cadra/renderer':
         specifier: workspace:*
         version: link:../renderer
+      '@cadra/satori-layer':
+        specifier: workspace:*
+        version: link:../satori-layer
       '@cadra/text':
         specifier: workspace:*
         version: link:../text
