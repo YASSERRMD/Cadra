@@ -6,21 +6,20 @@ import { EXAMPLE_SCENE_DOCUMENTS } from "@cadra/schema";
 import { describe, expect, it } from "vitest";
 
 /**
- * `product-shot-ibl-dof` renders fully black through this package's own
- * native-GPU-headless path specifically: isolated empirically (rendering
- * the same document with `postProcessing` stripped out produces a normal,
- * lit frame; with it left in, every channel is 0). The environment map
- * resolves and prefilters fine (`EnvironmentRegistry`/`createEnvironmentMap`
- * both confirmed working here) - the bug is somewhere in this package's
- * WebGPU post-processing pipeline (`depthOfField`/`sharpen`) itself, a
- * real, separate, substantially bigger fix than the ones this file
- * verifies. Excluded here (rather than silently passing a weaker check)
- * so this gap stays visible instead of being masked the same way the
- * examples this file *does* cover were: remove this exclusion once that
- * pipeline bug is fixed, at which point this example should pass like
- * every other one.
+ * Every previously-known-broken curated example now renders correctly (see
+ * `@cadra/golden-frames`' own `render-raster-scene.e2e.test.ts` for a
+ * dedicated `depthOfField` regression test covering the `product-shot-ibl-dof`
+ * fix specifically: a freshly built scene pass's own render target started
+ * at its 1x1 constructor default, and `depthOfField`'s own node read that
+ * *before* the pass had ever actually rendered once to size itself,
+ * collapsing its entire internal chain - and so this composition's final
+ * output - to a 1x1 black composite; fixed in
+ * `post-processing-pipeline.ts`'s own `buildWebGpuPipeline`). Kept as an
+ * empty set, not deleted outright, so a future regression has an obvious,
+ * named place to be excluded from again rather than needing this whole
+ * mechanism re-invented.
  */
-const KNOWN_BROKEN_EXAMPLES = new Set(["product-shot-ibl-dof"]);
+const KNOWN_BROKEN_EXAMPLES = new Set<string>([]);
 
 function containsTextNode(node: SceneNode): boolean {
   if (node.kind === "text") {
