@@ -78,8 +78,9 @@
                     "scale": [1, 1, 1]
                   },
                   "visible": true,
-                  "geometryRef": "geometry-box",
+                  "geometryRef": "box",
                   "materialRef": "material-shape-gold",
+                  "material": { "baseColor": [1, 0.766, 0.336, 1], "metalness": 0.4, "roughness": 0.35 },
                   "children": []
                 }
               }

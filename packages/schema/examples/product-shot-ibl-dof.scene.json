@@ -68,7 +68,7 @@
                     "scale": [1, 1, 1]
                   },
                   "visible": true,
-                  "geometryRef": "geometry-sphere",
+                  "geometryRef": "sphere",
                   "materialRef": "material-product-fallback",
                   "material": {
                     "baseColor": [1, 0.766, 0.336, 1],

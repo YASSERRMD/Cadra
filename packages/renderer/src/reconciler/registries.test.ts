@@ -20,10 +20,11 @@ describe("createDefaultGeometryRegistry", () => {
     }
   });
 
-  it("resolves box and sphere to their specific geometry classes", () => {
+  it("resolves box, sphere, and plane to their specific geometry classes", () => {
     const registry = createDefaultGeometryRegistry();
     expect(registry.resolve("box")).toBeInstanceOf(THREE.BoxGeometry);
     expect(registry.resolve("sphere")).toBeInstanceOf(THREE.SphereGeometry);
+    expect(registry.resolve("plane")).toBeInstanceOf(THREE.PlaneGeometry);
   });
 
   it("returns undefined for an unregistered ref", () => {

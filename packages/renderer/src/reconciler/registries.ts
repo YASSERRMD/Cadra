@@ -41,21 +41,28 @@ export interface TextureRegistry {
 }
 
 /** Ids the default geometry registry seeds itself with. */
-export const DEFAULT_GEOMETRY_REFS = ["box", "sphere"] as const;
+export const DEFAULT_GEOMETRY_REFS = ["box", "sphere", "plane"] as const;
 
 /** Ids the default material registry seeds itself with. */
 export const DEFAULT_MATERIAL_REFS = ["default", "wireframe"] as const;
 
 /**
- * A simple in-memory `GeometryRegistry` seeded with a box and a sphere, so
- * tests (and early authoring) can exercise real mesh reconciliation without
- * waiting on Phase 12's real asset pipeline. Every call to `resolve` with a
- * seeded ref returns the exact same shared instance.
+ * A simple in-memory `GeometryRegistry` seeded with a box, a sphere, and a
+ * flat plane, so tests (and early authoring) can exercise real mesh
+ * reconciliation without waiting on Phase 12's real asset pipeline. Every
+ * call to `resolve` with a seeded ref returns the exact same shared
+ * instance. `"plane"` is unit-sized (`1x1`, same "scale it via the node's
+ * own `transform.scale`" convention `"box"`'s `BoxGeometry(1, 1, 1)`
+ * already establishes), facing `+Z` (`THREE.PlaneGeometry`'s own default
+ * orientation) - the same orientation a camera at a positive `Z` position
+ * looking toward the origin (every curated example's own camera convention)
+ * already faces.
  */
 export function createDefaultGeometryRegistry(): GeometryRegistry {
   const geometries = new Map<string, THREE.BufferGeometry>([
     ["box", new THREE.BoxGeometry(1, 1, 1)],
     ["sphere", new THREE.SphereGeometry(0.5, 16, 12)],
+    ["plane", new THREE.PlaneGeometry(1, 1)],
   ]);
 
   return {
